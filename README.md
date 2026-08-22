@@ -525,22 +525,6 @@ Narration is WAV (not mp3) whenever word timings are present — roughly 175 KB 
 
 ---
 
-## 📄 License
-
-Chalkline is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
-**The transcript editor under `src/rescript/` is not MIT.** It is ported from
-[Rescript](https://github.com/wassgha/rescript), which is licensed under **PolyForm Noncommercial
-1.0.0** — see [src/rescript/LICENSE](src/rescript/LICENSE). That license permits use for noncommercial
-purposes only and carries a required notice:
-
-> Copyright (c) 2026 Wassim Gharbi and Rescript contributors (https://github.com/wassgha/rescript)
-
-If this app is ever used commercially, `/rescript` and `src/rescript/` have to come out, or a separate
-license has to be obtained from the upstream author.
-
----
-
 ## 🙏 Acknowledgements
 
 - **[Omega C](https://omegaplusapi.com)** — text generation, storyboard planning, and the transcript editor's AI sidebar
