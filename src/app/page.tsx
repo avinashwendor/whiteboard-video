@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { CapabilityCards } from "@/components/studio/capability-cards";
 import { Composer } from "@/components/studio/composer";
@@ -8,41 +10,41 @@ import { Examples } from "@/components/studio/examples";
 import { ResultPanel } from "@/components/studio/result-panel";
 import { MODE_CONFIG } from "@/components/studio/mode-config";
 import { useStudio } from "@/lib/studio/use-studio";
-import { cn } from "@/lib/utils/cn";
 
 export default function StudioPage() {
-  const { current, history, openGeneration, reuse } = useStudio();
+  const { current, history, openGeneration } = useStudio();
+  const router = useRouter();
   const recent = history.filter((entry) => entry.id !== current?.id).slice(0, 4);
 
-  const isEditingProject =
-    current?.mode === "create" && current?.status === "done" && Boolean(current?.project);
+  /**
+   * A finished video is not a result card, it is a project -- so it opens in
+   * the editor.
+   *
+   * The trigger is the *transition* into "done", never the state itself: a
+   * finished generation stays current for the rest of the session, so testing
+   * the state would fire again every time someone came back here from the
+   * editor and bounce them out of the composer. Only a run this page actually
+   * watched finish gets to navigate.
+   */
+  const watching = useRef<string | null>(null);
+  useEffect(() => {
+    if (!current || current.mode !== "create") return;
+    if (current.status === "running") {
+      watching.current = current.id;
+      return;
+    }
+    if (current.status === "done" && current.project && watching.current === current.id) {
+      watching.current = null;
+      router.push(`/editor/${current.id}`);
+    }
+  }, [current, router]);
 
   return (
     <div className="relative min-h-screen">
       <div className="grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[420px]" aria-hidden />
 
-      <div
-        className={cn(
-          "relative mx-auto px-4 pb-24 pt-8 transition-all duration-300 sm:px-6",
-          isEditingProject ? "max-w-7xl" : "max-w-3xl pt-12 sm:pt-16",
-        )}
-      >
-        {isEditingProject ? (
-          <div className="mb-8 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => {
-                // Return to composer
-                window.location.reload();
-              }}
-              className="flex items-center gap-2 text-xs font-medium text-neutral-400 transition-colors hover:text-neutral-200"
-            >
-              <ArrowRight className="size-3.5 rotate-180" />
-              <span>Back to Create</span>
-            </button>
-          </div>
-        ) : (
-          <section className="mb-8 text-center sm:mb-10">
+      <div className="relative mx-auto max-w-3xl px-4 pb-24 pt-12 sm:px-6 sm:pt-16">
+        <section className="mb-8 text-center sm:mb-10">
             <h1 className="text-balance text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] sm:text-[46px]">
               Create anything with AI.
             </h1>
@@ -50,10 +52,9 @@ export default function StudioPage() {
               Turn one idea into words, visuals and voice — assembled into a whiteboard video you can
               watch and export.
             </p>
-          </section>
-        )}
+        </section>
 
-        {!isEditingProject ? <Composer /> : null}
+        <Composer />
 
         {current ? (
           <div className="mt-6">

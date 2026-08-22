@@ -1,6 +1,7 @@
 "use client";
 
 import type { SceneSpec } from "@/lib/whiteboard/scene";
+import type { EditOp } from "./edit-plan";
 import type { ModelInfo, VoiceInfo } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
@@ -178,6 +179,14 @@ export function generateScene(
   return post<{ scene: SceneSpec }>("/api/scene", body, signal);
 }
 
+/** Re-looks-up the icon geometry after a board has been edited by hand. */
+export function resolveBoard(
+  body: { scene: SceneSpec; model?: string },
+  signal?: AbortSignal,
+): Promise<{ scene: SceneSpec }> {
+  return post<{ scene: SceneSpec }>("/api/board", body, signal);
+}
+
 /* ---------------------------------- visual --------------------------------- */
 
 export interface VisualResponse {
@@ -246,6 +255,24 @@ export function createStoryboard(
   signal?: AbortSignal,
 ): Promise<CreateResponse> {
   return post<CreateResponse>("/api/create", body, signal);
+}
+
+/* ----------------------------------- edit ---------------------------------- */
+
+export interface EditPlanResponse {
+  summary: string;
+  ops: EditOp[];
+}
+
+/**
+ * Asks the model what a plain-language instruction should do to the project.
+ * Nothing is applied here -- the ops come back and `applyOps` runs them.
+ */
+export function planEdit(
+  body: { instruction: string; project: unknown; sceneNumber?: number; model?: string },
+  signal?: AbortSignal,
+): Promise<EditPlanResponse> {
+  return post<EditPlanResponse>("/api/edit", body, signal);
 }
 
 /* -------------------------------- discovery -------------------------------- */

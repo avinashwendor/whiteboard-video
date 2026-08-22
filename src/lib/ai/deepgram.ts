@@ -172,6 +172,49 @@ async function alignWords(
   return { words, duration: json.metadata?.duration };
 }
 
+/**
+ * The alignment pass is a recogniser pointed at our own audio, and a bad run
+ * does not fail -- it succeeds with a fraction of the words and a duration
+ * that matches neither them nor the script. Seen live: a 55-word narration
+ * came back with 8 timings and a length of 81.9s, which the video engine then
+ * honoured as forty-eight seconds of a static board in silence.
+ *
+ * So the result is checked against the text we asked to be spoken, which is
+ * the one thing here we know to be true.
+ */
+function sanityCheck(
+  transcript: string,
+  words: WordTiming[],
+  duration: number | undefined,
+): { words: WordTiming[]; duration: number | undefined } {
+  const expected = transcript.split(/\s+/).filter(Boolean).length;
+
+  // Partial transcriptions mistime every beat after the gap. Estimating from
+  // the script is worse than good timings and far better than wrong ones.
+  if (words.length && expected > 4 && words.length < expected * 0.6) {
+    console.warn(
+      `deepgram alignment covered ${words.length}/${expected} words; falling back to estimated timings`,
+    );
+    words = [];
+  }
+
+  const lastEnd = words.length ? words[words.length - 1].end : undefined;
+  if (lastEnd !== undefined) {
+    // A clip that runs seconds past its own last word is trailing silence, and
+    // the scene would hold on it.
+    if (duration === undefined || duration > lastEnd + 5) duration = lastEnd + 0.35;
+    return { words, duration };
+  }
+
+  // With no timings the script is the only yardstick left: nobody reads at
+  // less than about one and a half words a second.
+  if (duration !== undefined && duration > expected / 1.5 + 5) {
+    console.warn(`deepgram reported ${duration.toFixed(1)}s for ${expected} words; ignoring it`);
+    duration = undefined;
+  }
+  return { words, duration };
+}
+
 /* --------------------------------- speech --------------------------------- */
 
 async function generateSpeech(input: TTSInput): Promise<TTSResult> {
@@ -215,6 +258,8 @@ async function generateSpeech(input: TTSInput): Promise<TTSResult> {
     // word times from the transcript when they are missing.
     console.warn("deepgram alignment failed, falling back to estimated timings", err);
   }
+
+  ({ words, duration } = sanityCheck(transcript, words, duration));
 
   return {
     audio,

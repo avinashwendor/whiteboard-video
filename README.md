@@ -37,13 +37,20 @@ Chalkline is an AI-powered video studio that converts a single sentence into a f
 ```
                       ┌─ /api/create ──→ Omega ──→ storyboard JSON (Zod-validated)
                       │
-prompt ──→ studio ────┼─ /api/sketch ──→ Omega ──→ SVG ──→ normalised stroke list
+prompt ──→ studio ────┼─ /api/scene ───→ Omega ──→ board layout + icon geometry
                       │
-                      ├─ /api/tts ─────→ Cartesia ──→ mp3 ──→ asset store
+                      ├─ /api/tts ─────→ Deepgram ──→ audio + word timings
+                      │
+                      ├─ /api/visual ──→ Tavily ──→ a real photo, vision-checked
                       │
                       └─ /api/image ───→ Pollinations ──→ bytes ──→ asset store
                             ▲
                             └── browser tries Puter first, falls back here
+
+finished video ──→ /editor/[id] ──→ instruction ──→ /api/edit ──→ Omega ──→ ops
+                                                                            │
+                                        the browser runs them ──────────────┘
+                                        against the same routes above
 ```
 
 ### Project Structure
@@ -52,13 +59,17 @@ prompt ──→ studio ────┼─ /api/sketch ──→ Omega ──→
 src/
   app/
     page.tsx              studio: hero, composer, results, examples
+    editor/[id]/page.tsx  the editor for a finished video
     history/page.tsx      gallery of past generations
     api/
       generate/           Omega text, streaming or whole
       create/             storyboard planning, with one JSON repair round
-      sketch/             SVG marker artwork → normalised strokes
+      scene/              board layout: which of seven, and what sits in it
+      board/              re-resolves icon geometry after a board is hand-edited
+      edit/               plans a plain-language edit into a list of operations
+      visual/             Tavily photo search, curated by a vision model
       image/              Pollinations, prompt rewritten first
-      tts/                Cartesia narration
+      tts/                narration and word timings
       models/             live catalogue discovery
       capabilities/       which providers this deployment can run
       asset/[id]/         serves generated media, same-origin
@@ -66,12 +77,14 @@ src/
     ui/                   button, card, field, badge, skeleton
     site/                 top bar, navigation
     studio/               composer, modes, settings, results, actions
+    studio/editor/        the editor: scene rail, inspector, JSON panel, ask
     whiteboard/           board renderer, stroke drawing, player, export
   lib/
-    ai/                   omega, cartesia, sketch, image/{puter,pollinations}
+    ai/                   omega, deepgram, cartesia, editor agent, image/*
     video/                easing, word timings and cue planning, film grade
     hyperframes/          modern engine: shots, themes, kinetic type
-    studio/               state, history, IndexedDB media cache, API client
+    studio/               state, history, IndexedDB media cache, API client,
+                          edit operations and the hand-edited-JSON schema
     validation/           Zod schemas and limits
     utils/                errors, http, rate limiting, asset store, markdown
 ```
@@ -122,6 +135,44 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## ✏️ Editing a finished video
+
+A finished video opens at `/editor/<generation id>` — its own address, reloadable, reachable again from
+History. Everything the generator produced is editable there, three ways:
+
+- **Scene** — every field of the open scene, including **Board**: the title, captions, icons, badges and
+  colours actually drawn on the canvas. Plus the four pipelines that can refill it: a real photo (Tavily),
+  generated artwork, a new board layout, a new recording.
+- **JSON** — the whole project as text. It is validated before it reaches the renderer, so a mistyped brace
+  costs nothing; unknown keys survive the round trip.
+- **Ask** — describe the change. `/api/edit` plans it into operations (`set`, `findPhoto`, `generateImage`,
+  `relayout`, `speak`, `addScene`, …) and the browser runs them against the routes above. Every step is
+  named in the log and one Undo steps back.
+
+Two rules the executor keeps, because breaking either desynchronises the video: editing a narration always
+drags a fresh recording along with it (the animation is scheduled against `audio.words`), and a re-layout is
+told whether a photograph shares the board and which layouts the other scenes already used.
+
+### Two sets of words
+
+A whiteboard scene carries the scene's own `heading` and `bullets` **and** a composed `scene` spec — a board
+title and a handful of captions. Only the second is drawn. Editing a bullet and watching the canvas not
+change is the most confusing thing this editor can do, so:
+
+- The **Board** section edits `scene.scene` directly — `boardTitle` and each item's caption and icon — and
+  the canvas updates as you type.
+- An icon is a *name*, not a drawing. Renaming one posts the whole board to `/api/board`, which resolves it
+  through the hand-drawn set, then the 1700-icon Lucide catalogue, then a model shortlist — board-wide, so
+  no two items come back as the same picture. The field then shows the name that actually matched
+  ("stopwatch" comes back as "timer").
+- The AI speaks the same vocabulary: `set boardTitle` and `setBoardItem` change drawn words without
+  throwing the board away, which is what a `relayout` does.
+
+Placement lives in the layout system — seven whiteboard compositions and a photo column, seven modern shots.
+`relayout` is how positions, ordering and arrangement change; there are no free coordinates.
 
 ---
 

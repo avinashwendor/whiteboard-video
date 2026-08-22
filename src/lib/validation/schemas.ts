@@ -91,6 +91,25 @@ export const visualRequestSchema = z.object({
 });
 export type VisualRequest = z.infer<typeof visualRequestSchema>;
 
+/**
+ * A plain-language edit against an existing project.
+ *
+ * `project` arrives already pruned by the editor -- word timings and resolved
+ * icon geometry are stripped client-side, because raw they are most of a
+ * project's bytes and none of its meaning.
+ */
+export const editRequestSchema = z.object({
+  instruction: promptField,
+  project: z.looseObject({
+    title: z.string().trim().max(200),
+    scenes: z.array(z.unknown()).min(1).max(12),
+  }),
+  /** The scene open in the editor, numbered from 1 as the person sees it. */
+  sceneNumber: z.number().int().min(1).max(12).optional(),
+  model: modelId.optional(),
+});
+export type EditRequest = z.infer<typeof editRequestSchema>;
+
 export const createRequestSchema = z.object({
   prompt: promptField,
   model: modelId.optional(),

@@ -35,6 +35,7 @@ import {
   type Generation,
   type ImageAsset,
   type Mode,
+  type ProjectAsset,
   type SceneAsset,
   type Settings,
 } from "./types";
@@ -61,12 +62,16 @@ interface StudioValue {
   catalogues: Catalogues;
   current: Generation | null;
   history: Generation[];
+  /** False until the stored history has been read back out of IndexedDB. */
+  historyLoaded: boolean;
   running: boolean;
   run: (override?: { prompt?: string; mode?: Mode }) => Promise<void>;
   cancel: () => void;
   openGeneration: (generation: Generation) => void;
   reuse: (generation: Generation) => void;
   refreshHistory: () => void;
+  /** Writes an edited project back into history. Persisting is debounced. */
+  updateProject: (generationId: string, project: ProjectAsset) => void;
 }
 
 const StudioContext = createContext<StudioValue | null>(null);
@@ -123,6 +128,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [current, setCurrent] = useState<Generation | null>(null);
   const [history, setHistory] = useState<Generation[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [running, setRunning] = useState(false);
   const [catalogues, setCatalogues] = useState<Catalogues>({
     textModels: [],
@@ -148,6 +154,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const stored = loadHistory();
       const hydrated = await Promise.all(stored.map(hydrateGeneration));
       setHistory(hydrated);
+      setHistoryLoaded(true);
     })();
   }, []);
 
@@ -223,7 +230,69 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const hydrated = await Promise.all(loadHistory().map(hydrateGeneration));
       setHistory(hydrated);
+      setHistoryLoaded(true);
     })();
+  }, []);
+
+  /* -------------------------------- editing --------------------------------- */
+
+  const editTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const editDrafts = useRef(new Map<string, ProjectAsset>());
+  const editVersions = useRef(new Map<string, number>());
+
+  /**
+   * An edited project.
+   *
+   * The screen updates immediately; the write to localStorage waits, because a
+   * person typing into a narration box would otherwise re-serialise the whole
+   * video on every keystroke. The flush goes through `cacheGeneration`, which
+   * skips assets that already carry a cacheKey and copies newly generated ones
+   * into IndexedDB -- without that, an image regenerated in the editor dies
+   * with the next server restart.
+   */
+  const updateProject = useCallback((generationId: string, project: ProjectAsset) => {
+    editDrafts.current.set(generationId, project);
+    const version = (editVersions.current.get(generationId) ?? 0) + 1;
+    editVersions.current.set(generationId, version);
+
+    setCurrent((previous) =>
+      previous && previous.id === generationId ? { ...previous, project } : previous,
+    );
+    setHistory((previous) =>
+      previous.map((entry) => (entry.id === generationId ? { ...entry, project } : entry)),
+    );
+
+    const timers = editTimers.current;
+    const existing = timers.get(generationId);
+    if (existing) clearTimeout(existing);
+
+    timers.set(
+      generationId,
+      setTimeout(() => {
+        timers.delete(generationId);
+        const draft = editDrafts.current.get(generationId);
+        editDrafts.current.delete(generationId);
+        if (!draft) return;
+
+        void (async () => {
+          const stored = loadHistory().find((entry) => entry.id === generationId);
+          if (!stored) return;
+          const cached = await cacheGeneration({ ...stored, project: draft });
+          // Caching downloads bytes, so a fast typist can have moved on since
+          // this flush started. Writing a stale project back would undo them.
+          if (editVersions.current.get(generationId) !== version) return;
+          setHistory(saveGeneration(cached));
+          setCurrent((previous) => (previous?.id === generationId ? cached : previous));
+        })();
+      }, 400),
+    );
+  }, []);
+
+  useEffect(() => {
+    const timers = editTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+    };
   }, []);
 
   /* --------------------------------- runners -------------------------------- */
@@ -824,12 +893,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       catalogues,
       current,
       history,
+      historyLoaded,
       running,
       run,
       cancel,
       openGeneration,
       reuse,
       refreshHistory,
+      updateProject,
     }),
     [
       mode,
@@ -840,12 +911,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       catalogues,
       current,
       history,
+      historyLoaded,
       running,
       run,
       cancel,
       openGeneration,
       reuse,
       refreshHistory,
+      updateProject,
     ],
   );
 

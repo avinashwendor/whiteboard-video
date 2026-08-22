@@ -32,7 +32,8 @@ export default function HistoryPage() {
     const generation = history.find((entry) => entry.id === id);
     if (!generation) return;
     openGeneration(generation);
-    router.push("/");
+    // A video is a project you carry on editing; everything else is a result.
+    router.push(generation.project ? `/editor/${generation.id}` : "/");
   };
 
   return (

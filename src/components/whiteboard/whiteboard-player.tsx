@@ -111,9 +111,20 @@ interface SceneSchedule {
 export function WhiteboardPlayer({
   project,
   className,
+  seekRequest,
+  onSceneChange,
 }: {
   project: ProjectAsset;
   className?: string;
+  /**
+   * A request to jump to one scene of the project, carrying a nonce so the
+   * same scene can be asked for twice. It is a command rather than a bound
+   * value on purpose: playback moves the editor's selection, and a bound value
+   * would have that selection seek the player back to where it started.
+   */
+  seekRequest?: { index: number; nonce: number } | null;
+  /** Fires as playback crosses into a scene, so a selection can follow along. */
+  onSceneChange?: (projectIndex: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRefs = useRef<Array<HTMLAudioElement | null>>([]);
@@ -130,10 +141,16 @@ export function WhiteboardPlayer({
   const voiceDelay = project.voiceDelay ?? DEFAULT_VOICE_DELAY;
   const isHyperframes = project.videoStyle === "hyperframes";
 
-  const scenes = useMemo(
-    () => project.scenes.filter((scene) => scene.scene || scene.image || scene.audio || scene.heading),
+  const playable = useMemo(
+    () =>
+      project.scenes
+        .map((scene, index) => ({ scene, index }))
+        .filter(({ scene }) => scene.scene || scene.image || scene.audio || scene.heading),
     [project.scenes],
   );
+  const scenes = useMemo(() => playable.map((entry) => entry.scene), [playable]);
+  /** Position in the rendered list -> position in `project.scenes`. */
+  const sceneOrder = useMemo(() => playable.map((entry) => entry.index), [playable]);
 
   const { images, ready } = useBoardImages(scenes.map((scene) => scene.image?.url));
 
@@ -431,10 +448,22 @@ export function WhiteboardPlayer({
   // painter at a slightly different timestamp lands in the file as a stutter.
   useEffect(() => {
     if (!ready || playing || exporting) return;
-    draw(
-      sceneIndex,
-      sceneIndex < 0 ? elapsed : elapsedInScene(elapsed, sceneIndex, durations, coverDuration),
-    );
+    if (sceneIndex < 0) {
+      // Parked at the very start, show the title card settled rather than the
+      // first frame of its build-on -- which is an empty board, and reads as a
+      // player that failed to load.
+      draw(-1, elapsed > 0 ? elapsed : coverDuration);
+      return;
+    }
+
+    const offset = elapsedInScene(elapsed, sceneIndex, durations, coverDuration);
+    // Parked exactly on a scene boundary means someone jumped here to look at
+    // this scene -- from the rail or a chapter button -- so show them the board
+    // finished. Scrubbing lands mid-scene and stays honest about the timeline.
+    const settled = offset <= 0.01 && sceneIndex < durations.length;
+    // Past every beat but clear of the wipe that whites out the last 0.24s --
+    // land inside it and the board reads as a washed-out ghost of itself.
+    draw(sceneIndex, settled ? Math.max(0.32, durations[sceneIndex] - 0.32) : offset);
   }, [coverDuration, draw, durations, elapsed, exporting, playing, ready, sceneIndex]);
 
   /* ---------------------------------- audio --------------------------------- */
@@ -662,6 +691,28 @@ export function WhiteboardPlayer({
     startScene(-1);
     draw(-1, 0);
   }, [draw, startScene, stopPlayback]);
+
+  /* ------------------------------ editor bridge ----------------------------- */
+
+  const seekNonce = useRef(seekRequest?.nonce ?? -1);
+  useEffect(() => {
+    if (!seekRequest || seekRequest.nonce === seekNonce.current) return;
+    seekNonce.current = seekRequest.nonce;
+    const position = sceneOrder.indexOf(seekRequest.index);
+    if (position < 0) return;
+    seekTo(offsetOf(position, durations, coverDuration));
+  }, [coverDuration, durations, sceneOrder, seekRequest, seekTo]);
+
+  // Reported rather than bound, and only on a real crossing -- the parent
+  // re-renders constantly while someone is typing into the inspector.
+  const reported = useRef(-2);
+  useEffect(() => {
+    if (sceneIndex < 0 || sceneIndex >= sceneOrder.length) return;
+    const projectIndex = sceneOrder[sceneIndex];
+    if (reported.current === projectIndex) return;
+    reported.current = projectIndex;
+    onSceneChange?.(projectIndex);
+  }, [onSceneChange, sceneIndex, sceneOrder]);
 
   /* --------------------------------- export -------------------------------- */
 

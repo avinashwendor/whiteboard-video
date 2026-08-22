@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, ImageOff, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, ArrowRight, ImageOff, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Skeleton, TextSkeleton } from "@/components/ui/skeleton";
-import { VideoStudioEditor } from "./video-studio-editor";
 import { Markdown } from "@/lib/utils/markdown";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
@@ -17,11 +17,6 @@ import { ResultActions } from "./result-actions";
 
 export function ResultPanel({ generation }: { generation: Generation }) {
   const config = MODE_CONFIG[generation.mode];
-
-  // When a project is done, let VideoStudioEditor own the full studio experience
-  if (generation.mode === "create" && generation.status === "done" && generation.project) {
-    return <VideoStudioEditor project={generation.project} />;
-  }
 
   return (
     <Card className="animate-rise overflow-hidden">
@@ -192,44 +187,73 @@ function ProjectResult({ generation }: { generation: Generation }) {
     (scene) => scene.scene || scene.image || scene.audio,
   ).length;
 
+  // A finished video is handed to the editor as it lands. Coming back here
+  // afterwards, this card is the way in again -- the video itself lives on its
+  // own page now, not under the composer.
+  if (done) {
+    const runtime = project.scenes.reduce(
+      (total, scene) => total + (scene.audio?.duration ?? Math.max(4.5, scene.narration.split(/\s+/).length / 2.5)),
+      project.introDuration ?? 3,
+    );
+
+    return (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {project.cover ? (
+          <span className="w-full shrink-0 overflow-hidden rounded-card border border-line sm:w-40">
+            {/* eslint-disable-next-line @next/next/no-img-element -- object URLs from IndexedDB */}
+            <img src={project.cover.url} alt="" className="block w-full" />
+          </span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-[13px] leading-relaxed text-muted">{project.description}</p>
+          <p className="mt-1.5 text-[11px] text-faint">
+            {project.scenes.length} scenes · ~{Math.round(runtime)}s ·{" "}
+            {project.videoStyle === "hyperframes" ? "Modern frames" : "Whiteboard"}
+          </p>
+        </div>
+        <Link
+          href={`/editor/${generation.id}`}
+          className="flex shrink-0 items-center gap-1.5 rounded-card bg-ink px-3.5 py-2 text-[12px] font-medium text-[#0a0b0d] transition-colors hover:bg-white"
+        >
+          Open in editor
+          <ArrowRight className="size-3.5" aria-hidden />
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {done ? (
-        <VideoStudioEditor project={project} />
-      ) : (
-        <>
-          <p className="text-[13px] leading-relaxed text-muted">{project.description}</p>
-          <div className="space-y-3">
-            <Skeleton className="aspect-video w-full" />
-            <p className="flex items-center gap-2 text-[12px] text-faint">
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-              {generation.stage ?? "Building"} · {readyScenes}/{project.scenes.length} scenes ready
-            </p>
-          </div>
+      <p className="text-[13px] leading-relaxed text-muted">{project.description}</p>
+      <div className="space-y-3">
+        <Skeleton className="aspect-video w-full" />
+        <p className="flex items-center gap-2 text-[12px] text-faint">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          {generation.stage ?? "Building"} · {readyScenes}/{project.scenes.length} scenes ready
+        </p>
+      </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            {project.scenes.map((scene, index) => (
-              <div
-                key={`${scene.heading}-${index}`}
-                className={cn(
-                  "rounded-card border border-line bg-surface-raised p-3 transition-opacity",
-                  scene.status === "pending" && "opacity-50",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-faint">{String(index + 1).padStart(2, "0")}</span>
-                  <p className="truncate text-[13px] font-medium text-ink">{scene.heading}</p>
-                  {scene.status === "running" ? (
-                    <Loader2 className="ml-auto size-3 animate-spin text-faint" aria-hidden />
-                  ) : null}
-                </div>
-                <p className="mt-1.5 line-clamp-2 text-[12px] leading-relaxed text-muted">{scene.narration}</p>
-                {scene.error ? <p className="mt-1.5 text-[11px] text-danger">{scene.error}</p> : null}
-              </div>
-            ))}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {project.scenes.map((scene, index) => (
+          <div
+            key={`${scene.heading}-${index}`}
+            className={cn(
+              "rounded-card border border-line bg-surface-raised p-3 transition-opacity",
+              scene.status === "pending" && "opacity-50",
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] text-faint">{String(index + 1).padStart(2, "0")}</span>
+              <p className="truncate text-[13px] font-medium text-ink">{scene.heading}</p>
+              {scene.status === "running" ? (
+                <Loader2 className="ml-auto size-3 animate-spin text-faint" aria-hidden />
+              ) : null}
+            </div>
+            <p className="mt-1.5 line-clamp-2 text-[12px] leading-relaxed text-muted">{scene.narration}</p>
+            {scene.error ? <p className="mt-1.5 text-[11px] text-danger">{scene.error}</p> : null}
           </div>
-        </>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
