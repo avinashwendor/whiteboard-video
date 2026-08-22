@@ -30,6 +30,7 @@ import {
   type ProjectMeta,
 } from "@/rescript/lib/projects";
 import { isElectron } from "@/rescript/lib/platform";
+import { PixelBlast } from "@/components/ui/pixel-blast";
 import { useEditorStore } from "@/rescript/lib/store";
 import type { SpeakerInfo, Word } from "@/rescript/lib/types";
 import { useI18n } from "./I18nProvider";
@@ -263,11 +264,22 @@ export default function UploadScreen({
 
   return (
     <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain bg-zinc-950">
-      {/* Texture, not decoration: the empty state is mostly ground. */}
-      <div className="ms-ground" aria-hidden>
-        <div className="ms-ground__wash" />
-        <div className="ms-ground__grain" />
-        <div className="ms-ground__sweep" />
+      {/*
+        Texture, not decoration: the empty state is mostly ground. A dithered
+        pixel field is the same visual family as the studio hero, so crossing
+        between the two apps reads as one product.
+      */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.10]" aria-hidden>
+        <PixelBlast
+          variant="square"
+          color="#5fd08a"
+          pixelSize={5}
+          patternScale={2.6}
+          patternDensity={0.8}
+          pixelSizeJitter={0.5}
+          speed={0.35}
+          edgeFade={0.55}
+        />
       </div>
 
       {/* min-h-full + items-center centers when content fits; the outer
