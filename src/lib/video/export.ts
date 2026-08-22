@@ -284,14 +284,48 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
     ...(bed
       ? { audio: { codec: "aac", sampleRate: SAMPLE_RATE, numberOfChannels: CHANNELS } }
       : {}),
+    /*
+     * Some encoders do not hand back a first chunk stamped exactly zero — a
+     * hardware H.264 encoder that reorders frames can emit its first chunk a
+     * frame late, and the muxer's default `strict` mode rejects it outright.
+     *
+     * `cross-track-offset` rather than `offset` because both tracks are
+     * measured from the same timeline: video from `index / fps`, audio from
+     * `sample / SAMPLE_RATE`. Shifting them independently would slide the
+     * narration against the picture by however much the video track happened
+     * to be out; shifting both by the earliest keeps them locked together.
+     */
+    firstTimestampBehavior: "cross-track-offset",
   });
 
   let encodeError: Error | null = null;
 
+  /**
+   * Hands a chunk to the muxer without letting a failure escape.
+   *
+   * These callbacks run inside the encoder, so a throw here does not reach the
+   * loop that could stop the export — it just happens again on the next chunk,
+   * and the next. One bad first timestamp produced three thousand identical
+   * errors and no usable diagnosis. The first failure is kept and the rest are
+   * dropped; the render loop checks `encodeError` and stops.
+   */
+  const mux = <T>(add: (chunk: T, meta?: unknown) => void) => {
+    return (chunk: T, meta?: unknown) => {
+      if (encodeError) return;
+      try {
+        add(chunk, meta);
+      } catch (err) {
+        encodeError = err instanceof Error ? err : new Error(String(err));
+      }
+    };
+  };
+
   const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    output: mux((chunk, meta) =>
+      muxer.addVideoChunk(chunk as EncodedVideoChunk, meta as never),
+    ),
     error: (err) => {
-      encodeError = err;
+      encodeError ??= err;
     },
   });
   videoEncoder.configure({
@@ -351,9 +385,11 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
   if (bed) {
     progress(1, "Encoding audio");
     const audioEncoder = new AudioEncoder({
-      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      output: mux((chunk, meta) =>
+        muxer.addAudioChunk(chunk as EncodedAudioChunk, meta as never),
+      ),
       error: (err) => {
-        encodeError = err;
+        encodeError ??= err;
       },
     });
     audioEncoder.configure({
