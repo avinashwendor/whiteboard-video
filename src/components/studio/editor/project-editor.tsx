@@ -8,9 +8,7 @@ import {
   ChevronDown,
   Copy,
   Film,
-  Monitor,
   Plus,
-  Smartphone,
   Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
@@ -33,7 +31,6 @@ import { SceneInspector } from "./scene-inspector";
  */
 
 type Tab = "ask" | "scene" | "json";
-type AspectRatio = "16:9" | "9:16";
 
 const UNDO_DEPTH = 20;
 /** How long typing settles before the preview re-plans the whole video. */
@@ -56,7 +53,7 @@ function blankScene(index: number): SceneAsset {
 }
 
 export function ProjectEditor({ generation }: { generation: Generation }) {
-  const { settings, capabilities, updateProject } = useStudio();
+  const { settings, capabilities, catalogues, updateProject } = useStudio();
 
   /**
    * The studio owns the project, not this component. Every edit goes straight
@@ -70,7 +67,6 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
   /** A jump the rail asked for. The nonce lets the same scene be asked for twice. */
   const [seekRequest, setSeekRequest] = useState<{ index: number; nonce: number } | null>(null);
   const [tab, setTab] = useState<Tab>("ask");
-  const [aspect, setAspect] = useState<AspectRatio>("16:9");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -83,9 +79,13 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
   /* -------------------------------- committing ------------------------------ */
 
   const commit = useCallback(
-    (next: ProjectAsset, options: { snapshot?: boolean } = {}) => {
+    (next: ProjectAsset, options: { snapshot?: boolean; from?: ProjectAsset } = {}) => {
       if (options.snapshot) {
-        undoStack.current = [...undoStack.current, structuredClone(project)].slice(-UNDO_DEPTH);
+        // `from` matters for a long batch: it saves as it goes, so by the time
+        // it finishes the current project IS the result and snapshotting that
+        // would make Undo a no-op.
+        const before = options.from ?? project;
+        undoStack.current = [...undoStack.current, structuredClone(before)].slice(-UNDO_DEPTH);
         setCanUndo(true);
       }
       updateProject(generation.id, next);
@@ -125,10 +125,11 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
     async (label: string, task: (draft: ProjectAsset) => Promise<string | void>) => {
       setBusy(true);
       setStatus(`${label}…`);
+      const before = project;
       const draft = structuredClone(project) as ProjectAsset;
       try {
         const message = await task(draft);
-        commit(draft, { snapshot: true });
+        commit(draft, { snapshot: true, from: before });
         setActivity((log) => [entry(typeof message === "string" ? message : label), ...log]);
       } catch (err) {
         setActivity((log) => [
@@ -155,19 +156,46 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
 
   const ask = useCallback(
     (instruction: string) => {
+      const before = project;
       void (async () => {
         setBusy(true);
         setStatus("Working out what to change");
         setActivity((log) => [entry(instruction, true, true), ...log]);
         try {
+          const provider = capabilities?.image.providers.find(
+            (entry) => entry.id === settings.imageProvider,
+          );
+
           const plan = await planEdit({
             instruction,
             project: pruneForAgent(project) as Record<string, unknown>,
             sceneNumber: activeScene + 1,
+            // Casting a narrator and picking a pipeline are only sensible if
+            // the planner knows which ones this deployment actually has.
+            voices: catalogues.voices.map((voice) => ({
+              id: voice.id,
+              name: voice.name,
+              gender: voice.gender,
+              language: voice.language,
+              accent: voice.accent,
+              description: voice.description,
+            })),
+            can: {
+              photoSearch: capabilities?.text.configured ?? true,
+              generateImage: provider?.configured ?? true,
+              lineArt: provider?.lineArt ?? false,
+            },
             model: settings.textModel || undefined,
           });
 
           if (plan.summary) setActivity((log) => [entry(plan.summary), ...log]);
+
+          // A plan can be part-usable. Saying so beats silently doing less
+          // than was asked.
+          for (const reason of plan.rejected ?? []) {
+            setActivity((log) => [entry(`Skipped one step — ${reason}`, false), ...log]);
+          }
+
           if (!plan.ops.length) {
             setActivity((log) => [entry("Nothing was changed.", false), ...log]);
             return;
@@ -177,9 +205,14 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
             settings,
             capabilities,
             onProgress: (message) => setStatus(message),
+            // Saved as it goes: a re-cast of a six-scene video is minutes of
+            // speech requests, and none of it should depend on the tab
+            // surviving to the end. The undo snapshot was taken before the
+            // batch, so stepping back still undoes the whole thing.
+            onPartial: (partial) => updateProject(generation.id, partial),
           });
 
-          commit(result.project, { snapshot: true });
+          commit(result.project, { snapshot: true, from: before });
           setActivity((log) => [
             ...result.log.map((line) => entry(line.message, line.ok)).reverse(),
             ...log,
@@ -198,7 +231,17 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
         }
       })();
     },
-    [activeScene, capabilities, commit, openScene, project, settings],
+    [
+      activeScene,
+      capabilities,
+      catalogues.voices,
+      commit,
+      generation.id,
+      openScene,
+      project,
+      settings,
+      updateProject,
+    ],
   );
 
   /* --------------------------------- scenes --------------------------------- */
@@ -275,28 +318,6 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-line bg-surface-raised p-0.5">
-            {(
-              [
-                { value: "16:9" as const, icon: Monitor },
-                { value: "9:16" as const, icon: Smartphone },
-              ]
-            ).map(({ value, icon: Icon }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setAspect(value)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-                  aspect === value ? "bg-surface-hover text-ink" : "text-muted hover:text-ink",
-                )}
-              >
-                <Icon className="size-3.5" aria-hidden />
-                {value}
-              </button>
-            ))}
-          </div>
-
           <button
             type="button"
             onClick={copyScript}
@@ -459,12 +480,7 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
             ) : null}
           </div>
           <div className="flex flex-1 items-start justify-center">
-            <div
-              className={cn(
-                "w-full transition-all duration-300",
-                aspect === "9:16" ? "max-w-[340px]" : "max-w-[880px]",
-              )}
-            >
+            <div className="w-full max-w-[880px]">
               <WhiteboardPlayer
                 project={preview}
                 seekRequest={seekRequest}

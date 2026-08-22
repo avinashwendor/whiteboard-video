@@ -37,7 +37,10 @@ const item = z.object({
 
 const datum = z.object({
   label: z.string().trim().min(1).max(24),
-  value: z.number().min(0).max(1_000_000),
+  // Real quantities turn up here -- transaction counts, revenue, populations --
+  // and a cap that rejects them turns a legitimate chart into a hard failure.
+  // Bars are drawn relative to the largest value, so the magnitude is free.
+  value: z.number().min(0).max(1e12),
   colour: colour.optional(),
 });
 

@@ -1,7 +1,7 @@
 import { omega } from "./omega";
 import type { ChatMessage } from "./types";
 import { AppError } from "@/lib/utils/errors";
-import { editPlanSchema, type EditPlan } from "@/lib/studio/edit-plan";
+import { editPlanSchema, sift, type EditPlan } from "@/lib/studio/edit-plan";
 
 /**
  * Turns "make scene two use a real photo of a server rack" into work.
@@ -44,6 +44,27 @@ OPERATIONS
     voiceDelay      seconds, 0-10
   A mood or a feeling is musicMood and visualTheme. It is never videoStyle.
 
+{"op":"setBoard","scene":2,"board":{ ...a whole board spec... }}
+  Writes the board outright. This is the ONLY way to change the layout, to add, remove or reorder items,
+  to edit a pie's slices or a bar's values, or to touch a compare board's two columns. The shapes:
+    {"layout":"icons","title":"...","items":[{"icon":"...","label":"...","badge":"check|cross|alert","colour":"blue"}]}          1-4 items
+    {"layout":"steps","title":"...","items":[...]}                                                                              2-4, joined by arrows
+    {"layout":"timeline","title":"...","items":[...]}                                                                           2-4, along a line
+    {"layout":"compare","title":"...","left":{"title":"...","items":[...],"stat":"25%","statCaption":"..."},"right":{...}}       1-3 items a side
+    {"layout":"pie","title":"...","data":[{"label":"...","value":60}],"items":[...]}                                            2-4 slices
+    {"layout":"bars","title":"...","data":[{"label":"...","value":85}],"items":[...]}                                           2-5 bars
+    {"layout":"stat","title":"...","stat":"85%","caption":"...","icon":"..."}                                                   one big number
+  Titles are 2-6 words. Labels and captions are at most 18 characters -- they are captions, never sentences.
+  On pie and bars, "data" IS the chart -- do not repeat its rows anywhere else. Both may also carry an
+  optional "items":[{"icon":"...","label":"..."}] drawn as up to 3 icons underneath, and every entry there
+  needs an "icon". Omit "items" unless you actually want icons under the chart.
+  "value" is a plain number and bars are drawn relative to the largest, so scale them and put the unit in
+  the label: 14 with the label "2024 (BN)", never 14000000000.
+  No board holds more than 4 items in a row; compare holds 3 a side, for 6 in total. If more are asked for,
+  use compare, or say in "summary" that they will not fit rather than cramming them in.
+  Colours: blue, yellow, orange, green, red, violet, teal, pink. Icon geometry is looked up for you.
+  Prefer setBoardItem when only a caption or an icon is wrong; setBoard replaces the whole board.
+
 {"op":"setBoardItem","scene":2,"item":3,"label":"CASH WAS KING","icon":"banknote"}
   One drawn item on the board: its caption, its icon, its tick/cross/warning badge, its colour. Add
   "side":"left"|"right" for a compare board. Captions are at most 20 characters and are drawn in capitals.
@@ -64,6 +85,15 @@ OPERATIONS
   ordering, icons or the diagram type -- there are no x/y coordinates in this system. Use it whenever they
   talk about layout, position, arrangement, spacing, which icon, or "this scene looks wrong".
 
+{"op":"removeImage","scene":2}
+  Takes the picture off the board. The board is then re-composed to use the full width again.
+
+{"op":"setVoice","scene":2,"voiceId":"...","speed":1.0}
+  Re-casts the narrator and re-records. Omit "scene" to re-cast the whole video. "voiceId" must be one of
+  the ids in NARRATORS AVAILABLE below -- never invent one. "speed" is 0.6-1.5, where 1 is normal.
+  Cast only a voice whose language matches the script. An accent is not a language: a Spanish voice reading
+  English narration mispronounces the whole clip.
+
 {"op":"speak","scene":2}
   Re-records the narration. You do NOT need this after editing narration -- that happens automatically.
   Only emit it when they ask for the voice to be redone on its own.
@@ -78,6 +108,15 @@ OPERATIONS
 {"op":"moveScene","from":4,"to":2}
 
 WHAT IS ACTUALLY ON SCREEN
+There are two engines, and they draw different halves of a scene. Check "videoStyle" before planning.
+
+"videoStyle":"hyperframes" -- a Modern video. It draws "heading", "bullets", "keywords" and "stat"
+directly, as kinetic type, and the shot is chosen from what the scene carries. It has NO drawn board:
+setBoard, setBoardItem, relayout and boardTitle do nothing there, so never plan them. To change what a
+Modern scene says, set heading, bullets, keywords, stat and statCaption.
+
+"videoStyle":"whiteboard" -- a hand-drawn board, and the rest of this section applies.
+
 A whiteboard scene keeps two sets of words. The board -- "boardTitle" and the drawn items -- is what a
 viewer sees. "heading" and "bullets" are the writer's notes: they name the scene and feed a re-layout, and
 they are not drawn. So when someone asks to change wording they can see, edit boardTitle and setBoardItem.
@@ -89,13 +128,18 @@ board they are looking at. The video's own "title" is only what they mean when t
 the whole video, the project, or the intro card.
 
 RULES
-- Do only what was asked. Two words of feedback is not licence to rewrite the video.
+- Do only what was asked. Two words of feedback is not licence to rewrite the video. Asked to change a
+  board, change the board -- do not also rewrite the narration, blank the image prompt, or "tidy" fields
+  nobody mentioned. Every extra edit costs them a re-record or a lost picture.
 - When they name no scene and the request is clearly about one, use the scene they have open.
 - Editing narration re-records the voice by itself, which takes time -- so do not rewrite a script unless
   they asked you to.
 - Board labels come from the narration: if you change what a scene says, relayout it so its captions still
   use words the narrator actually speaks.
 - Never invent statistics. Never put a url, a file path or base64 in a value.
+- removeScene and moveScene renumber the scenes after them, exactly as addScene does. Put them last, or
+  emit one and stop.
+- Do not plan work the deployment cannot do -- WHAT THIS DEPLOYMENT CAN DO is below.
 - If the request is unclear or you cannot do it, return an empty ops array and say why in "summary".`;
 
 function stripFence(value: string): string {
@@ -116,16 +160,49 @@ export interface EditPlannerInput {
   project: unknown;
   /** The scene open in the editor (1-based), used when no scene is named. */
   sceneNumber?: number;
+  /** The narrators this deployment can actually cast. */
+  voices?: Array<{
+    id: string;
+    name: string;
+    gender?: string;
+    language?: string;
+    accent?: string;
+    description?: string;
+  }>;
+  /** What is configured, so nothing impossible gets planned. */
+  can?: { photoSearch?: boolean; generateImage?: boolean; lineArt?: boolean };
   model?: string;
   signal?: AbortSignal;
 }
 
 export async function planEdit(input: EditPlannerInput): Promise<EditPlan> {
+  const can = input.can;
+  const abilities = can
+    ? [
+        `- Real photo search (findPhoto): ${can.photoSearch ? "available" : "NOT configured — do not plan it"}`,
+        `- Generated artwork (generateImage): ${can.generateImage ? "available" : "NOT configured — do not plan it"}`,
+        `- Marker line art for whiteboard scenes: ${can.lineArt ? "available" : "NOT available — a generated picture here would come back as a photograph, so prefer findPhoto or none"}`,
+      ].join("\n")
+    : "";
+
+  const narrators = input.voices?.length
+    ? input.voices
+        .slice(0, 60)
+        .map((voice) =>
+          [`  ${voice.id}`, voice.name, voice.language, voice.gender, voice.accent, voice.description]
+            .filter(Boolean)
+            .join(" · "),
+        )
+        .join("\n")
+    : "";
+
   const context = [
     `THE VIDEO AS IT STANDS:\n${JSON.stringify(input.project)}`,
     typeof input.sceneNumber === "number"
       ? `The editor currently has scene ${input.sceneNumber} open.`
       : "",
+    abilities ? `WHAT THIS DEPLOYMENT CAN DO:\n${abilities}` : "",
+    narrators ? `NARRATORS AVAILABLE (use an id exactly as written):\n${narrators}` : "",
     `WHAT THEY ASKED FOR:\n${input.instruction}`,
   ]
     .filter(Boolean)
@@ -152,9 +229,20 @@ export async function planEdit(input: EditPlannerInput): Promise<EditPlan> {
     if (candidate) {
       try {
         const parsed = editPlanSchema.safeParse(JSON.parse(candidate));
-        if (parsed.success) return parsed.data;
-        const issue = parsed.error.issues[0];
-        problem = `${issue.path.join(".") || "root"} ${issue.message}`;
+        if (parsed.success) {
+          const { ops, rejected } = sift(parsed.data.ops);
+
+          // Something usable, or nothing to do at all: either is an answer.
+          if (ops.length || !parsed.data.ops.length) {
+            return { summary: parsed.data.summary, ops, rejected };
+          }
+
+          // Every op was malformed. Worth one more try with the reason.
+          problem = rejected[0] ?? "no usable operations";
+        } else {
+          const issue = parsed.error.issues[0];
+          problem = `${issue.path.join(".") || "root"} ${issue.message}`;
+        }
       } catch (err) {
         problem = `invalid JSON (${err instanceof Error ? err.message : "parse error"})`;
       }

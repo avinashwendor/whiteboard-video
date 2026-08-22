@@ -262,6 +262,8 @@ export function createStoryboard(
 export interface EditPlanResponse {
   summary: string;
   ops: EditOp[];
+  /** Operations the planner produced that could not be understood. */
+  rejected?: string[];
 }
 
 /**
@@ -269,7 +271,21 @@ export interface EditPlanResponse {
  * Nothing is applied here -- the ops come back and `applyOps` runs them.
  */
 export function planEdit(
-  body: { instruction: string; project: unknown; sceneNumber?: number; model?: string },
+  body: {
+    instruction: string;
+    project: unknown;
+    sceneNumber?: number;
+    voices?: Array<{
+      id: string;
+      name: string;
+      gender?: string;
+      language?: string;
+      accent?: string;
+      description?: string;
+    }>;
+    can?: { photoSearch?: boolean; generateImage?: boolean; lineArt?: boolean };
+    model?: string;
+  },
   signal?: AbortSignal,
 ): Promise<EditPlanResponse> {
   return post<EditPlanResponse>("/api/edit", body, signal);

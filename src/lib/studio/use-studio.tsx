@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { generateImage } from "@/lib/ai/image/client";
+import { castVoice } from "./casting";
 import { renderThumbnail } from "@/components/whiteboard/thumbnail";
 import type { SceneSpec } from "@/lib/whiteboard/scene";
 import type { ImageStyle, ModelInfo, VoiceInfo } from "@/lib/ai/types";
@@ -468,32 +469,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
              * whole speech provider. A voice the user has explicitly picked
              * always wins.
              */
-            const castVoice = (): string => {
-              const brief = plan.storyboard.voice_brief;
-              const catalogue = catalogues.voices;
-              if (!brief || !catalogue.length || settings.voicePinned) return settings.voiceId;
-
-              const wanted = (brief.qualities ?? []).map((q) => q.toLowerCase());
-              let best = settings.voiceId;
-              let bestScore = -1;
-
-              for (const voice of catalogue) {
-                const haystack = `${voice.description ?? ""} ${voice.accent ?? ""}`.toLowerCase();
-                let points = wanted.reduce((sum, q) => sum + (haystack.includes(q) ? 2 : 0), 0);
-                if (brief.gender && brief.gender !== "any") {
-                  points += voice.gender === brief.gender ? 3 : -4;
-                }
-                // Prefer the language the narration is actually in.
-                if ([voice.language, ...(voice.languages ?? [])].includes(settings.language)) points += 1;
-                if (points > bestScore) {
-                  bestScore = points;
-                  best = voice.id;
-                }
-              }
-              return bestScore > 0 ? best : settings.voiceId;
-            };
-
-            const voiceId = castVoice();
+            const voiceId = castVoice({
+              brief: plan.storyboard.voice_brief,
+              catalogue: catalogues.voices,
+              language: settings.language || "en",
+              current: settings.voiceId,
+              pinned: settings.voicePinned,
+            });
 
             const scenes: SceneAsset[] = plan.storyboard.scenes.map((scene) => ({
               heading: scene.heading,

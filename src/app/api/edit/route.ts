@@ -29,6 +29,8 @@ export async function POST(req: Request) {
       instruction: body.instruction,
       project: body.project,
       sceneNumber: body.sceneNumber,
+      voices: body.voices,
+      can: body.can,
       model: body.model,
       signal: req.signal,
     });

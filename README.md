@@ -148,13 +148,47 @@ History. Everything the generator produced is editable there, three ways:
   generated artwork, a new board layout, a new recording.
 - **JSON** — the whole project as text. It is validated before it reaches the renderer, so a mistyped brace
   costs nothing; unknown keys survive the round trip.
-- **Ask** — describe the change. `/api/edit` plans it into operations (`set`, `findPhoto`, `generateImage`,
-  `relayout`, `speak`, `addScene`, …) and the browser runs them against the routes above. Every step is
-  named in the log and one Undo steps back.
+- **Ask** — describe the change. `/api/edit` plans it into operations and the browser runs them against the
+  routes above. Every step is named in the log and one Undo steps back.
 
-Two rules the executor keeps, because breaking either desynchronises the video: editing a narration always
-drags a fresh recording along with it (the animation is scheduled against `audio.words`), and a re-layout is
-told whether a photograph shares the board and which layouts the other scenes already used.
+The planner reaches everything the panels do:
+
+| op | what it changes |
+|---|---|
+| `set` | any field of the video or a scene, including `boardTitle` |
+| `setBoard` | the whole board — layout, items, pie slices, bar values, compare columns |
+| `setBoardItem` | one drawn caption, icon, badge or colour |
+| `relayout` | hands the board back to the scene writer to recompose |
+| `findPhoto` / `generateImage` / `removeImage` | the picture beside the drawing |
+| `setVoice` | re-casts the narrator (one scene or the whole video) and re-records |
+| `speak` | re-records one scene |
+| `addScene` / `removeScene` / `moveScene` | the storyboard |
+
+It is told what the deployment can actually do (photo search, image generation, whether the image model can
+do line art) and which narrators exist, so it never plans a step that cannot run. A plan is sifted op by op:
+one malformed operation is reported in the log and skipped, and the rest still run.
+
+Rules the executor keeps, because breaking any of them desynchronises the video: editing a narration always
+drags a fresh recording along with it (the animation is scheduled against `audio.words`); a re-layout is
+told whether a photograph shares the board and which layouts the other scenes already used; a renamed icon
+is resolved board-wide so no two items come back the same picture; and removing a picture recomposes the
+board to use the full width again.
+
+### Two engines, two halves of a scene
+
+Which engine a project uses decides which half of a scene is real, and the editor follows it:
+
+- **Whiteboard** draws the composed board and ignores `heading` and `bullets` entirely.
+- **Modern frames** draw `heading`, `bullets`, `keywords` and `stat` as kinetic type and ignore the board
+  entirely — the shot is picked from what the scene carries (a stat makes a metric, three bullets a
+  process, two a contrast).
+
+So on a Modern video the inspector shows **Shot** instead of Board, hides the re-layout button, and flips
+its field hints. The planner is told the engine too, and `setBoard`, `setBoardItem`, `relayout` and
+`boardTitle` are refused there with a reason rather than silently editing data nothing renders.
+
+Output is 1280×720. There is no portrait mode: every layout in `scene.ts` and `hyperframes/` composes
+against those fixed dimensions, so a 9:16 switch would need all of them re-composed, not a resized canvas.
 
 ### Two sets of words
 

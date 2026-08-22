@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sceneSpecSchema } from "@/lib/whiteboard/scene";
 import type { ProjectAsset } from "./types";
 
 /**
@@ -94,6 +95,27 @@ export const editOpSchema = z.discriminatedUnion("op", [
     badge: z.enum(["check", "cross", "alert"]).optional(),
     colour: z.enum(["blue", "yellow", "orange", "green", "red", "violet", "teal", "pink"]).optional(),
   }),
+  z.object({
+    op: z.literal("setBoard"),
+    scene: sceneNumber,
+    /**
+     * A whole board, written out. This is the only op that can change the
+     * layout, add or remove items, reorder them, or touch a pie's slices and a
+     * compare's columns -- everything `setBoardItem` cannot reach.
+     */
+    board: sceneSpecSchema,
+  }),
+  z.object({
+    op: z.literal("removeImage"),
+    scene: sceneNumber,
+  }),
+  z.object({
+    op: z.literal("setVoice"),
+    /** Omit to re-cast the whole video. */
+    scene: sceneNumber.optional(),
+    voiceId: z.string().trim().min(1).max(120).optional(),
+    speed: z.number().min(0.6).max(1.5).optional(),
+  }),
   z.object({ op: z.literal("speak"), scene: sceneNumber }),
   z.object({
     op: z.literal("addScene"),
@@ -112,12 +134,81 @@ export const editOpSchema = z.discriminatedUnion("op", [
 
 export type EditOp = z.infer<typeof editOpSchema>;
 
+/**
+ * The reply, before the ops are judged.
+ *
+ * Ops are taken one at a time rather than as a block: a plan of six good edits
+ * and one malformed seventh used to fail whole, which is a bad trade for the
+ * person who asked. The bad one is reported and the rest still run.
+ */
 export const editPlanSchema = z.object({
   summary: z.string().trim().max(400),
-  ops: z.array(editOpSchema).max(12),
+  // Generous, because "give every scene a photo" on a six-scene video is
+  // already six, and a rewrite is three or four each.
+  ops: z.array(z.unknown()).max(30),
 });
 
-export type EditPlan = z.infer<typeof editPlanSchema>;
+export interface EditPlan {
+  summary: string;
+  ops: EditOp[];
+  /** One sentence per op that could not be understood. */
+  rejected: string[];
+}
+
+/**
+ * The one shape planners reliably get wrong.
+ *
+ * On a pie or a bar board, `data` is the chart and `items` is an optional row
+ * of icons underneath -- so an entry there needs an icon, not a label and a
+ * number. Models write the chart rows into both. The duplicates carry nothing
+ * `data` does not already have, so they are dropped rather than failed.
+ */
+function tidyBoard(candidate: unknown): unknown {
+  if (!candidate || typeof candidate !== "object") return candidate;
+  const op = candidate as { op?: unknown; board?: { items?: unknown } };
+  if (op.op !== "setBoard" || !op.board || typeof op.board !== "object") return candidate;
+
+  const items = op.board.items;
+  if (!Array.isArray(items)) return candidate;
+
+  const kept = items.filter(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      typeof (item as { icon?: unknown }).icon === "string" &&
+      (item as { icon: string }).icon.trim().length > 0,
+  );
+  if (kept.length === items.length) return candidate;
+
+  return {
+    ...op,
+    board: { ...op.board, ...(kept.length ? { items: kept } : {}) },
+    ...(kept.length ? {} : {}),
+  };
+}
+
+/** Keeps every op that validates, and says why the others were dropped. */
+export function sift(raw: unknown[]): { ops: EditOp[]; rejected: string[] } {
+  const ops: EditOp[] = [];
+  const rejected: string[] = [];
+
+  for (const entry of raw) {
+    const candidate = tidyBoard(entry);
+    const parsed = editOpSchema.safeParse(candidate);
+    if (parsed.success) {
+      ops.push(parsed.data);
+      continue;
+    }
+    const issue = parsed.error.issues[0];
+    const name =
+      candidate && typeof candidate === "object" && "op" in candidate
+        ? String((candidate as { op: unknown }).op)
+        : "an operation";
+    rejected.push(`${name}: ${[issue.path.join("."), issue.message].filter(Boolean).join(" ")}`);
+  }
+
+  return { ops, rejected };
+}
 
 /* ------------------------------- set guards -------------------------------- */
 
@@ -169,23 +260,25 @@ export function checkSet(field: string, value: unknown, onScene: boolean): strin
  * numbers and SVG path data before this runs. Scenes carry their own number so
  * the model never has to count.
  */
-/** The captions actually drawn, in the order they appear on the board. */
-function boardItemsOf(spec: ProjectAsset["scenes"][number]["scene"]): unknown {
-  if (!spec) return undefined;
-  const describe = (items: Array<{ icon: string; label?: string }>) =>
-    items.map((item, index) => ({ item: index + 1, label: item.label, icon: item.icon }));
-
-  if (spec.layout === "compare") {
-    return {
-      left: { title: spec.left.title, items: describe(spec.left.items) },
-      right: { title: spec.right.title, items: describe(spec.right.items) },
-    };
-  }
-  if (spec.layout === "stat") return { stat: spec.stat, caption: spec.caption, icon: spec.icon };
-  if (spec.layout === "pie" || spec.layout === "bars") {
-    return { data: spec.data.map((entry) => ({ label: entry.label, value: entry.value })) };
-  }
-  return describe(spec.items);
+/**
+ * The board as it stands, minus the resolved geometry.
+ *
+ * The planner is handed the real spec rather than a summary of it, because it
+ * can now write one back -- and it cannot edit a shape it has only been told
+ * about. The `glyph` arrays are the one thing stripped: thousands of SVG path
+ * numbers that mean nothing to a model and would dwarf the rest of the prompt.
+ */
+function boardOf(spec: ProjectAsset["scenes"][number]["scene"]): unknown {
+  if (!spec) return null;
+  const clone = structuredClone(spec) as Record<string, unknown>;
+  const strip = (items?: Array<{ glyph?: unknown }>) => {
+    for (const item of items ?? []) delete item.glyph;
+  };
+  strip(clone.items as Array<{ glyph?: unknown }>);
+  strip((clone.left as { items?: Array<{ glyph?: unknown }> })?.items);
+  strip((clone.right as { items?: Array<{ glyph?: unknown }> })?.items);
+  delete clone.glyph;
+  return clone;
 }
 
 export function pruneForAgent(project: ProjectAsset): unknown {
@@ -208,13 +301,13 @@ export function pruneForAgent(project: ProjectAsset): unknown {
       stat: scene.stat,
       statCaption: scene.statCaption,
       visualTheme: scene.visualTheme,
-      layout: scene.scene?.layout,
-      boardTitle: scene.scene?.title,
-      boardItems: boardItemsOf(scene.scene),
+      board: boardOf(scene.scene),
       image: scene.image
         ? `${scene.image.kind ?? "image"} · ${scene.image.provider} · ${scene.image.width}x${scene.image.height}`
         : null,
-      audio: scene.audio ? `${scene.audio.provider} · ${scene.audio.duration?.toFixed(1) ?? "?"}s` : null,
+      audio: scene.audio
+        ? `${scene.audio.provider} · ${scene.audio.voiceId} · ${scene.audio.duration?.toFixed(1) ?? "?"}s`
+        : null,
     })),
   };
 }

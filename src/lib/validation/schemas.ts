@@ -106,6 +106,28 @@ export const editRequestSchema = z.object({
   }),
   /** The scene open in the editor, numbered from 1 as the person sees it. */
   sceneNumber: z.number().int().min(1).max(12).optional(),
+  /** The narrators this deployment can actually cast. */
+  voices: z
+    .array(
+      z.object({
+        id: z.string().trim().max(120),
+        name: z.string().trim().max(80),
+        gender: z.string().trim().max(24).optional(),
+        language: z.string().trim().max(12).optional(),
+        accent: z.string().trim().max(60).optional(),
+        description: z.string().trim().max(200).optional(),
+      }),
+    )
+    .max(120)
+    .optional(),
+  /** What is configured, so nothing impossible gets planned. */
+  can: z
+    .object({
+      photoSearch: z.boolean().optional(),
+      generateImage: z.boolean().optional(),
+      lineArt: z.boolean().optional(),
+    })
+    .optional(),
   model: modelId.optional(),
 });
 export type EditRequest = z.infer<typeof editRequestSchema>;

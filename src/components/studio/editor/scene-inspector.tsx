@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ImageIcon, LayoutTemplate, Mic, Search } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { curateVisual, resolveBoard } from "@/lib/studio/api";
-import { relayoutScene, speakScene } from "@/lib/studio/edit-ops";
+import { prevailingVoice, relayoutScene, speakScene } from "@/lib/studio/edit-ops";
 import { generateImage } from "@/lib/ai/image/client";
 import type { ImageStyle } from "@/lib/ai/types";
 import type { ProjectAsset, SceneAsset } from "@/lib/studio/types";
@@ -73,7 +73,15 @@ export function SceneInspector({
     }
   };
 
-  const isBoard = Boolean(scene.scene);
+  /**
+   * Which engine draws this video.
+   *
+   * It decides which half of a scene is real. A whiteboard draws the composed
+   * board and ignores heading and bullets; a Modern frame draws heading,
+   * bullets, keywords and the stat, and ignores the board completely. Showing
+   * the wrong half is how an edit ends up doing nothing.
+   */
+  const isModern = (project.videoStyle ?? settings.videoStyle) === "hyperframes";
 
   const imageStyle: ImageStyle =
     (project.videoStyle ?? settings.videoStyle) === "hyperframes"
@@ -87,9 +95,9 @@ export function SceneInspector({
         rows={2}
         value={scene.heading}
         hint={
-          isBoard
-            ? "Names the scene in the timeline. The title drawn on the board is under Board, below."
-            : "Written across the top of the frame."
+          isModern
+            ? "Drawn across the frame, word by word, as the narrator reaches it."
+            : "Names the scene in the timeline. The title drawn on the board is under Board, below."
         }
         onChange={(event) => onPatch({ heading: event.target.value })}
       />
@@ -108,9 +116,9 @@ export function SceneInspector({
         max={4}
         placeholder="Short fragment"
         hint={
-          isBoard
-            ? "What the board is re-laid out from — not drawn as-is. The captions on the canvas are under Board."
-            : "Revealed one at a time, timed to the narration."
+          isModern
+            ? "Revealed one at a time, timed to the narration. Two or three shapes the shot."
+            : "What the board is re-laid out from — not drawn as-is. The captions on the canvas are under Board."
         }
         onChange={(bullets) => onPatch({ bullets })}
       />
@@ -121,6 +129,11 @@ export function SceneInspector({
         max={6}
         addLabel="Add"
         placeholder="Word the narrator says"
+        hint={
+          isModern
+            ? "Picked out in the accent colour as the heading lands."
+            : "Guides the board's captions on a re-layout."
+        }
         onChange={(keywords) => onPatch({ keywords })}
       />
 
@@ -148,8 +161,14 @@ export function SceneInspector({
       />
 
       {/* ── the board ── */}
-      <Section title="Board">
-        {scene.scene ? (
+      <Section title={isModern ? "Shot" : "Board"}>
+        {isModern ? (
+          <p className="text-[11px] leading-relaxed text-faint">
+            Modern frames are composed from the fields above — the shot is chosen from what the scene
+            carries: a stat makes a metric shot, three bullets a process, two a contrast. There is no
+            drawn board to edit.
+          </p>
+        ) : scene.scene ? (
           <>
             <p className="text-[11px] leading-relaxed text-faint">
               Everything drawn on the canvas, laid out as “{scene.scene.layout}”. Where things sit comes
@@ -172,7 +191,8 @@ export function SceneInspector({
           icon={LayoutTemplate}
           label={scene.scene ? "Re-lay out the board" : "Lay out the board"}
           busy={task === "relayout"}
-          disabled={busy}
+          disabled={busy || isModern}
+          hidden={isModern}
           onClick={() =>
             run("relayout", "Re-laid out the board", async (draft) => {
               const layout = await relayoutScene(draft, index, settings);
@@ -289,7 +309,12 @@ export function SceneInspector({
           disabled={busy || !scene.narration.trim()}
           onClick={() =>
             run("voice", "Re-recorded the narration", async (draft) => {
-              await speakScene(draft.scenes[index], settings);
+              const target = draft.scenes[index];
+              await speakScene(target, settings, undefined, {
+                // A scene with no recording yet takes the voice the rest of the
+                // video already uses, not the global default.
+                voiceId: target.audio ? undefined : prevailingVoice(draft.scenes, settings.voiceId),
+              });
               return `Scene ${index + 1}: re-recorded the narration`;
             })
           }
@@ -313,14 +338,17 @@ function Action({
   label,
   busy,
   disabled,
+  hidden,
   onClick,
 }: {
   icon: typeof Mic;
   label: string;
   busy: boolean;
   disabled?: boolean;
+  hidden?: boolean;
   onClick: () => void;
 }) {
+  if (hidden) return null;
   return (
     <button
       type="button"

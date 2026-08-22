@@ -29,6 +29,14 @@ export interface ApplyContext {
   signal?: AbortSignal;
   /** Called as each op starts, so the panel can say what is happening. */
   onProgress?: (message: string) => void;
+  /**
+   * Called with the project after every completed op.
+   *
+   * Re-casting a six-scene video is six speech requests and a couple of
+   * minutes. Holding all of it until the batch returns means a closed tab
+   * throws the lot away, so each finished step is handed back to be saved.
+   */
+  onPartial?: (project: ProjectAsset) => void;
 }
 
 /* ------------------------------ asset helpers ------------------------------ */
@@ -93,18 +101,24 @@ function measureDuration(url: string): Promise<number | undefined> {
   });
 }
 
-/** Re-records one scene. Keeps whichever narrator that scene already had. */
+/**
+ * Re-records one scene.
+ *
+ * Without an override it keeps whichever narrator that scene already had, so
+ * fixing a typo in scene three does not silently re-cast it.
+ */
 export async function speakScene(
   scene: SceneAsset,
   settings: Settings,
   signal?: AbortSignal,
+  override?: { voiceId?: string; speed?: number },
 ): Promise<void> {
   const speech = await generateSpeech(
     {
       transcript: scene.narration,
-      voiceId: scene.audio?.voiceId || settings.voiceId,
+      voiceId: override?.voiceId || scene.audio?.voiceId || settings.voiceId,
       language: scene.audio?.language || settings.language || undefined,
-      speed: settings.speed,
+      speed: override?.speed ?? settings.speed,
     },
     signal,
   );
@@ -117,6 +131,30 @@ export async function speakScene(
     duration: speech.duration ?? (await measureDuration(speech.audioUrl)),
     words: speech.words,
   };
+}
+
+/**
+ * The narrator this video is already using.
+ *
+ * A scene added later has no voice of its own, and falling through to the
+ * global default casts a different person for one scene in the middle of a
+ * finished video. The voice the rest of the scenes share is the right answer.
+ */
+export function prevailingVoice(scenes: SceneAsset[], fallback: string): string {
+  const counts = new Map<string, number>();
+  for (const scene of scenes) {
+    const voice = scene.audio?.voiceId;
+    if (voice) counts.set(voice, (counts.get(voice) ?? 0) + 1);
+  }
+  let best = fallback;
+  let bestCount = 0;
+  for (const [voice, count] of counts) {
+    if (count > bestCount) {
+      bestCount = count;
+      best = voice;
+    }
+  }
+  return best;
 }
 
 /** Re-picks the layout and the slots -- where everything sits on the board. */
@@ -196,10 +234,20 @@ export async function applyOps(
   const touched = new Set<number>();
   /** Boards whose icon names changed and still need real geometry. */
   const boardsToResolve = new Set<number>();
+  /** A re-cast this batch asked for, applied to every recording it makes. */
+  let voiceSpeed: number | undefined;
+  const voiceCast = new Map<number, string>();
 
   const note = (op: EditOp["op"], message: string, ok = true) => {
     log.push({ op, message, ok });
   };
+
+  /**
+   * A Modern video draws its heading, bullets, keywords and stat; the composed
+   * board is ignored by that renderer entirely. Board ops there would appear to
+   * succeed and change nothing on screen, so they are refused with a reason.
+   */
+  const isModern = (next.videoStyle ?? settings.videoStyle) === "hyperframes";
 
   const sceneAt = (index: number): SceneAsset | undefined => {
     const scene = next.scenes[index];
@@ -234,6 +282,10 @@ export async function applyOps(
           }
 
           if (op.field === "boardTitle") {
+            if (isModern) {
+              note("set", "This is a Modern video — its heading is what is drawn, not a board title", false);
+              break;
+            }
             if (!scene.scene) {
               note("set", `${label(index)} has no drawn board`, false);
               break;
@@ -300,6 +352,14 @@ export async function applyOps(
 
         case "relayout": {
           const index = op.scene - 1;
+          if (isModern) {
+            note(
+              "relayout",
+              `This is a Modern video — it has no drawn board. Edit the heading, bullets, keywords or stat instead.`,
+              false,
+            );
+            break;
+          }
           if (!sceneAt(index)) {
             note("relayout", `${label(index)} doesn't exist`, false);
             break;
@@ -313,6 +373,14 @@ export async function applyOps(
 
         case "setBoardItem": {
           const index = op.scene - 1;
+          if (isModern) {
+            note(
+              "setBoardItem",
+              `This is a Modern video — it has no drawn board. Edit the heading, bullets, keywords or stat instead.`,
+              false,
+            );
+            break;
+          }
           const scene = sceneAt(index);
           if (!scene?.scene) {
             note("setBoardItem", `${label(index)} has no drawn board`, false);
@@ -349,6 +417,90 @@ export async function applyOps(
           break;
         }
 
+        case "setBoard": {
+          const index = op.scene - 1;
+          if (isModern) {
+            note(
+              "setBoard",
+              `This is a Modern video — it has no drawn board. Edit the heading, bullets, keywords or stat instead.`,
+              false,
+            );
+            break;
+          }
+          const scene = sceneAt(index);
+          if (!scene) {
+            note("setBoard", `${label(index)} doesn't exist`, false);
+            break;
+          }
+          const before = scene.scene?.layout;
+          scene.scene = op.board;
+          // Written by a model, so every icon on it is a bare name.
+          boardsToResolve.add(index);
+          ctx.onProgress?.(`Rebuilding the board for ${label(index).toLowerCase()}`);
+          note(
+            "setBoard",
+            before && before !== op.board.layout
+              ? `${label(index)}: board rebuilt as “${op.board.layout}” (was “${before}”)`
+              : `${label(index)}: board rewritten`,
+          );
+          break;
+        }
+
+        case "removeImage": {
+          const index = op.scene - 1;
+          const scene = sceneAt(index);
+          if (!scene) {
+            note("removeImage", `${label(index)} doesn't exist`, false);
+            break;
+          }
+          if (!scene.image) {
+            note("removeImage", `${label(index)} has no picture`, false);
+            break;
+          }
+          scene.image = undefined;
+          scene.imageNote = undefined;
+          scene.supportVisual = "none";
+          // The board was composed around a photo column that is now empty.
+          if (scene.scene && !isModern) {
+            ctx.onProgress?.(`Re-laying out ${label(index).toLowerCase()} without the picture`);
+            const layout = await relayoutScene(next, index, settings, undefined, signal);
+            note("removeImage", `${label(index)}: picture removed, board re-laid out as “${layout}”`);
+          } else {
+            note("removeImage", `${label(index)}: picture removed`);
+          }
+          break;
+        }
+
+        case "setVoice": {
+          const targets =
+            op.scene === undefined
+              ? next.scenes.map((_, i) => i)
+              : sceneAt(op.scene - 1)
+                ? [op.scene - 1]
+                : [];
+          if (!targets.length) {
+            note("setVoice", `${label((op.scene ?? 1) - 1)} doesn't exist`, false);
+            break;
+          }
+          if (op.speed !== undefined) voiceSpeed = op.speed;
+
+          for (const index of targets) {
+            if (!next.scenes[index].narration.trim()) continue;
+            if (op.voiceId) voiceCast.set(index, op.voiceId);
+            touched.add(index);
+            needsVoice.add(index);
+          }
+          note(
+            "setVoice",
+            `${op.scene === undefined ? "Every scene" : label(op.scene - 1)}: re-recording with ${
+              [op.voiceId && `voice ${op.voiceId}`, op.speed !== undefined && `speed ${op.speed}×`]
+                .filter(Boolean)
+                .join(" and ") || "the same voice"
+            }`,
+          );
+          break;
+        }
+
         case "speak": {
           const index = op.scene - 1;
           const scene = sceneAt(index);
@@ -357,7 +509,12 @@ export async function applyOps(
             break;
           }
           ctx.onProgress?.(`Recording ${label(index).toLowerCase()}`);
-          await speakScene(scene, settings, signal);
+          await speakScene(scene, settings, signal, {
+            voiceId:
+              voiceCast.get(index) ??
+              (scene.audio ? undefined : prevailingVoice(next.scenes, settings.voiceId)),
+            speed: voiceSpeed,
+          });
           needsVoice.delete(index);
           note("speak", `${label(index)}: re-recorded the narration`);
           break;
@@ -398,7 +555,23 @@ export async function applyOps(
               scene.image = { ...found.image, kind: "photo" as const, promptUsed: scene.photoQuery };
               note("findPhoto", `${label(at)}: found a photo — ${found.reason}`);
             } else {
-              note("findPhoto", `${label(at)}: no usable photo — ${found.reason}`, false);
+              // The same fallback the generator uses: a scene with no picture
+              // beside four that have one reads as a mistake.
+              ctx.onProgress?.(`No photo found — drawing one instead`);
+              const drawn = await drawImage(
+                scene.imagePrompt || scene.heading,
+                styleFor(next, settings),
+                settings,
+                signal,
+              );
+              if (drawn) {
+                scene.image = drawn;
+                scene.supportVisual = "generated";
+                scene.imageNote = `${found.reason} — generated one instead`;
+                note("findPhoto", `${label(at)}: no usable photo, generated a plate instead`);
+              } else {
+                note("findPhoto", `${label(at)}: no usable photo — ${found.reason}`, false);
+              }
             }
           } else if (scene.supportVisual === "generated" && scene.imagePrompt.trim()) {
             ctx.onProgress?.(`Generating artwork for the new scene`);
@@ -459,6 +632,8 @@ export async function applyOps(
       if (signal?.aborted) break;
       note(op.op, err instanceof Error ? err.message : "That step failed", false);
     }
+
+    if (ctx.onPartial) ctx.onPartial(structuredClone(next) as ProjectAsset);
   }
 
   // Renamed icons, looked up.
@@ -472,6 +647,7 @@ export async function applyOps(
         signal,
       );
       next.scenes[index].scene = resolved.scene;
+      if (ctx.onPartial) ctx.onPartial(structuredClone(next) as ProjectAsset);
     } catch (err) {
       note("setBoardItem", `${label(index)}: kept the icon names as written — ${err instanceof Error ? err.message : "lookup failed"}`, false);
     }
@@ -484,8 +660,12 @@ export async function applyOps(
     if (!scene?.narration) continue;
     try {
       ctx.onProgress?.(`Re-recording ${label(index).toLowerCase()}`);
-      await speakScene(scene, settings, signal);
+      await speakScene(scene, settings, signal, {
+        voiceId: voiceCast.get(index) ?? (scene.audio ? undefined : prevailingVoice(next.scenes, settings.voiceId)),
+        speed: voiceSpeed,
+      });
       note("speak", `${label(index)}: re-recorded to match the new script`);
+      if (ctx.onPartial) ctx.onPartial(structuredClone(next) as ProjectAsset);
     } catch (err) {
       note("speak", `${label(index)}: couldn't re-record — ${err instanceof Error ? err.message : "failed"}`, false);
     }
