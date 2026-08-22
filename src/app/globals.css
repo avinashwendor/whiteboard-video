@@ -1,34 +1,37 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Dark-first palette. Restrained: one neutral ramp, chalk-white primary
-   actions, and a single accent hue per mode used only in small doses.
+   Motionhouse Design System Tokens.
+   Near-black #0A0A0B, warm off-white #F2F2F0, graphite secondary typography,
+   thin subtle borders, squared geometry (0px radius), and restrained accents.
    --------------------------------------------------------------------------- */
 :root {
-  --bg: #08090b;
-  --bg-soft: #0c0e11;
-  --surface: #101216;
-  --surface-raised: #16181d;
-  --surface-hover: #1b1e24;
+  --bg: #0a0a0b;
+  --bg-soft: #0d0d0e;
+  --surface: #0e0e10;
+  --surface-raised: #121214;
+  --surface-hover: #171719;
 
-  --border: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.13);
+  --border: rgba(242, 242, 240, 0.08);
+  --border-strong: rgba(242, 242, 240, 0.16);
 
-  --text: #f3f4f6;
-  --text-muted: #8f939c;
-  --text-faint: #5a5e67;
+  --text: #f2f2f0;
+  --text-muted: #8a8a85;
+  --text-faint: #5c5c58;
+  --text-dim: #6e6e6a;
 
-  --accent-write: #7ea6ff;
-  --accent-image: #c08bff;
-  --accent-voice: #ffb65c;
-  --accent-create: #5fd8a4;
-  --danger: #ff8a80;
+  --accent-create: #5fd08a;
+  --accent-write: #5b7fbf;
+  --accent-image: #c89b5a;
+  --accent-voice: #9a8ac0;
+  --accent-story: #6aa9a0;
+  --danger: #c4574e;
 
-  --board: #f7f5ef;
-  --board-ink: #1d1f24;
+  --board: #f4f1ea;
+  --board-ink: #141414;
 
-  --radius: 14px;
-  --radius-lg: 20px;
+  --radius: 0px;
+  --radius-lg: 0px;
 }
 
 @theme inline {
@@ -42,9 +45,11 @@
   --color-ink: var(--text);
   --color-muted: var(--text-muted);
   --color-faint: var(--text-faint);
+  --color-dim: var(--text-dim);
   --color-write: var(--accent-write);
   --color-image: var(--accent-image);
   --color-voice: var(--accent-voice);
+  --color-story: var(--accent-story);
   --color-create: var(--accent-create);
   --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
@@ -73,46 +78,64 @@ body {
 }
 
 ::selection {
-  background: rgba(126, 166, 255, 0.28);
+  background: rgba(242, 242, 240, 0.2);
+  color: var(--text);
 }
 
-/* Focus: one consistent, high-contrast ring everywhere. */
+/* Studio precision focus ring */
 :focus-visible {
-  outline: 2px solid var(--accent-write);
-  outline-offset: 2px;
-  border-radius: 6px;
+  outline: 1px solid rgba(242, 242, 240, 0.4);
+  outline-offset: 1px;
+  border-radius: 0;
 }
 
-/* Scrollbars that don't fight the palette. */
+/* Squared, restrained scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: rgba(242, 242, 240, 0.12) transparent;
 }
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: content-box;
+  background: rgba(242, 242, 240, 0.12);
+  border-radius: 0;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-  background-clip: content-box;
+  background: rgba(242, 242, 240, 0.22);
 }
 
-/* --------------------------------- motion -------------------------------- */
+/* --------------------------------- motion & animations -------------------------------- */
 
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInBackground {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -125,27 +148,58 @@ body {
   }
 }
 
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
+@keyframes mhSheen {
+  0% {
+    transform: translateX(-70%);
   }
-}
-
-@keyframes pulse-soft {
-  0%,
   100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 0.85;
+    transform: translateX(320%);
   }
 }
 
 .animate-rise {
-  animation: rise 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rise 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .animate-fade {
   animation: fade 0.3s ease both;
+}
+
+.animate-bg-fade {
+  animation: fadeInBackground 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-up-1 {
+  animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+}
+.animate-slide-up-2 {
+  animation: slideUpFade 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+}
+.animate-slide-up-3 {
+  animation: slideUpFade 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both;
+}
+.animate-slide-up-4 {
+  animation: slideUpFade 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.46s both;
+}
+
+/* Animated expanding underline on hover */
+.hover-underline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.hover-underline::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0%;
+  height: 1px;
+  background-color: var(--text);
+  transition: width 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.hover-underline:hover::after,
+.group:hover .hover-underline::after {
+  width: 100%;
 }
 
 .skeleton {
@@ -161,10 +215,10 @@ body {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.045),
+    rgba(242, 242, 240, 0.04),
     transparent
   );
-  animation: shimmer 1.6s infinite;
+  animation: mhSheen 2.5s infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -180,40 +234,49 @@ body {
   }
 }
 
-/* Grid backdrop used behind the hero, kept subtle enough to read as texture. */
-.grid-backdrop {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse 78% 58% at 50% 0%, #000 40%, transparent 100%);
+/* Studio hairline divider */
+.studio-hairline {
+  border-top: 1px solid rgba(242, 242, 240, 0.05);
 }
 
-/* Markdown-ish rendering for generated copy. */
+.studio-generation {
+  min-height: calc(100dvh - 3.5rem);
+}
+
+/* Generation player */
+.generation-player > :not(:first-child) {
+  display: none;
+}
+
+.generation-player > :first-child {
+  border-radius: 0;
+}
+
+/* Clean markdown formatting */
 .prose-generated {
-  line-height: 1.72;
-  font-size: 0.975rem;
+  line-height: 1.7;
+  font-size: 0.95rem;
   color: var(--text);
 }
 .prose-generated > * + * {
-  margin-top: 0.95em;
+  margin-top: 0.9em;
 }
 .prose-generated h1,
 .prose-generated h2,
 .prose-generated h3 {
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.015em;
   line-height: 1.3;
-  margin-top: 1.6em;
+  margin-top: 1.5em;
 }
 .prose-generated h1 {
-  font-size: 1.32rem;
+  font-size: 1.25rem;
 }
 .prose-generated h2 {
-  font-size: 1.14rem;
+  font-size: 1.1rem;
 }
 .prose-generated h3 {
-  font-size: 1rem;
+  font-size: 0.975rem;
 }
 .prose-generated ul,
 .prose-generated ol {
@@ -226,29 +289,28 @@ body {
   list-style: decimal;
 }
 .prose-generated li + li {
-  margin-top: 0.35em;
+  margin-top: 0.3em;
 }
 .prose-generated code {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 0.86em;
+  font-size: 0.85em;
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0.1em 0.36em;
+  border-radius: 0;
+  padding: 0.1em 0.35em;
 }
 .prose-generated strong {
-  font-weight: 600;
+  font-weight: 500;
   color: #fff;
 }
 .prose-generated em {
   color: var(--text-muted);
 }
 
-/* ----------------------------- studio editor ----------------------------- */
-
+/* Studio editor scrollbar & panel */
 .studio-panel {
-  background: #0b0e17;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #0a0a0b;
+  border: 1px solid rgba(242, 242, 240, 0.08);
 }
 
 .studio-scrollbar::-webkit-scrollbar {
@@ -256,10 +318,265 @@ body {
   width: 4px;
 }
 .studio-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
+  background: rgba(242, 242, 240, 0.12);
+  border-radius: 0;
 }
 .studio-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
+/* --------------------------- footer wordmark ---------------------------- */
+/* The mark is cut out of footage: the type is a window, not a fill. */
+.footer-wordmark {
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 500;
+  /* Sized so the 11 glyphs span the viewport edge to edge at any width. */
+  font-size: clamp(56px, 18.1vw, 320px);
+  line-height: 0.86;
+  letter-spacing: -0.055em;
+  text-align: center;
+  white-space: nowrap;
+  /* Wash only — the footage underneath read as noise against the type. */
+  background-image: linear-gradient(
+    170deg,
+    rgba(242, 242, 240, 0.92) 0%,
+    rgba(242, 242, 240, 0.46) 38%,
+    rgba(242, 242, 240, 0.14) 72%,
+    rgba(242, 242, 240, 0.04) 100%
+  );
+  background-size: cover;
+  background-position: center;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* fade the mark into the page rather than cropping it at the viewport edge */
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 62%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, #000 62%, transparent 100%);
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .footer-wordmark {
+    color: rgba(242, 242, 240, 0.08);
+    background-image: none;
+  }
+}
+
+/* ------------------------------ hero scrim ------------------------------ */
+/* The dither field runs bright in places; the copy needs its own ground. */
+.hero-scrim {
+  background: radial-gradient(
+    ellipse 78% 62% at 50% 52%,
+    rgba(10, 10, 11, 0.9) 0%,
+    rgba(10, 10, 11, 0.72) 42%,
+    rgba(10, 10, 11, 0.28) 72%,
+    rgba(10, 10, 11, 0) 100%
+  );
+}
+
+.hero-vignette {
+  background: linear-gradient(
+    180deg,
+    rgba(10, 10, 11, 0.72) 0%,
+    rgba(10, 10, 11, 0) 24%,
+    rgba(10, 10, 11, 0) 62%,
+    rgba(10, 10, 11, 0.95) 100%
+  );
+}
+
+/* ------------------------------ grain shimmer ---------------------------- */
+/*
+   The waiting texture. Fractal noise jittered on a short loop reads as film
+   grain rather than as a spinner, a light band sweeps across it, and a slow
+   breath keeps the whole field from sitting still. Three cheap layers, no
+   canvas, no per-frame JavaScript.
+*/
+.grain-shimmer {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.grain-shimmer__noise {
+  position: absolute;
+  /* oversized so the jitter never exposes an edge */
+  inset: -18%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 300px 300px;
+  animation: grainJitter 0.5s steps(1) infinite;
+  will-change: transform;
+}
+
+.grain-shimmer__glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 70% 90% at 50% 50%,
+    rgba(242, 242, 240, 0.09) 0%,
+    rgba(242, 242, 240, 0.02) 55%,
+    rgba(242, 242, 240, 0) 100%
+  );
+  animation: grainBreathe 5.5s ease-in-out infinite;
+}
+
+.grain-shimmer__sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  background: linear-gradient(
+    90deg,
+    rgba(242, 242, 240, 0),
+    rgba(242, 242, 240, 0.09) 48%,
+    rgba(242, 242, 240, 0)
+  );
+  animation-name: mhSheen;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+@keyframes grainJitter {
+  0% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-4%, 3%);
+  }
+  40% {
+    transform: translate(3%, -5%);
+  }
+  60% {
+    transform: translate(-3%, -3%);
+  }
+  80% {
+    transform: translate(4%, 4%);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes grainBreathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grain-shimmer__noise,
+  .grain-shimmer__glow,
+  .grain-shimmer__sweep {
+    animation: none;
+  }
+}
+
+/* -------------------------------- script body ---------------------------- */
+/*
+   Long-form output gets its own scale. The default prose block is tuned for
+   short blurbs in panels; a 700-word keynote read at that size and weight has
+   no visible structure — every heading looks like a bolded sentence.
+*/
+.script-body {
+  font-size: 16px;
+  line-height: 1.78;
+  color: #dedeD9;
+  text-wrap: pretty;
+}
+
+.script-body > * + * {
+  margin-top: 1.05em;
+}
+
+.script-body h1 {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.032em;
+  color: var(--text);
+}
+
+.script-body h2 {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 2.6em;
+  padding-top: 1.1em;
+  border-top: 1px solid var(--border);
+}
+
+.script-body h3 {
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  margin-top: 1.9em;
+}
+
+.script-body h1 + *,
+.script-body h2 + *,
+.script-body h3 + * {
+  margin-top: 0.7em;
+}
+
+.script-body > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.script-body ul,
+.script-body ol {
+  padding-left: 1.1rem;
+  color: var(--text);
+}
+.script-body ul {
+  list-style: none;
+}
+.script-body ul > li {
+  position: relative;
+}
+.script-body ul > li::before {
+  content: "—";
+  position: absolute;
+  left: -1.1rem;
+  color: var(--text-faint);
+}
+.script-body ol {
+  list-style: decimal;
+}
+.script-body li + li {
+  margin-top: 0.45em;
+}
+
+.script-body strong {
+  font-weight: 500;
+  color: #fff;
+}
+.script-body em {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* The fade that tells you a long script continues past the fold. */
+.script-clamp {
+  position: relative;
+  max-height: 560px;
+  overflow: hidden;
+}
+.script-clamp::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 160px;
+  background: linear-gradient(180deg, rgba(14, 14, 16, 0), var(--surface) 92%);
+  pointer-events: none;
+}

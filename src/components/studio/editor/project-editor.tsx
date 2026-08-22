@@ -2,21 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowLeft,
-  Check,
-  ChevronDown,
-  Copy,
-  Film,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, Check, Copy, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { planEdit } from "@/lib/studio/api";
 import { applyOps, pruneForAgent } from "@/lib/studio/edit-ops";
 import type { Generation, ProjectAsset, SceneAsset } from "@/lib/studio/types";
 import { useStudio } from "@/lib/studio/use-studio";
 import { WhiteboardPlayer } from "@/components/whiteboard/whiteboard-player";
+import { AsciiInline, AsciiVeil, BlurredWhileBusy } from "@/components/ui/ascii-loader";
 import { AskPanel, type ActivityEntry } from "./ask-panel";
 import { Choice, LabelledArea, LabelledInput } from "./controls";
 import { JsonPanel } from "./json-panel";
@@ -292,36 +285,41 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
     [project],
   );
 
+  /** Duration a scene occupies once narrated, used by the rail and the timeline. */
+  const sceneSeconds = useCallback(
+    (scene: SceneAsset) =>
+      scene.audio?.duration ?? Math.max(4.5, scene.narration.split(/\s+/).filter(Boolean).length / 2.5),
+    [],
+  );
+
   /* --------------------------------- render --------------------------------- */
 
   return (
     <div className="flex min-h-[calc(100vh-3.5rem)] flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2.5 sm:px-5">
+        <div className="flex min-w-0 items-center gap-5">
           <Link
             href="/"
-            className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
+            className="flex shrink-0 items-center gap-1.5 border border-line px-3.5 py-1.5 text-[12.5px] text-[#c9c9c4] transition-colors hover:border-line-strong hover:text-ink"
           >
             <ArrowLeft className="size-3.5" aria-hidden />
             Create
           </Link>
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-line bg-surface-raised text-create">
-            <Film className="size-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h1 className="truncate text-[13px] font-medium text-ink">{project.title}</h1>
-            <p className="truncate text-[11px] text-faint">
-              {project.scenes.length} scenes · ~{totalDuration.toFixed(1)}s ·{" "}
+          <div className="flex min-w-0 items-baseline gap-3">
+            <h1 className="truncate text-[14.5px] font-medium text-ink">{project.title}</h1>
+            <p className="hidden shrink-0 text-[12.5px] text-dim sm:block">
+              {project.scenes.length} scenes · {totalDuration.toFixed(1)}s ·{" "}
               {project.videoStyle === "hyperframes" ? "Modern frames" : "Whiteboard"}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-5">
+          {busy ? <AsciiInline label={status ?? "Working"} /> : null}
           <button
             type="button"
             onClick={copyScript}
-            className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
+            className="flex items-center gap-1.5 text-[12.5px] text-muted transition-colors hover:text-ink"
           >
             {copied ? <Check className="size-3.5" aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
             {copied ? "Copied" : "Script"}
@@ -329,89 +327,102 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
         </div>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 divide-y divide-line lg:grid-cols-12 lg:divide-x lg:divide-y-0">
-        {/* ── scenes and video settings ── */}
-        <aside className="flex flex-col gap-3 p-3 lg:col-span-3 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto studio-scrollbar">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[11px] font-medium tracking-wide text-muted">Scenes</h2>
+      <div className="flex flex-1 flex-col lg:flex-row">
+        {/*
+          ── the scene rail ──
+          Full-bleed rows on a single hairline grid, not a stack of cards. A
+          card inside a panel inside a column reads as three nested boxes; the
+          rail is one column of records with the open one marked at its edge.
+        */}
+        <aside className="flex w-full shrink-0 flex-col border-b border-line lg:max-h-[calc(100vh-6.75rem)] lg:w-[268px] lg:border-b-0 lg:border-r">
+          <div className="flex h-[38px] shrink-0 items-center justify-between border-b border-line px-4">
+            <span className="text-[13px] text-muted">Scenes</span>
             <button
               type="button"
               onClick={addScene}
-              className="flex items-center gap-1 text-[10px] font-medium text-muted transition-colors hover:text-ink"
+              className="text-[13px] text-muted transition-colors hover:text-ink"
             >
-              <Plus className="size-3" aria-hidden />
               Add
             </button>
           </div>
 
-          <ul className="space-y-1.5">
-            {project.scenes.map((scene, index) => (
-              <li key={index}>
-                <div
-                  className={cn(
-                    "group rounded-lg border p-2.5 transition-colors",
-                    activeScene === index
-                      ? "border-line-strong bg-surface-hover"
-                      : "border-line bg-surface hover:bg-surface-raised",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => openScene(index)}
-                    className="block w-full text-left"
+          <ul className="min-h-0 flex-1 overflow-y-auto studio-scrollbar">
+            {project.scenes.map((scene, index) => {
+              const open = activeScene === index;
+              return (
+                <li key={index}>
+                  <div
+                    className={cn(
+                      "group relative border-b border-line px-4 py-3.5 transition-colors",
+                      open
+                        ? "bg-[rgba(242,242,240,0.03)] shadow-[inset_2px_0_0_var(--text)]"
+                        : "hover:bg-surface",
+                    )}
                   >
-                    <span className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-faint">
-                        {String(index + 1).padStart(2, "0")}
+                    <button type="button" onClick={() => openScene(index)} className="block w-full text-left">
+                      <span className="flex items-center justify-between font-mono text-[11.5px]">
+                        <span className={open ? "text-muted" : "text-dim"}>
+                          {String(index + 1).padStart(2, "0")} · {sceneKind(scene, project.videoStyle)}
+                        </span>
+                        <span className={open ? "text-muted" : "text-dim"}>
+                          {sceneSeconds(scene).toFixed(1)}s
+                        </span>
                       </span>
-                      <span className="font-mono text-[10px] text-faint">
-                        {scene.audio?.duration ? `${scene.audio.duration.toFixed(1)}s` : "—"}
+                      <span
+                        className={cn(
+                          "mt-1.5 block truncate text-[13.5px] font-medium",
+                          open ? "text-ink" : "text-[#c9c9c4]",
+                        )}
+                      >
+                        {scene.heading || `Scene ${index + 1}`}
                       </span>
-                    </span>
-                    <span className="mt-1 block truncate text-[12px] font-medium text-ink">
-                      {scene.heading || `Scene ${index + 1}`}
-                    </span>
-                    <span className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-faint">
-                      {scene.narration || "No narration"}
-                    </span>
-                  </button>
+                      <span
+                        className={cn(
+                          "mt-1 line-clamp-2 block text-[12px] leading-[1.5]",
+                          open ? "text-dim" : "text-faint",
+                        )}
+                      >
+                        {scene.narration || "No narration"}
+                      </span>
+                    </button>
 
-                  <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                    <RailButton label="Move up" onClick={() => moveScene(index, -1)} disabled={index === 0}>
-                      ↑
-                    </RailButton>
-                    <RailButton
-                      label="Move down"
-                      onClick={() => moveScene(index, 1)}
-                      disabled={index === project.scenes.length - 1}
-                    >
-                      ↓
-                    </RailButton>
-                    <RailButton
-                      label="Delete scene"
-                      onClick={() => removeScene(index)}
-                      disabled={project.scenes.length <= 1}
-                      danger
-                    >
-                      <Trash2 className="size-3" aria-hidden />
-                    </RailButton>
+                    <div className="mt-2.5 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <RailButton label="Move up" onClick={() => moveScene(index, -1)} disabled={index === 0}>
+                        ↑
+                      </RailButton>
+                      <RailButton
+                        label="Move down"
+                        onClick={() => moveScene(index, 1)}
+                        disabled={index === project.scenes.length - 1}
+                      >
+                        ↓
+                      </RailButton>
+                      <RailButton
+                        label="Delete scene"
+                        onClick={() => removeScene(index)}
+                        disabled={project.scenes.length <= 1}
+                        danger
+                      >
+                        <Trash2 className="size-3" aria-hidden />
+                      </RailButton>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
 
           <button
             type="button"
             onClick={() => setShowSettings((value) => !value)}
-            className="mt-1 flex items-center justify-between rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-[11px] font-medium text-muted transition-colors hover:text-ink"
+            className="flex h-[42px] shrink-0 items-center justify-between border-t border-line px-4 text-[13px] text-muted transition-colors hover:text-ink"
           >
             Video settings
-            <ChevronDown className={cn("size-3.5 transition-transform", showSettings && "rotate-180")} aria-hidden />
+            <span className="font-mono text-[11px]">{showSettings ? "−" : "+"}</span>
           </button>
 
           {showSettings ? (
-            <div className="space-y-3 rounded-lg border border-line bg-surface p-2.5">
+            <div className="max-h-[42vh] shrink-0 space-y-3 overflow-y-auto border-t border-line bg-bg-soft p-4 studio-scrollbar">
               <LabelledInput
                 label="Title"
                 value={project.title}
@@ -472,27 +483,56 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
         </aside>
 
         {/* ── preview ── */}
-        <main className="flex flex-col gap-3 bg-bg-soft p-4 lg:col-span-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[11px] font-medium tracking-wide text-muted">Preview</h2>
+        <main className="flex min-w-0 flex-1 flex-col bg-bg-soft px-6 pb-5 pt-4">
+          <div className="flex items-baseline justify-between pb-3">
+            <span className="text-[13px] text-muted">
+              Preview — scene {String(activeScene + 1).padStart(2, "0")}
+            </span>
             {preview !== project ? (
-              <span className="text-[10px] text-faint">updating…</span>
-            ) : null}
+              <AsciiInline label="re-planning" variant="track" />
+            ) : (
+              <span className="text-[12.5px] text-faint">1920 × 1080 · 24 fps</span>
+            )}
           </div>
+
           <div className="flex flex-1 items-start justify-center">
             <div className="w-full max-w-[880px]">
-              <WhiteboardPlayer
-                project={preview}
-                seekRequest={seekRequest}
-                onSceneChange={followPlayback}
-              />
+              {/*
+                A re-plan swaps the whole project under the canvas, which shows
+                as a frame drawn from half-old, half-new state. Blur it and put
+                the shimmer over it rather than showing a frame that lies.
+              */}
+              <BlurredWhileBusy
+                busy={preview !== project}
+                blur={14}
+                overlay={
+                  <AsciiVeil
+                    title="Re-planning the video"
+                    detail="Applying your edits to the timeline"
+                  />
+                }
+              >
+                <WhiteboardPlayer
+                  project={preview}
+                  seekRequest={seekRequest}
+                  onSceneChange={followPlayback}
+                />
+              </BlurredWhileBusy>
             </div>
           </div>
+
+          <Timeline
+            scenes={project.scenes}
+            activeScene={activeScene}
+            videoStyle={project.videoStyle}
+            durations={project.scenes.map(sceneSeconds)}
+            onSelect={openScene}
+          />
         </main>
 
         {/* ── inspector ── */}
-        <aside className="flex flex-col p-3 lg:col-span-3 lg:max-h-[calc(100vh-7.5rem)]">
-          <div className="mb-3 flex rounded-lg border border-line bg-surface-raised p-0.5">
+        <aside className="flex w-full shrink-0 flex-col border-t border-line lg:max-h-[calc(100vh-6.75rem)] lg:w-[340px] lg:border-l lg:border-t-0">
+          <div className="flex h-[38px] shrink-0 border-b border-line">
             {(
               [
                 { value: "ask" as const, label: "Ask" },
@@ -505,8 +545,8 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
                 type="button"
                 onClick={() => setTab(option.value)}
                 className={cn(
-                  "flex-1 rounded-md py-1.5 text-center text-[11px] font-medium transition-colors",
-                  tab === option.value ? "bg-surface-hover text-ink" : "text-muted hover:text-ink",
+                  "flex-1 text-center text-[13px] transition-colors",
+                  tab === option.value ? "border-b border-ink text-ink" : "text-dim hover:text-ink",
                 )}
               >
                 {option.label}
@@ -514,7 +554,7 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
             ))}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto studio-scrollbar">
+          <div className="min-h-0 flex-1 overflow-y-auto studio-scrollbar p-4">
             {tab === "ask" ? (
               <AskPanel
                 sceneNumber={activeScene + 1}
@@ -553,6 +593,94 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
   );
 }
 
+/* -------------------------------- timeline -------------------------------- */
+
+/** What a scene is made of, for the mono meta line. */
+function sceneKind(scene: SceneAsset, videoStyle?: string) {
+  if (videoStyle === "hyperframes") return "Frame";
+  if (scene.image) return "Image";
+  if (scene.scene) return "Whiteboard";
+  return "Draft";
+}
+
+/**
+ * The scene strip.
+ *
+ * Widths are the real durations, so the shape of the video is visible at a
+ * glance — a 21-second closing block next to a 14-second one is the kind of
+ * imbalance the rail's tidy equal rows hide completely.
+ */
+function Timeline({
+  scenes,
+  durations,
+  activeScene,
+  videoStyle,
+  onSelect,
+}: {
+  scenes: SceneAsset[];
+  durations: number[];
+  activeScene: number;
+  videoStyle?: string;
+  onSelect: (index: number) => void;
+}) {
+  const total = durations.reduce((sum, value) => sum + value, 0) || 1;
+  const ticks = Math.max(2, Math.min(8, Math.ceil(total / 10)));
+
+  return (
+    <div className="shrink-0 border-t border-line pt-3">
+      <div className="flex justify-between pb-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[#4e4e4a]">
+        {Array.from({ length: ticks + 1 }, (_, index) => {
+          const seconds = (total / ticks) * index;
+          return (
+            <span key={index}>
+              {Math.floor(seconds / 60)}:{String(Math.round(seconds % 60)).padStart(2, "0")}
+            </span>
+          );
+        })}
+      </div>
+
+      <div className="flex h-[44px] gap-0.5">
+        {scenes.map((scene, index) => {
+          const open = activeScene === index;
+          return (
+            <button
+              key={index}
+              type="button"
+              onClick={() => onSelect(index)}
+              style={{ width: `${(durations[index] / total) * 100}%` }}
+              title={scene.heading || `Scene ${index + 1}`}
+              className={cn(
+                "min-w-0 overflow-hidden px-2.5 py-2 text-left transition-colors",
+                open
+                  ? "border-t-2 border-ink bg-[rgba(242,242,240,0.13)]"
+                  : "border-t-2 border-[rgba(242,242,240,0.2)] bg-[rgba(242,242,240,0.07)] hover:bg-[rgba(242,242,240,0.1)]",
+              )}
+            >
+              <span
+                className={cn(
+                  "block truncate font-mono text-[9.5px]",
+                  open ? "text-[#c9c9c4]" : "text-muted",
+                )}
+              >
+                {String(index + 1).padStart(2, "0")} {sceneKind(scene, videoStyle)}
+              </span>
+              <span
+                className={cn("mt-0.5 block font-mono text-[9.5px]", open ? "text-dim" : "text-faint")}
+              >
+                {durations[index].toFixed(1)}s
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-0.5 bg-[rgba(242,242,240,0.05)] px-2.5 py-1 text-[11px] text-faint">
+        Narration · word-synced
+      </div>
+    </div>
+  );
+}
+
 function RailButton({
   label,
   onClick,
@@ -574,7 +702,7 @@ function RailButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "grid size-6 place-items-center rounded-md border border-line bg-surface-raised text-[10px] text-muted",
+        "grid size-6 place-items-center border border-line bg-surface-raised text-[10px] text-muted",
         "transition-colors hover:border-line-strong hover:text-ink disabled:pointer-events-none disabled:opacity-30",
         danger && "hover:text-danger",
       )}

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Permanent_Marker } from "next/font/google";
-import { StudioProvider } from "@/lib/studio/use-studio";
 import { TopBar } from "@/components/site/top-bar";
+import { StudioProvider } from "@/lib/studio/use-studio";
 import "../globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -11,15 +11,15 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const marker = Permanent_Marker({ variable: "--font-hand", subsets: ["latin"], weight: "400" });
 
 export const metadata: Metadata = {
-  title: "Chalkline — turn one idea into a whiteboard video",
+  title: "Motionhouse — create, edit and enhance video",
   description:
-    "Describe an idea and get a narrated whiteboard explainer: a written script, hand-drawn sketches, and a natural voice, assembled into a video you can export.",
-  applicationName: "Chalkline",
+    "Generate a video from an idea, edit footage you already have, and add interactive visual content through Hyperframes.",
+  applicationName: "Motionhouse",
   robots: { index: false },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#08090b",
+  themeColor: "#0a0a0b",
   width: "device-width",
   initialScale: 1,
 };
@@ -30,16 +30,16 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${marker.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col bg-bg">
+      {/*
+        The standing footer that used to sit here has moved into the landing
+        page's own SiteFooter. Keeping both would put two footers under the
+        home page, and the studio routes are full-height surfaces that should
+        not have anything below them at all.
+      */}
+      <body className="flex min-h-full flex-col bg-bg text-ink">
         <StudioProvider>
           <TopBar />
           <main className="flex-1">{children}</main>
-          <footer className="border-t border-line px-5 py-6">
-            <p className="mx-auto max-w-6xl text-[11px] leading-relaxed text-faint">
-              Text by Omega C · Images by Puter with a Pollinations fallback · Voice by Cartesia.
-              Generations are kept in this browser only.
-            </p>
-          </footer>
         </StudioProvider>
       </body>
     </html>

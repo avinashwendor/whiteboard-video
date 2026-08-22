@@ -1,122 +1,134 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
-import { CapabilityCards } from "@/components/studio/capability-cards";
-import { Composer } from "@/components/studio/composer";
-import { Examples } from "@/components/studio/examples";
-import { ResultPanel } from "@/components/studio/result-panel";
-import { MODE_CONFIG } from "@/components/studio/mode-config";
-import { useStudio } from "@/lib/studio/use-studio";
+import { EntryHub } from "@/components/studio/entry-hub";
+import { SiteFooter } from "@/components/site/site-footer";
+
+const Dither = dynamic(() => import("@/components/ui/dither"), {
+  ssr: false,
+});
 
 export default function StudioPage() {
-  const { current, history, openGeneration } = useStudio();
   const router = useRouter();
-  const recent = history.filter((entry) => entry.id !== current?.id).slice(0, 4);
 
   /**
-   * A finished video is not a result card, it is a project -- so it opens in
-   * the editor.
+   * The hero CTA shows the three modes before it commits to one.
    *
-   * The trigger is the *transition* into "done", never the state itself: a
-   * finished generation stays current for the rest of the session, so testing
-   * the state would fire again every time someone came back here from the
-   * editor and bounce them out of the composer. Only a run this page actually
-   * watched finish gets to navigate.
+   * Jumping straight to /new hides the fact that starting from an idea is a
+   * choice among three, so the page scrolls the hub to the centre of the
+   * viewport first, holds it long enough to register, then follows the link.
+   * It stays a real anchor: middle-click, ⌘-click and keyboard activation all
+   * still open /new directly, and the scroll only runs on a plain click.
    */
-  const watching = useRef<string | null>(null);
-  useEffect(() => {
-    if (!current || current.mode !== "create") return;
-    if (current.status === "running") {
-      watching.current = current.id;
-      return;
-    }
-    if (current.status === "done" && current.project && watching.current === current.id) {
-      watching.current = null;
-      router.push(`/editor/${current.id}`);
-    }
-  }, [current, router]);
+  const handleStartCreating = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+
+    const hub = document.getElementById("production-entry-hub");
+    if (!hub) return;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    event.preventDefault();
+    hub.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Long enough for the section to land and be seen, short enough that it
+    // does not feel like the click was ignored.
+    window.setTimeout(() => router.push("/new"), 900);
+  };
 
   return (
-    <div className="relative min-h-screen">
-      <div className="grid-backdrop pointer-events-none absolute inset-x-0 top-0 h-[420px]" aria-hidden />
+    <div className="relative w-full overflow-hidden bg-bg">
+      {/* ----------------- 01 HERO: DITHER BACKGROUND (85–94vh) ----------------- */}
+      <section
+        aria-label="Motionhouse introduction"
+        className="relative flex min-h-[85vh] w-full flex-col items-center justify-center overflow-hidden px-6 pt-16 pb-12 sm:min-h-[88vh] sm:pt-20 lg:min-h-[92vh]"
+      >
+        {/* Full-bleed living Dither background with smooth fade-in */}
+        <div className="animate-bg-fade absolute inset-0 z-0 h-full w-full pointer-events-none select-none" aria-hidden>
+          <Dither
+            waveColor={[0.5, 0.5, 0.5]}
+            disableAnimation={false}
+            enableMouseInteraction={false}
+            mouseRadius={0.3}
+            colorNum={3.7}
+            waveAmplitude={0.25}
+            waveFrequency={3.2}
+            waveSpeed={0.06}
+          />
+        </div>
 
-      <div className="relative mx-auto max-w-3xl px-4 pb-24 pt-12 sm:px-6 sm:pt-16">
-        <section className="mb-8 text-center sm:mb-10">
-            <h1 className="text-balance text-[34px] font-semibold leading-[1.08] tracking-[-0.03em] sm:text-[46px]">
-              Create anything with AI.
-            </h1>
-            <p className="mx-auto mt-3.5 max-w-lg text-pretty text-[15px] leading-relaxed text-muted sm:text-base">
-              Turn one idea into words, visuals and voice — assembled into a whiteboard video you can
-              watch and export.
+        {/*
+          The dither runs bright in patches, which leaves the graphite subcopy
+          unreadable wherever a light band lands under it. A radial scrim gives
+          the copy its own ground without flattening the field around it.
+        */}
+        <div className="hero-scrim pointer-events-none absolute inset-0 z-[1]" aria-hidden />
+        <div className="hero-vignette pointer-events-none absolute inset-0 z-[1]" aria-hidden />
+
+        {/* Hero Editorial Content with Staggered Entrance Animations */}
+        <div className="relative z-10 mx-auto flex w-full max-w-[880px] flex-col items-center px-4 text-center">
+          <p className="animate-slide-up-1 font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[#b4b4ae]">
+            MOTIONHOUSE
+          </p>
+
+          <h1 className="animate-slide-up-2 mt-5 text-balance text-[52px] font-medium leading-[0.92] tracking-[-0.04em] text-ink sm:text-[76px] lg:text-[96px]">
+            IDEAS INTO MOTION.
+          </h1>
+
+          <p className="animate-slide-up-3 mt-5 max-w-[520px] text-pretty text-[16px] leading-relaxed text-[#c9c9c4] sm:text-[18px]">
+            Turn an idea into a visual story.
+          </p>
+
+          <div className="animate-slide-up-4 mt-9">
+            <Link
+              href="/new"
+              onClick={handleStartCreating}
+              className="group relative flex items-center gap-2 pb-1.5 text-[15px] font-medium text-ink transition-colors hover:text-white sm:text-[16px]"
+            >
+              <span className="hover-underline">
+                Start creating
+              </span>
+              <span className="text-[18px] leading-none transition-transform duration-300 group-hover:translate-x-1" aria-hidden>
+                →
+              </span>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Subtle Studio Divider */}
+      <div className="studio-hairline w-full" aria-hidden />
+
+      {/* ----------------- 02 PRODUCTION MODES & STUDIO COMPOSER ----------------- */}
+      <div className="relative mx-auto flex max-w-[1160px] flex-col px-5 pb-24 pt-16 sm:px-8 sm:pt-20 lg:pb-32">
+        <section className="w-full">
+          {/* Editorial Section Introduction */}
+          <div className="flex flex-col justify-between gap-4 border-b border-line pb-8 sm:flex-row sm:items-end">
+            <div>
+              <p className="text-[13px] font-medium text-muted">
+                Production modes
+              </p>
+              <h2 className="mt-2 text-balance text-[30px] font-medium leading-[1.08] tracking-[-0.03em] text-ink sm:text-[38px]">
+                Create, edit and enhance video.
+              </h2>
+            </div>
+            <p className="text-[13.5px] text-muted sm:text-right">
+              A creative production studio
             </p>
+          </div>
+
+          {/* Asymmetric 3-part production entry point hub */}
+          <div id="production-entry-hub" className="mt-8 sm:mt-10">
+            <EntryHub />
+          </div>
+
         </section>
 
-        <Composer />
-
-        {current ? (
-          <div className="mt-6">
-            <ResultPanel generation={current} />
-          </div>
-        ) : null}
-
-        <div className="mt-12 space-y-10">
-          {current ? null : <Examples />}
-
-          {recent.length ? (
-            <section aria-labelledby="recent-heading" className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 id="recent-heading" className="text-[12px] font-medium tracking-wide text-faint">
-                  Recent
-                </h2>
-                <Link
-                  href="/history"
-                  className="flex items-center gap-1 rounded-md text-[12px] text-muted transition-colors hover:text-ink"
-                >
-                  All generations
-                  <ArrowRight className="size-3" aria-hidden />
-                </Link>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {recent.map((generation) => {
-                  const config = MODE_CONFIG[generation.mode];
-                  const thumbnail = generation.image?.url ?? generation.project?.cover?.url;
-                  return (
-                    <button
-                      key={generation.id}
-                      type="button"
-                      onClick={() => {
-                        openGeneration(generation);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      className="flex items-center gap-3 rounded-card border border-line bg-surface p-2.5 text-left transition-colors hover:border-line-strong hover:bg-surface-raised"
-                    >
-                      <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-surface-raised">
-                        {thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- object URLs from IndexedDB
-                          <img src={thumbnail} alt="" className="size-full object-cover" />
-                        ) : (
-                          <config.icon className="size-4" style={{ color: config.accent }} aria-hidden />
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] text-ink">
-                          {generation.project?.title ?? generation.prompt}
-                        </span>
-                        <span className="block text-[11px] text-faint">{config.label}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
-
-          <CapabilityCards />
-        </div>
       </div>
+
+      <SiteFooter />
     </div>
   );
 }
