@@ -91,6 +91,8 @@ export default function OverlayStage({
     y: [],
   });
 
+  const freezeCache = useRef(new Map<number, HTMLCanvasElement>());
+
   // Live values for the animation frame, which must not re-subscribe per frame.
   const live = useRef({ elements, subtitles, transitions, timeline, words, duration, manualCuts });
   useEffect(() => {
@@ -169,20 +171,44 @@ export default function OverlayStage({
       );
 
       const active = transitionAt(t, state.timeline, state.transitions);
-      // The preview has no captured freeze — a held frame would mean seeking a
-      // playing element. Push transitions therefore preview as a straight cut
-      // plus the incoming animation, and the exporter fills in the held frame.
+      let freeze: HTMLCanvasElement | null = null;
+      
+      if (video && video.videoWidth && video.videoHeight) {
+        // Buffer freeze frames for upcoming push transitions without stalling playback.
+        for (const spec of state.transitions) {
+          const boundary = state.timeline.boundaries.find((b) => b.index === spec.index);
+          if (!boundary) continue;
+
+          // Capture the frame when we are playing through the last 0.15s of the outgoing clip
+          if (t >= boundary.outTime - 0.15 && t < boundary.outTime) {
+            let canvas = freezeCache.current.get(boundary.index);
+            if (!canvas) {
+              canvas = document.createElement("canvas");
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              freezeCache.current.set(boundary.index, canvas);
+            }
+            const ctxCanvas = canvas.getContext("2d", { alpha: false });
+            if (ctxCanvas) {
+              ctxCanvas.drawImage(video, 0, 0, canvas.width, canvas.height);
+            }
+          }
+        }
+
+        if (active && active.family === "push") {
+          freeze = freezeCache.current.get(active.boundary.index) ?? null;
+        }
+      }
+
       // A throw here used to end the preview: the exception escaped the frame
       // callback, no further frame was ever scheduled, and the canvas simply
-      // froze on whatever it had last painted — with the video apparently
-      // playing underneath because the <video> element carried on. Canvas2D
-      // throws on any non-finite geometry, which one malformed element is
-      // enough to produce, so the loop keeps going and reports instead.
+      // froze on whatever it had last painted. Canvas2D throws on any non-finite geometry,
+      // so the loop keeps going and reports instead.
       try {
         paintFrame(
           ctx,
           size,
-          { live: video && video.videoWidth ? video : null, freeze: null },
+          { live: video && video.videoWidth ? video : null, freeze },
           active,
           {
             elements: state.elements,

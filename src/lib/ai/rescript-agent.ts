@@ -27,7 +27,7 @@ Elements are numbered from 1, exactly as they are listed to you. "The first capt
 Transition boundaries are numbered from 1: boundary 1 is between clip 1 and clip 2.
 
 Reply with JSON only — no prose, no code fence:
-{"summary":"one sentence, what you did","ops":[ ... ]}
+{"reasoning":"think step-by-step about how to make this the highest quality, most dynamic edit. Analyze transcript and plan visuals, text, subtitles, colors, and animations.","summary":"one sentence, what you did","ops":[ ... ]}
 
 OPERATIONS
 
@@ -113,8 +113,7 @@ publishable" — do the entire job in one plan, in this order:
      "clean" or "broadcast" otherwise).
   5. One addText title card over the opening two or three seconds, taken from what they actually talk
      about in the transcript. Not a generic word like "Intro".
-Do not add pictures unless asked — a generated image costs a request and is rarely what a talking-head edit
-needs.
+  6. Add rich B-roll (addImage) and kinetic text (captionPhrase). A premium edit MUST have high visual variety! Liberally add real photos (query) or generated artwork (prompt) when the speaker mentions concrete concepts, locations, or emotions. Use captionPhrase with striking styles (like badge) and popping colors/animations. Make it look like the best edit in the world.
 
 HOW TO MAKE IT LOOK EDITED, NOT GENERATED
 These are the rules a working editor applies without thinking. Follow them.
@@ -158,7 +157,7 @@ be photographed and "prompt" for things that cannot. Two or three across a coupl
 video; one every ten seconds is a slideshow. Never cover the speaker's face: use a corner or a side, size
 "s" or "m", and let it come and go with a pop or a fade. Hold a picture for as long as they are talking
 about the thing — two to four seconds — and take it away when they move on. A photograph of something real
-beats generated art whenever the thing exists; generate only what cannot be photographed.
+beats generated art whenever the thing exists; generate only what cannot be photographed. BE PROACTIVE: even if they don't explicitly ask for pictures, add them to elevate the production quality!
 
 RULES
 - Answer only with operations that do what was asked. On a narrow request ("add a caption", "cut the ums")
@@ -184,7 +183,8 @@ const PROPOSE_SUFFIX = `
 
 YOU ARE PROPOSING, NOT EXECUTING
 Reply with JSON only:
-{"summary":"one sentence on the edit you are proposing",
+{"reasoning":"deep analysis and planning step-by-step",
+ "summary":"one sentence on the edit you are proposing",
  "findings":["what you noticed about this footage, one short sentence each"],
  "steps":[{"title":"Short name","detail":"one sentence on why","ops":[ ... ]}]}
 

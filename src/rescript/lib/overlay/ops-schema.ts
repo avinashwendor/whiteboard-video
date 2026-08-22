@@ -345,6 +345,8 @@ export const agentStepSchema = z.object({
 });
 
 export const agentPlanSchema = z.object({
+  /** Deep reasoning step for the AI to analyze and plan out the highly-produced edit before choosing operations. */
+  reasoning: z.string().optional(),
   summary: z.string().max(400).default(""),
   /** What the model noticed in the footage. Proposal mode only. */
   findings: z.array(z.string().max(240)).max(10).default([]),
