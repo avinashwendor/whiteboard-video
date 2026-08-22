@@ -85,10 +85,52 @@ function placement(
 }
 
 /**
+ * Fill the frame behind a picture that does not cover it.
+ *
+ * Only meaningful under `contain`. Black is honest; a blurred blow-up of the
+ * same frame is what every social tool does, and it is the difference between a
+ * Short that looks made and one that looks letterboxed.
+ *
+ * Drawn once per frame, by the caller, rather than by each `drawSource`. During
+ * a push transition two sources are drawn over each other, and a backdrop
+ * painted by the second of them would cover the first — the outgoing clip would
+ * slide across on an opaque blur instead of across the incoming shot.
+ */
+function drawBackdrop(
+  ctx: CanvasRenderingContext2D,
+  src: CanvasImageSource,
+  size: FrameSize,
+  frame: FrameSpec
+) {
+  if (frame.fit !== "contain") return;
+  const intrinsic = sourceSize(src);
+  if (!intrinsic) return;
+
+  const spot = placement(intrinsic, size, frame, "contain", 1);
+  if (spot.w >= size.width - 1 && spot.h >= size.height - 1) return;
+
+  if (frame.background === "blur") {
+    const back = placement(intrinsic, size, frame, "cover", 1);
+    ctx.save();
+    // Blur radius follows the frame, not the source, so a 4K and a 720p
+    // version of the same edit look the same.
+    ctx.filter = `blur(${Math.max(8, size.height * 0.045)}px)`;
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(src, back.x, back.y, back.w, back.h);
+    ctx.restore();
+    ctx.filter = "none";
+  } else if (frame.background === "white") {
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, size.width, size.height);
+  }
+  // "black" needs nothing: the frame was already cleared to black.
+}
+
+/**
  * Draw a source into `size` under the project's frame.
  *
  * `cover` crops to fill and is what makes a 16:9 recording usable as a Short;
- * `contain` fits the whole picture and fills the rest with the chosen backdrop.
+ * `contain` fits the whole picture in, over whatever `drawBackdrop` left.
  * `scale` zooms about the centre for transitions; `dx`/`dy` shift in output
  * pixels for the push family.
  */
@@ -103,33 +145,7 @@ function drawSource(
 ) {
   const intrinsic = sourceSize(src);
   if (!intrinsic) return;
-
   const spot = placement(intrinsic, size, frame, frame.fit, scale);
-
-  // A contained picture leaves the frame showing through. Black is honest;
-  // a blurred blow-up of the same frame is what every social tool does, and it
-  // is the difference between a Short that looks made and one that looks
-  // letterboxed.
-  const gapX = spot.w < size.width - 1;
-  const gapY = spot.h < size.height - 1;
-  if (frame.fit === "contain" && (gapX || gapY)) {
-    if (frame.background === "blur") {
-      const back = placement(intrinsic, size, frame, "cover", scale);
-      ctx.save();
-      // Blur radius follows the frame, not the source, so a 4K and a 720p
-      // version of the same edit look the same.
-      ctx.filter = `blur(${Math.max(8, size.height * 0.045)}px)`;
-      ctx.globalAlpha = 0.85;
-      ctx.drawImage(src, back.x + dx * 0.35, back.y + dy * 0.35, back.w, back.h);
-      ctx.restore();
-      ctx.filter = "none";
-    } else if (frame.background === "white") {
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, size.width, size.height);
-    }
-    // "black" needs nothing: the frame was already cleared to black.
-  }
-
   ctx.drawImage(src, spot.x + dx, spot.y + dy, spot.w, spot.h);
 }
 
@@ -157,6 +173,13 @@ function paintVideoLayer(
   ctx.fillRect(0, 0, size.width, size.height);
 
   const { live, freeze } = sources;
+
+  // One backdrop for the whole frame, from whichever source is real. The freeze
+  // is the fallback because a seek can leave the <video> momentarily without a
+  // picture, and a backdrop that blinks is worse than one drawn from the held
+  // frame beside it.
+  const backdropFrom = live ?? freeze;
+  if (backdropFrom) drawBackdrop(ctx, backdropFrom, size, frame);
 
   if (!active) {
     if (live) drawSource(ctx, live, size, frame);

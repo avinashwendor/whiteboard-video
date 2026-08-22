@@ -66,7 +66,8 @@ const AUTO_EDIT =
   "subtitles, and add a title card at the start based on what it is about.";
 
 const SUGGESTIONS = [
-  "Make this a 30 second short — keep only the best parts",
+  "Make this a 30 second vertical short — keep only the best parts",
+  "Reframe it to 9:16 and keep me centred",
   "Cut every um, uh and long pause",
   "Burn in subtitles, big and centred like a Short",
   "Put a dissolve on every cut and a title card at the start",
@@ -543,8 +544,9 @@ export default function AiPanel() {
         {log.length === 0 ? (
           <div className="space-y-3 pt-2">
             <p className="px-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-              Describe the change. It reads the transcript, the clips and what is
-              already on screen, then makes the edit.
+              Describe the change. It reads the transcript, the clips, the frame
+              and what is already on screen — checking anything it is unsure of —
+              then makes the edit.
             </p>
 
             <button
