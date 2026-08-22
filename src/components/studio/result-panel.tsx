@@ -1,18 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowRight, ImageOff, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Skeleton, TextSkeleton } from "@/components/ui/skeleton";
-import { Markdown } from "@/lib/utils/markdown";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
 import type { Generation } from "@/lib/studio/types";
-import { AudioPlayer } from "./audio-player";
 import { MODE_CONFIG } from "./mode-config";
+import { ScriptResult, StillResult, StoryboardResult, VoiceoverResult } from "./results";
 import { ResultActions } from "./result-actions";
 
 export function ResultPanel({ generation }: { generation: Generation }) {
@@ -22,7 +20,7 @@ export function ResultPanel({ generation }: { generation: Generation }) {
     <Card className="animate-rise overflow-hidden">
       <CardHeader>
         <span
-          className="grid size-7 shrink-0 place-items-center rounded-lg border border-line"
+          className="grid size-7 shrink-0 place-items-center rounded-none border border-line"
           style={{ color: config.accent }}
         >
           <config.icon className="size-3.5" aria-hidden />
@@ -66,109 +64,26 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function ResultBody({ generation }: { generation: Generation }) {
-  const running = generation.status === "running";
-
   switch (generation.mode) {
     case "write":
-      return generation.text ? (
-        <div className="prose-generated">
-          <Markdown text={generation.text} />
-          {running ? <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-ink align-middle" /> : null}
-        </div>
-      ) : (
-        <TextSkeleton lines={6} />
-      );
-
+      return <ScriptResult generation={generation} />;
     case "image":
-      return generation.image ? (
-        <ImageResult generation={generation} />
-      ) : (
-        <div className="space-y-3">
-          <Skeleton className="aspect-video w-full" />
-          <p className="flex items-center gap-2 text-[12px] text-faint">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            {generation.stage ?? "Generating"}
-          </p>
-        </div>
-      );
-
+      return <StillResult generation={generation} />;
+    case "storyboard":
+      return <StoryboardResult generation={generation} />;
     case "voice":
+      return <VoiceoverResult generation={generation} />;
+    case "create":
       return (
-        <div className="space-y-4">
-          {generation.text ? (
-            <div className="prose-generated text-muted">
-              <Markdown text={generation.text} />
-            </div>
-          ) : null}
-          {generation.audio ? (
-            <AudioPlayer key={generation.audio.url} src={generation.audio.url} />
-          ) : (
-            <Skeleton className="h-[58px] w-full" />
-          )}
+        <div className="p-4 sm:p-5">
+          <ProjectResult generation={generation} />
         </div>
       );
-
-    case "create":
-      return <ProjectResult generation={generation} />;
   }
-}
-
-function ImageResult({ generation }: { generation: Generation }) {
-  const [failed, setFailed] = useState(false);
-  const image = generation.image!;
-
-  if (failed) {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-line py-12 text-center">
-        <ImageOff className="size-5 text-faint" aria-hidden />
-        <p className="text-[13px] text-muted">This image is no longer available.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {image.fallbackFrom ? <FallbackNotice image={image} /> : null}
-      <div className="overflow-hidden rounded-card border border-line bg-surface-raised">
-        {/* eslint-disable-next-line @next/next/no-img-element -- blob and object URLs bypass the optimiser */}
-        <img
-          src={image.url}
-          alt={generation.prompt}
-          width={image.width}
-          height={image.height}
-          onError={() => setFailed(true)}
-          className="block w-full animate-fade"
-        />
-      </div>
-      {image.promptUsed && image.promptUsed !== generation.prompt ? (
-        <details className="group">
-          <summary className="cursor-pointer list-none text-[12px] text-faint transition-colors hover:text-muted">
-            <Sparkles className="mr-1.5 inline size-3" aria-hidden />
-            See the prompt that was actually used
-          </summary>
-          <p className="mt-2 rounded-card border border-line bg-surface-raised px-3 py-2.5 text-[12px] leading-relaxed text-muted">
-            {image.promptUsed}
-          </p>
-        </details>
-      ) : null}
-    </div>
-  );
-}
-
-function FallbackNotice({ image }: { image: NonNullable<Generation["image"]> }) {
-  return (
-    <p className="flex items-start gap-2 rounded-card border border-voice/25 bg-voice/8 px-3 py-2.5 text-[12px] leading-relaxed text-voice">
-      <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-      <span>
-        <strong className="font-medium">Puter couldn&apos;t run</strong> — {image.fallbackReason}
-        {" "}Generated with Pollinations ({image.model}) instead.
-      </span>
-    </p>
-  );
 }
 
 function ProjectResult({ generation }: { generation: Generation }) {
-  const project = generation.project;
+  const project = generation.project!;
 
   if (!project) {
     return (
@@ -187,9 +102,6 @@ function ProjectResult({ generation }: { generation: Generation }) {
     (scene) => scene.scene || scene.image || scene.audio,
   ).length;
 
-  // A finished video is handed to the editor as it lands. Coming back here
-  // afterwards, this card is the way in again -- the video itself lives on its
-  // own page now, not under the composer.
   if (done) {
     const runtime = project.scenes.reduce(
       (total, scene) => total + (scene.audio?.duration ?? Math.max(4.5, scene.narration.split(/\s+/).length / 2.5)),
@@ -199,7 +111,7 @@ function ProjectResult({ generation }: { generation: Generation }) {
     return (
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         {project.cover ? (
-          <span className="w-full shrink-0 overflow-hidden rounded-card border border-line sm:w-40">
+          <span className="w-full shrink-0 overflow-hidden rounded-none border border-line sm:w-40">
             {/* eslint-disable-next-line @next/next/no-img-element -- object URLs from IndexedDB */}
             <img src={project.cover.url} alt="" className="block w-full" />
           </span>
@@ -213,7 +125,7 @@ function ProjectResult({ generation }: { generation: Generation }) {
         </div>
         <Link
           href={`/editor/${generation.id}`}
-          className="flex shrink-0 items-center gap-1.5 rounded-card bg-ink px-3.5 py-2 text-[12px] font-medium text-[#0a0b0d] transition-colors hover:bg-white"
+          className="flex shrink-0 items-center gap-1.5 rounded-none bg-ink px-3.5 py-2 text-[12px] font-medium text-[#0a0b0d] transition-colors hover:bg-white"
         >
           Open in editor
           <ArrowRight className="size-3.5" aria-hidden />
@@ -238,7 +150,7 @@ function ProjectResult({ generation }: { generation: Generation }) {
           <div
             key={`${scene.heading}-${index}`}
             className={cn(
-              "rounded-card border border-line bg-surface-raised p-3 transition-opacity",
+              "rounded-none border border-line bg-surface-raised p-3 transition-opacity",
               scene.status === "pending" && "opacity-50",
             )}
           >
@@ -262,7 +174,7 @@ function ErrorState({ generation }: { generation: Generation }) {
   const { run, running } = useStudio();
 
   return (
-    <div className="flex flex-col items-start gap-3 rounded-card border border-danger/25 bg-danger/6 p-4">
+    <div className="flex flex-col items-start gap-3 rounded-none border border-danger/25 bg-danger/6 p-4">
       <p className="flex items-start gap-2 text-[13px] leading-relaxed text-danger">
         <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
         {generation.error?.message ?? "Something went wrong."}

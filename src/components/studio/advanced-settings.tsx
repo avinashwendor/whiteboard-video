@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Settings2 } from "lucide-react";
 import { Field, Select, Slider } from "@/components/ui/field";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
@@ -62,6 +61,21 @@ function languageLabel(code: string): string {
   return LANGUAGE_NAMES[code] ?? code.toUpperCase();
 }
 
+function settingsLabelForMode(mode: Mode): string {
+  switch (mode) {
+    case "create":
+      return "Production settings — voice, pace, aspect, length";
+    case "voice":
+      return "Production settings — voice, language, speed";
+    case "image":
+      return "Production settings — provider, model, style, size";
+    case "storyboard":
+      return "Production settings — frames, model, style, size";
+    case "write":
+      return "Production settings — text model";
+  }
+}
+
 export function AdvancedSettings({ mode }: { mode: Mode }) {
   const { settings, updateSettings, catalogues, capabilities } = useStudio();
   const [open, setOpen] = useState(false);
@@ -78,7 +92,10 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
   );
 
   const showText = mode !== "image";
-  const showImage = mode === "image" || (mode === "create" && (settings.sceneArt === "image" || settings.sceneArt === "hybrid"));
+  const showImage =
+    mode === "image" ||
+    mode === "storyboard" ||
+    (mode === "create" && (settings.sceneArt === "image" || settings.sceneArt === "hybrid"));
   const showVoice = mode === "voice" || mode === "create";
 
   return (
@@ -87,24 +104,22 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-[12px] font-medium text-muted transition-colors hover:text-ink sm:px-5"
+        className="flex h-11 w-full items-center justify-between px-6 text-[13px] text-muted transition-colors hover:text-ink sm:px-8"
       >
-        <Settings2 className="size-3.5" aria-hidden />
-        Advanced Settings & Indian TTS
-        <ChevronDown
-          className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")}
-          aria-hidden
-        />
+        <span>{settingsLabelForMode(mode)}</span>
+        <span className="select-none font-mono text-[13px] text-muted" aria-hidden>
+          {open ? "−" : "+"}
+        </span>
       </button>
 
       {open ? (
-        <div className="animate-fade space-y-4 border-t border-line px-4 py-4 sm:px-5">
+        <div className="animate-fade space-y-6 border-t border-line bg-surface/50 px-6 py-6 sm:px-8">
           {showVoice ? (
-            <div className="rounded-card border border-line bg-surface-raised/60 p-3">
-              <p className="mb-2 text-[11px] font-medium tracking-wide text-faint">
-                POPULAR INDIAN TTS VOICES (CARTESIA)
+            <div className="border-l border-line pl-3">
+              <p className="mb-2 text-[12px] font-medium text-muted">
+                Popular Indian TTS Voices (Cartesia)
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {INDIAN_VOICE_SHORTCUTS.map((preset) => {
                   const isSelected = settings.voiceId === preset.id;
                   return (
@@ -113,13 +128,13 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                       type="button"
                       onClick={() => updateSettings({ voiceId: preset.id, language: preset.lang })}
                       className={cn(
-                        "rounded-lg border px-2.5 py-1 text-[11px] transition-colors",
+                        "border-b py-0.5 text-[11.5px] transition-colors",
                         isSelected
-                          ? "border-voice bg-voice/15 text-voice font-medium"
-                          : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink",
+                          ? "border-ink font-medium text-ink"
+                          : "border-transparent text-muted hover:border-line-strong hover:text-ink",
                       )}
                     >
-                      {preset.name} · <span className="opacity-80">{preset.desc}</span>
+                      {preset.name} · <span className="text-faint">{preset.desc}</span>
                     </button>
                   );
                 })}
@@ -127,7 +142,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
             </div>
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {showText ? (
               <Field
                 label="Text model"
@@ -236,7 +251,6 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                       value={settings.language}
                       onChange={(event) => {
                         const language = event.target.value;
-                        // Voices are language-specific, so move to one that speaks it.
                         const match = catalogues.voices.find((voice) =>
                           [voice.language, ...(voice.languages ?? [])].includes(language),
                         );
@@ -338,6 +352,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                     )}
                   </Field>
                 ) : null}
+
                 <Field label={`Scenes count · ${settings.sceneCount}`}>
                   {(id) => (
                     <Slider
@@ -350,6 +365,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                     />
                   )}
                 </Field>
+
                 <Field label="Script tone">
                   {(id) => (
                     <Select
@@ -367,6 +383,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                     />
                   )}
                 </Field>
+
                 <Field label={`Voice lead-in delay · ${settings.voiceDelay.toFixed(1)}s`}>
                   {(id) => (
                     <Slider
@@ -379,6 +396,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                     />
                   )}
                 </Field>
+
                 <Field label={`Intro title card · ${settings.introDuration.toFixed(1)}s`}>
                   {(id) => (
                     <Slider

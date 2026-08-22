@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { CornerDownLeft, Loader2, Sparkles, Undo2 } from "lucide-react";
+import { CornerDownLeft, Sparkles, Undo2 } from "lucide-react";
+import { AsciiSpinner, GrainShimmer } from "@/components/ui/ascii-loader";
 import { cn } from "@/lib/utils/cn";
 
 /**
@@ -55,7 +56,7 @@ export function AskPanel({
 
   return (
     <div className="flex h-full flex-col gap-3 pb-6">
-      <div className="rounded-lg border border-line bg-surface-raised p-2.5">
+      <div className="border border-line bg-surface-raised p-2.5">
         <textarea
           rows={3}
           value={value}
@@ -76,9 +77,9 @@ export function AskPanel({
             type="button"
             onClick={submit}
             disabled={busy || !value.trim()}
-            className="flex items-center gap-1.5 rounded-md bg-ink px-2.5 py-1 text-[11px] font-medium text-[#0a0b0d] transition-colors hover:bg-white disabled:pointer-events-none disabled:opacity-45"
+            className="flex items-center gap-1.5 bg-ink px-2.5 py-1 text-[11px] font-medium text-[#0a0b0d] transition-colors hover:bg-white disabled:pointer-events-none disabled:opacity-45"
           >
-            {busy ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <CornerDownLeft className="size-3" aria-hidden />}
+            {busy ? <AsciiSpinner variant="braille" className="text-[11px]" /> : <CornerDownLeft className="size-3" aria-hidden />}
             Send
           </button>
         </div>
@@ -92,7 +93,7 @@ export function AskPanel({
               key={example}
               type="button"
               onClick={() => setValue(example)}
-              className="block w-full rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-left text-[11px] leading-relaxed text-muted transition-colors hover:border-line-strong hover:text-ink"
+              className="block w-full border border-line bg-surface-raised px-2.5 py-2 text-left text-[11px] leading-relaxed text-muted transition-colors hover:border-line-strong hover:text-ink"
             >
               {example}
             </button>
@@ -101,18 +102,30 @@ export function AskPanel({
       )}
 
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto studio-scrollbar">
+        {/*
+          The planner is reading the scene and has nothing to show yet. A
+          shimmer field says that honestly; a progress bar would be inventing
+          a completion figure nobody can compute.
+        */}
         {status ? (
-          <p className="flex items-center gap-2 rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-[11px] text-muted">
-            <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
-            {status}
-          </p>
+          <div className="border border-line bg-surface-raised p-2.5">
+            <p className="flex items-center gap-2 text-[11px] text-muted">
+              <AsciiSpinner variant="braille" className="text-[11px] text-create" />
+              {status}
+            </p>
+            <GrainShimmer
+              intensity={0.5}
+              sweep={2.4}
+              className="mt-2.5 h-[54px] w-full border border-line"
+            />
+          </div>
         ) : null}
 
         {activity.map((entry) => (
           <p
             key={entry.id}
             className={cn(
-              "flex items-start gap-1.5 rounded-lg px-2.5 py-2 text-[11px] leading-relaxed",
+              "flex items-start gap-1.5 px-2.5 py-2 text-[11px] leading-relaxed",
               entry.instruction
                 ? "border border-line-strong bg-surface-hover text-ink"
                 : entry.ok
@@ -134,7 +147,7 @@ export function AskPanel({
         type="button"
         onClick={onUndo}
         disabled={!canUndo || busy}
-        className="flex items-center justify-center gap-1.5 rounded-lg border border-line bg-surface-raised px-3 py-2 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+        className="flex items-center justify-center gap-1.5 border border-line bg-surface-raised px-3 py-2 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:pointer-events-none disabled:opacity-40"
       >
         <Undo2 className="size-3.5" aria-hidden />
         Undo last change
