@@ -48,5 +48,8 @@ export const config = {
     // Everything except Next internals and static assets.
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|avif|wasm|mp3|mp4|json)).*)",
     "/(api|trpc)(.*)",
+    // Clerk's auto-proxy path, so handshakes and its own endpoints reach the
+    // middleware even though the pattern above would otherwise skip them.
+    "/__clerk/:path*",
   ],
 };
