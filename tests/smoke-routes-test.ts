@@ -32,6 +32,10 @@ const ROUTES: Check[] = [
   { path: "/upload", expect: ["Start with footage", "Drop a video here"] },
   { path: "/history", expect: ["History"] },
   { path: "/signin", expect: ["waitlist"] },
+  // Redirect to the waitlist while Clerk is unconfigured; the real form once
+  // keys land. Either way it must not throw.
+  { path: "/sign-in" },
+  { path: "/sign-up" },
   { path: "/rescript", expect: ["<!DOCTYPE html>"] },
 ];
 

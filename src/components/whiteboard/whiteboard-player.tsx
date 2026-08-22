@@ -1037,20 +1037,79 @@ export function WhiteboardPlayer({
   const goFullscreen = () => {
     const node = stageRef.current;
     if (!node) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void node.requestFullscreen?.().catch(() => {});
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+
+    // Safari still wants the prefix, and an embedded frame without
+    // `allow="fullscreen"` rejects outright — which used to be swallowed, so
+    // the button simply did nothing and said nothing.
+    const request =
+      node.requestFullscreen?.bind(node) ??
+      (node as unknown as { webkitRequestFullscreen?: () => Promise<void> })
+        .webkitRequestFullscreen?.bind(node);
+
+    if (!request) {
+      setExportError("This browser won't allow fullscreen here.");
+      return;
+    }
+
+    void Promise.resolve(request()).catch(() => {
+      setExportError("Fullscreen was blocked — try the page outside an embedded frame.");
+    });
   };
 
   /**
    * Fullscreen used to take the canvas wrapper, which left every control
    * behind in the page — no pause, no scrubber, nothing but Escape. The stage
    * goes fullscreen now and carries its own overlay bar.
+   *
+   * Focus moves with it. The click that opened fullscreen leaves focus on a
+   * toolbar button that is now outside the fullscreen element, so space and
+   * the arrow keys went nowhere until you clicked the picture first.
    */
   useEffect(() => {
-    const sync = () => setImmersive(document.fullscreenElement === stageRef.current);
+    const sync = () => {
+      const on = document.fullscreenElement === stageRef.current;
+      setImmersive(on);
+      if (on) stageRef.current?.focus();
+    };
     document.addEventListener("fullscreenchange", sync);
     return () => document.removeEventListener("fullscreenchange", sync);
   }, []);
+
+  /**
+   * Controls that behave like a video player's.
+   *
+   * They were hover-only, so entering fullscreen showed a bare picture and
+   * nothing else until you happened to move the mouse — no way to know a
+   * transport existed. Now they are up on arrival and after any movement, and
+   * fade out once you have been still for a moment. The cursor goes with them.
+   */
+  const [barVisible, setBarVisible] = useState(true);
+  useEffect(() => {
+    if (!immersive) return;
+    setBarVisible(true);
+
+    let timer = 0;
+    const wake = () => {
+      setBarVisible(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setBarVisible(false), 2_600);
+    };
+
+    wake();
+    const node = stageRef.current;
+    node?.addEventListener("mousemove", wake);
+    node?.addEventListener("touchstart", wake);
+    return () => {
+      window.clearTimeout(timer);
+      node?.removeEventListener("mousemove", wake);
+      node?.removeEventListener("touchstart", wake);
+    };
+  }, [immersive]);
 
   const cycleSpeed = () => {
     const speeds = [1, 1.25, 1.5];
@@ -1070,6 +1129,7 @@ export function WhiteboardPlayer({
           // Fullscreen hands us the whole screen; centre the frame in it
           // rather than stretching a 16:9 board to fill a 16:10 laptop panel.
           immersive && "flex items-center justify-center rounded-none border-0 bg-black",
+          immersive && !barVisible && "cursor-none",
         )}
         tabIndex={0}
         role="application"
@@ -1092,7 +1152,12 @@ export function WhiteboardPlayer({
           one too many.
         */}
         {immersive && !exporting ? (
-          <div className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-4 bg-gradient-to-t from-black/85 to-transparent px-6 pb-5 pt-12 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <div
+            className={cn(
+              "absolute inset-x-0 bottom-0 z-20 flex items-center gap-4 bg-gradient-to-t from-black/85 to-transparent px-6 pb-5 pt-12 transition-opacity duration-300 focus-within:opacity-100",
+              barVisible ? "opacity-100" : "opacity-0",
+            )}
+          >
             <button
               type="button"
               onClick={toggle}

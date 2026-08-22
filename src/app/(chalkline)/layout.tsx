@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Permanent_Marker } from "next/font/google";
 import { TopBar } from "@/components/site/top-bar";
 import { StudioProvider } from "@/lib/studio/use-studio";
+import { AuthProvider } from "@/components/site/auth";
 import "../globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -37,10 +38,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         not have anything below them at all.
       */}
       <body className="flex min-h-full flex-col bg-bg text-ink">
-        <StudioProvider>
-          <TopBar />
-          <main className="flex-1">{children}</main>
-        </StudioProvider>
+        <AuthProvider>
+          <StudioProvider>
+            <TopBar />
+            <main className="flex-1">{children}</main>
+          </StudioProvider>
+        </AuthProvider>
       </body>
     </html>
   );

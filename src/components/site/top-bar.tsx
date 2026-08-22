@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
+import { AuthNav } from "./auth";
 
 export function TopBar() {
   const pathname = usePathname();
@@ -66,17 +67,7 @@ export function TopBar() {
             Edit video
           </a>
 
-          <Link
-            href="/signin"
-            className={cn(
-              "border-b pb-1 pt-0.5 transition-colors",
-              pathname === "/signin"
-                ? "border-ink text-ink"
-                : "border-transparent text-muted hover:text-ink",
-            )}
-          >
-            Sign in
-          </Link>
+          <AuthNav className="text-muted hover:text-ink" />
 
           {/*
             A standing way out of whatever you are looking at. The timestamp
