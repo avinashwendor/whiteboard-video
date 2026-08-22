@@ -1,26 +1,265 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Dark-first palette. Restrained: one neutral ramp, chalk-white primary
+   actions, and a single accent hue per mode used only in small doses.
+   --------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #08090b;
+  --bg-soft: #0c0e11;
+  --surface: #101216;
+  --surface-raised: #16181d;
+  --surface-hover: #1b1e24;
+
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+
+  --text: #f3f4f6;
+  --text-muted: #8f939c;
+  --text-faint: #5a5e67;
+
+  --accent-write: #7ea6ff;
+  --accent-image: #c08bff;
+  --accent-voice: #ffb65c;
+  --accent-create: #5fd8a4;
+  --danger: #ff8a80;
+
+  --board: #f7f5ef;
+  --board-ink: #1d1f24;
+
+  --radius: 14px;
+  --radius-lg: 20px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+  --color-write: var(--accent-write);
+  --color-image: var(--accent-image);
+  --color-voice: var(--accent-voice);
+  --color-create: var(--accent-create);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-hand: var(--font-hand);
+  --radius-card: var(--radius);
+  --radius-panel: var(--radius-lg);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: dark;
+  background: var(--bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+::selection {
+  background: rgba(126, 166, 255, 0.28);
+}
+
+/* Focus: one consistent, high-contrast ring everywhere. */
+:focus-visible {
+  outline: 2px solid var(--accent-write);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Scrollbars that don't fight the palette. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: content-box;
+}
+
+/* --------------------------------- motion -------------------------------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade {
+  animation: fade 0.3s ease both;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-raised);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.045),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .skeleton::after {
+    animation: none;
+  }
+}
+
+/* Grid backdrop used behind the hero, kept subtle enough to read as texture. */
+.grid-backdrop {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 78% 58% at 50% 0%, #000 40%, transparent 100%);
+}
+
+/* Markdown-ish rendering for generated copy. */
+.prose-generated {
+  line-height: 1.72;
+  font-size: 0.975rem;
+  color: var(--text);
+}
+.prose-generated > * + * {
+  margin-top: 0.95em;
+}
+.prose-generated h1,
+.prose-generated h2,
+.prose-generated h3 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin-top: 1.6em;
+}
+.prose-generated h1 {
+  font-size: 1.32rem;
+}
+.prose-generated h2 {
+  font-size: 1.14rem;
+}
+.prose-generated h3 {
+  font-size: 1rem;
+}
+.prose-generated ul,
+.prose-generated ol {
+  padding-left: 1.25rem;
+}
+.prose-generated ul {
+  list-style: disc;
+}
+.prose-generated ol {
+  list-style: decimal;
+}
+.prose-generated li + li {
+  margin-top: 0.35em;
+}
+.prose-generated code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.86em;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1em 0.36em;
+}
+.prose-generated strong {
+  font-weight: 600;
+  color: #fff;
+}
+.prose-generated em {
+  color: var(--text-muted);
+}
+
+/* ----------------------------- studio editor ----------------------------- */
+
+.studio-panel {
+  background: #0b0e17;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.studio-scrollbar::-webkit-scrollbar {
+  height: 4px;
+  width: 4px;
+}
+.studio-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+.studio-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
