@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Runtime wasm glue copied from node_modules by scripts/copy-assets.mjs.
+    "public/vendor/**",
+    // Read-only upstream checkout the Rescript editor was ported from.
+    "reference */**",
   ]),
 ]);
 

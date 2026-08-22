@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, schema);
-    lease = acquire(clientKey(req, "icon"), LIMITS);
+    lease = acquire(clientKey(req, "icon"), LIMITS, req.signal);
 
     const picked = pickIcon(body.name);
     if (!picked) {

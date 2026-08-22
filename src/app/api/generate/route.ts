@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   let lease: { release(): void } | undefined;
   try {
     const body = await parseBody(req, generateRequestSchema);
-    lease = acquire(clientKey(req, "generate"), LIMITS);
+    lease = acquire(clientKey(req, "generate"), LIMITS, req.signal);
 
     const messages: ChatMessage[] = [
       { role: "system", content: body.systemPrompt?.trim() || DEFAULT_SYSTEM },

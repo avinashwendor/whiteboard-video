@@ -9,17 +9,34 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "patch-package && node scripts/copy-assets.mjs",
+    "test:i18n": "tsx tests/i18n-test.ts",
+    "test:timeline": "tsx tests/serialize-timeline-test.ts",
+    "test:overlay": "tsx tests/overlay-test.ts",
+    "test:placement": "tsx tests/overlay-placement-test.ts"
   },
   "dependencies": {
+    "@chatoctopus/timeline": "^0.3.0",
+    "@ffmpeg/core-mt": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@floating-ui/react": "^0.27.20",
+    "@huggingface/transformers": "4.2.0",
+    "@sentry/react": "^10.69.0",
+    "cfb": "^1.2.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.33.0",
     "mp4-muxer": "^5.2.2",
     "next": "16.3.1",
+    "parakeet.js": "^1.4.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-resizable-panels": "^4.12.2",
     "tailwind-merge": "^3.6.0",
-    "zod": "^4.4.3"
+    "weightlift": "^0.2.1",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,7 +45,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
+    "patch-package": "^8.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }

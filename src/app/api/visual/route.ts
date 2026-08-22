@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, visualRequestSchema);
-    lease = acquire(clientKey(req, "visual"), LIMITS);
+    lease = acquire(clientKey(req, "visual"), LIMITS, req.signal);
 
     if (!tavilyConfigured()) {
       throw new AppError("missing_key", {

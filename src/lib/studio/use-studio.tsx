@@ -68,6 +68,7 @@ interface StudioValue {
   running: boolean;
   run: (override?: { prompt?: string; mode?: Mode }) => Promise<void>;
   cancel: () => void;
+  resetSession: () => void;
   openGeneration: (generation: Generation) => void;
   reuse: (generation: Generation) => void;
   refreshHistory: () => void;
@@ -151,6 +152,31 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     // point here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSettings(readSettings());
+
+    // Restore any active task interrupted by a refresh
+    if (typeof sessionStorage !== "undefined") {
+      try {
+        const inFlightRaw = sessionStorage.getItem("chalkline_in_flight");
+        if (inFlightRaw) {
+          const inFlight = JSON.parse(inFlightRaw) as Generation;
+          const ageMs = Date.now() - (inFlight.createdAt ?? 0);
+          if (ageMs < 180_000) {
+            setCurrent({
+              ...inFlight,
+              status: "running",
+              stage: inFlight.stage || "Task in progress",
+            });
+            if (inFlight.mode) setMode(inFlight.mode);
+            if (inFlight.prompt) setPrompt(inFlight.prompt);
+          } else {
+            sessionStorage.removeItem("chalkline_in_flight");
+          }
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     void (async () => {
       const stored = loadHistory();
       const hydrated = await Promise.all(stored.map(hydrateGeneration));
@@ -333,6 +359,17 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       const patch = (update: Partial<Generation>) => {
         Object.assign(generation, update);
         setCurrent({ ...generation });
+        if (typeof sessionStorage !== "undefined") {
+          if (generation.status === "running") {
+            try {
+              sessionStorage.setItem("chalkline_in_flight", JSON.stringify(generation));
+            } catch {
+              /* non-fatal */
+            }
+          } else {
+            sessionStorage.removeItem("chalkline_in_flight");
+          }
+        }
       };
 
       const { width, height } = parseSize(settings.imageSize);
@@ -853,6 +890,23 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     abortRef.current = null;
     setRunning(false);
     setCurrent(null);
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("chalkline_in_flight");
+    }
+  }, []);
+
+  const resetSession = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+    setCurrent(null);
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("chalkline_in_flight");
+      sessionStorage.setItem(
+        "chalkline_session_id",
+        `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      );
+    }
   }, []);
 
   const openGeneration = useCallback((generation: Generation) => {
@@ -881,6 +935,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       running,
       run,
       cancel,
+      resetSession,
       openGeneration,
       reuse,
       refreshHistory,

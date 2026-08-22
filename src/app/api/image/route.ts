@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, imageRequestSchema);
-    lease = acquire(clientKey(req, "image"), LIMITS);
+    lease = acquire(clientKey(req, "image"), LIMITS, req.signal);
 
     const width = body.width ?? 1024;
     const height = body.height ?? 1024;

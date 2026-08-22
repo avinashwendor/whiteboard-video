@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, editRequestSchema);
-    lease = acquire(clientKey(req, "edit"), LIMITS);
+    lease = acquire(clientKey(req, "edit"), LIMITS, req.signal);
 
     const plan = await planEdit({
       instruction: body.instruction,

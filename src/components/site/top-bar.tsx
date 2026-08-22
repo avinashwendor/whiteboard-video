@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { History, PenLine } from "lucide-react";
+import { History, PenLine, Scissors } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
 
@@ -13,6 +13,10 @@ export function TopBar() {
   const links = [
     { href: "/", label: "Studio", icon: PenLine },
     { href: "/history", label: "History", icon: History, count: history.length },
+    // Rescript lives under its own root layout, so Next falls back to a full
+    // page load here rather than a client-side transition. That is intended:
+    // the editor owns the whole viewport and its own appearance toggle.
+    { href: "/rescript", label: "Edit video", icon: Scissors },
   ] as const;
 
   return (
@@ -29,8 +33,10 @@ export function TopBar() {
           {links.map(({ href, label, icon: Icon, ...rest }) => {
             const active = pathname === href;
             const count = "count" in rest ? rest.count : undefined;
+            const isExternalPage = href.startsWith("/rescript");
+            const Component = isExternalPage ? "a" : Link;
             return (
-              <Link
+              <Component
                 key={href}
                 href={href}
                 className={cn(
@@ -45,7 +51,7 @@ export function TopBar() {
                     {count}
                   </span>
                 ) : null}
-              </Link>
+              </Component>
             );
           })}
         </nav>

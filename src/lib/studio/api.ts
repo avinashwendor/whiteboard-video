@@ -21,12 +21,26 @@ interface Failure {
   error?: { code?: string; message?: string };
 }
 
+function getSessionId(): string {
+  if (typeof window === "undefined") return "";
+  let id = sessionStorage.getItem("chalkline_session_id");
+  if (!id) {
+    id = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    sessionStorage.setItem("chalkline_session_id", id);
+  }
+  return id;
+}
+
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
+    const sessionId = getSessionId();
     res = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(sessionId ? { "x-session-id": sessionId } : {}),
+      },
       body: JSON.stringify(body),
       signal,
     });
@@ -75,9 +89,13 @@ export async function streamText(
   onDelta: (delta: string) => void,
   signal?: AbortSignal,
 ): Promise<TextResult> {
+  const sessionId = getSessionId();
   const res = await fetch("/api/generate", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionId ? { "x-session-id": sessionId } : {}),
+    },
     body: JSON.stringify({ ...body, stream: true }),
     signal,
   });

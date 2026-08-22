@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const LIMITS = { capacity: 8, windowMs: 60_000, maxConcurrent: 1 };
+const LIMITS = { capacity: 12, windowMs: 60_000, maxConcurrent: 2, leaseTtlMs: 75_000 };
 
 const TONE_GUIDANCE: Record<string, string> = {
   explainer: "Deep, high-information explanation for an intelligent, curious audience. Build first-principles understanding step by step with concrete analogies and real mechanisms.",
@@ -256,7 +256,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, createRequestSchema);
-    lease = acquire(clientKey(req, "create"), LIMITS);
+    lease = acquire(clientKey(req, "create"), LIMITS, req.signal);
 
     const sceneCount = body.sceneCount ?? 6;
     const tone = body.tone ?? "explainer";

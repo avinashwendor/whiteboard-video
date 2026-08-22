@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, schema);
-    lease = acquire(clientKey(req, "board"), LIMITS);
+    lease = acquire(clientKey(req, "board"), LIMITS, req.signal);
 
     const scene = body.scene as SceneSpec;
     clearGlyphs(scene);

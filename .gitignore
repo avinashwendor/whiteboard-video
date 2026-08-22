@@ -40,3 +40,10 @@ next-env.d.ts
 
 # icon cache
 .icon-cache.json
+
+# runtime assets copied from node_modules on postinstall
+/public/vendor/
+
+# ad-hoc scratch media dropped at the repo root during manual testing
+/scratch_*
+/*.scratch.*

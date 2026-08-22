@@ -259,23 +259,50 @@ function ProjectResult({ generation }: { generation: Generation }) {
 }
 
 function ErrorState({ generation }: { generation: Generation }) {
-  const { run, running } = useStudio();
+  const { run, running, resetSession, cancel } = useStudio();
+  const isBusy =
+    generation.error?.code === "busy" ||
+    generation.error?.message?.includes("already have a generation running");
 
   return (
     <div className="flex flex-col items-start gap-3 rounded-card border border-danger/25 bg-danger/6 p-4">
       <p className="flex items-start gap-2 text-[13px] leading-relaxed text-danger">
         <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
-        {generation.error?.message ?? "Something went wrong."}
+        {isBusy
+          ? "A generation was already in-flight or was interrupted by a page refresh. You can unlock and start fresh."
+          : (generation.error?.message ?? "Something went wrong.")}
       </p>
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={running}
-        onClick={() => void run({ prompt: generation.prompt, mode: generation.mode })}
-      >
-        <RefreshCw className="size-3.5" />
-        Retry
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={running}
+          onClick={() => {
+            if (isBusy) resetSession();
+            void run({ prompt: generation.prompt, mode: generation.mode });
+          }}
+        >
+          <RefreshCw className="size-3.5" />
+          {isBusy ? "Unlock & Retry" : "Retry"}
+        </Button>
+        {isBusy ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => resetSession()}
+          >
+            Reset Session
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => cancel()}
+          >
+            Dismiss
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

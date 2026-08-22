@@ -110,8 +110,8 @@ let skipped = 0;
 for (const file of files) {
   const name = file.replace(/\.mjs$/, "");
   try {
-    const module = await import(pathToFileURL(path.join(ICON_DIR, file)).href);
-    const nodes = module.__iconNode;
+    const iconMod = await import(pathToFileURL(path.join(ICON_DIR, file)).href);
+    const nodes = iconMod.__iconNode;
     if (!Array.isArray(nodes)) {
       skipped += 1;
       continue;

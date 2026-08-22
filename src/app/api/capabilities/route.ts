@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveTts } from "@/lib/ai/tts";
 import { omega } from "@/lib/ai/omega";
+import { isConfigured as tavilyConfigured } from "@/lib/ai/image/tavily";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,9 @@ export function GET() {
         },
       ],
     },
+    // Real-photo search, so a client can tell whether to offer it at all
+    // rather than finding out from a failed request.
+    visual: { provider: "tavily", configured: tavilyConfigured() },
     voice: (() => {
       const engine = resolveTts();
       return { provider: engine.id, configured: engine.isConfigured() };

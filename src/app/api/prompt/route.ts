@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, schema);
-    lease = acquire(clientKey(req, "prompt"), LIMITS);
+    lease = acquire(clientKey(req, "prompt"), LIMITS, req.signal);
 
     const enhancement = await enhanceImagePrompt({
       request: body.prompt,

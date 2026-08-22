@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   let lease;
   try {
     const body = await parseBody(req, ttsRequestSchema);
-    lease = acquire(clientKey(req, "tts"), LIMITS);
+    lease = acquire(clientKey(req, "tts"), LIMITS, req.signal);
 
     const provider = resolveTts(body.provider);
 

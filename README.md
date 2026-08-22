@@ -21,7 +21,7 @@ Chalkline is an AI-powered video studio that converts a single sentence into a f
 | **🎨 Hand-Drawn Whiteboard** | A chisel-tip marker draws one stroke at a time, lifts, travels to the next, and writes captions. Paper grain, a rostrum camera that drifts over the work, a highlighter pass across the heading. |
 | **⚡ Modern Video (Hyperframes)** | Seven cinematic shot types chosen from what each scene contains: kinetic type revealed word by word from behind a mask, Ken Burns plates under a colour grade, film grain, and weighted cuts. |
 
-### Four Creation Modes
+### Five Creation Modes
 
 | Mode | Does |
 |---|---|
@@ -29,6 +29,7 @@ Chalkline is an AI-powered video studio that converts a single sentence into a f
 | **✍️ Write** | Idea → polished long-form copy, streamed token by token |
 | **🖼️ Image** | Prompt → a generated image, with the prompt auto-rewritten for quality |
 | **🎙️ Voice** | Text → natural narration in any language the chosen voice speaks |
+| **✂️ Edit** ([`/rescript`](#-editing-real-footage--the-transcript--composition-editor)) | Footage you already have → transcript-based cutting, on-video text/image/shape overlays, transitions, burned-in subtitles — driven by hand or by prompt |
 
 ---
 
@@ -58,9 +59,13 @@ finished video ──→ /editor/[id] ──→ instruction ──→ /api/edit 
 ```
 src/
   app/
-    page.tsx              studio: hero, composer, results, examples
-    editor/[id]/page.tsx  the editor for a finished video
-    history/page.tsx      gallery of past generations
+    (chalkline)/          the generator, under the Chalkline root layout
+      page.tsx              studio: hero, composer, results, examples
+      editor/[id]/page.tsx  the editor for a finished video
+      history/page.tsx      gallery of past generations
+    (rescript)/           the transcript editor, under its own root layout
+      rescript/page.tsx     mounts the editor at /rescript, client-only
+      rescript.css          Rescript's own Tailwind layer and dark variant
     api/
       generate/           Omega text, streaming or whole
       create/             storyboard planning, with one JSON repair round
@@ -73,6 +78,7 @@ src/
       models/             live catalogue discovery
       capabilities/       which providers this deployment can run
       asset/[id]/         serves generated media, same-origin
+      rescript/agent/      plans an overlay/cut edit; browser executes and validates
   components/
     ui/                   button, card, field, badge, skeleton
     site/                 top bar, navigation
@@ -80,13 +86,37 @@ src/
     studio/editor/        the editor: scene rail, inspector, JSON panel, ask
     whiteboard/           board renderer, stroke drawing, player, export
   lib/
-    ai/                   omega, deepgram, cartesia, editor agent, image/*
+    ai/                   omega, deepgram, cartesia, editor agent, image/*,
+                          rescript-agent (the transcript editor's AI planner)
     video/                easing, word timings and cue planning, film grade
     hyperframes/          modern engine: shots, themes, kinetic type
     studio/               state, history, IndexedDB media cache, API client,
                           edit operations and the hand-edited-JSON schema
     validation/           Zod schemas and limits
     utils/                errors, http, rate limiting, asset store, markdown
+  rescript/               the ported transcript editor, extended with a
+                          composition layer, self-contained
+    components/           Editor, TranscriptPanel, Timeline, ExportDialog, ...
+    components/overlay/   Sidebar (AI/Add/Style/Subs/Cuts), OverlayStage (the
+                          draggable/resizable canvas), OverlayTrack (the
+                          timeline lane), the panels behind each tab
+    hooks/                transcriber, selection, cut ranges, appearance,
+                          the output-clock timeline
+    lib/                  whisper/parakeet models, alignment, VAD, diarization,
+                          ffmpeg, edits, waveform, NLE + AAF serialization, i18n
+    lib/overlay/           types, one shared canvas renderer (preview + export),
+                          animation easing, output-clock ↔ source-clock mapping,
+                          subtitle-cue generation, the collision-avoidance
+                          layout engine, the AI op schema + executor, footage
+                          analysis, and the WebCodecs export compositor
+    workers/              transcription.worker.ts (ASR off the main thread)
+    LICENSE               PolyForm Noncommercial 1.0.0 — see License, below
+  instrumentation-client.ts  boots the editor's crash reporter (inert w/o a DSN)
+tests/                    the ported editor's suite, plus overlay-test.ts and
+                          overlay-placement-test.ts for the composition layer
+                          (all tsx, no runner)
+assets/aaf/               metadata-only AAF scaffold, copied to public/vendor
+patches/                  @huggingface/transformers timestamp-range fix
 ```
 
 ---
@@ -102,9 +132,12 @@ src/
 | **Validation** | [Zod 4](https://zod.dev/) |
 | **Video Export** | [mp4-muxer](https://github.com/nicknisi/mp4-muxer) (client-side WebCodecs → MP4) |
 | **Icons** | [Lucide React](https://lucide.dev/) |
-| **Text AI** | Omega C (OpenAI-compatible API) |
-| **Voice AI** | [Cartesia](https://cartesia.ai/) (sonic-3, word-level timings) |
-| **Image AI** | [Puter](https://puter.com/) (browser-side, primary) + [Pollinations](https://pollinations.ai/) (server fallback) |
+| **Text AI** | Omega C (OpenAI-compatible API) — also plans the transcript editor's overlay/cut edits |
+| **Voice AI** | [Deepgram](https://deepgram.com/) (aura-2, leads when configured) + [Cartesia](https://cartesia.ai/) (sonic-3, fallback) — both give word-level timings |
+| **Image AI** | [Puter](https://puter.com/) (browser-side, primary) + [Pollinations](https://pollinations.ai/) (server fallback) for generated art; [Tavily](https://tavily.com/) for real photos |
+| **Transcript editor state** | [Zustand](https://zustand-demo.pmnd.rs/) — one store for the cut, a second for the composition layer, independent undo stacks |
+| **On-device ASR** | [transformers.js](https://github.com/huggingface/transformers.js) (Whisper) or [parakeet.js](https://github.com/wassgha/parakeet.js), plus `pyannote-segmentation-3.0` for diarization, all via [onnxruntime-web](https://onnxruntime.ai/) in a Web Worker |
+| **Media processing** | [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) — cut, re-encode, and audio graft, all client-side |
 
 ---
 
@@ -112,7 +145,7 @@ src/
 
 ### Prerequisites
 
-- **Node.js** ≥ 18.17
+- **Node.js** ≥ 22 (the transcript editor's toolchain — `@ffmpeg/core-mt`, `onnxruntime-web` — requires it)
 - **npm** ≥ 9
 - API keys (see [Environment Variables](#-environment-variables))
 
@@ -244,20 +277,120 @@ Placement lives in the layout system — seven whiteboard compositions and a pho
 
 ---
 
+## 🎞️ Editing real footage — the transcript & composition editor
+
+`/rescript` is [Rescript](https://github.com/wassgha/rescript) ported into this app end to end, then
+extended into a full composition tool: a transcript-based editor for video and audio you already have,
+as opposed to video Chalkline generated. Drop in a file, it is transcribed **on device** with per-word
+timestamps, and deleting words in the transcript cuts the matching span out of the media. Nothing is
+uploaded — there is no route behind it, only the browser.
+
+- **Word-level editing** — select words, press ⌫, the cut follows the text
+- **Import a transcript** — skip Whisper entirely and edit against an SRT, VTT, or JSON caption file
+- **Filler and silence removal** — one click each for "um"/"uh" and for pauses ≥0.3s
+- **Speaker diarization** — the transcript is grouped by speaker
+- **Timeline** — waveform, wordbar with draggable timing handles, split, cut regions, playhead
+- **Export hub** — MP4/WebM (720p–4K), M4A/MP3/WAV, TXT/MD, SRT/VTT/JSON, or an NLE timeline
+  (Resolve/Premiere XML, FCPXML, Pro Tools/Logic AAF)
+
+It runs entirely client-side: `transformers.js` (Whisper) or `parakeet.js` for ASR in a Web Worker,
+`pyannote-segmentation-3.0` for speaker labels, and `ffmpeg.wasm` for audio extraction and the final
+re-encode. Both wasm runtimes need `SharedArrayBuffer`, which the browser only grants to a
+**cross-origin-isolated** document.
+
+### On top of the cut: elements, transitions, subtitles
+
+A composition layer (`src/rescript/lib/overlay/`) sits over the trimmed footage, sharing one renderer
+between the live preview and the export — what you see while editing is pixel-for-pixel what ships:
+
+- **Elements** — text, images, and shapes. Drag to move, 8-handle resize, rotate (Shift snaps to 15°),
+  snap-to-centre guides, double-click to edit text in place. A layer list handles lock/hide/reorder/duplicate.
+- **Generate & drop** — a tray for AI artwork (Pollinations) and real photos (Tavily); drag a result onto
+  the frame, or a local image file straight from the desktop.
+- **Transitions** — 11 kinds across two families that are both duration-preserving and audio-safe: a
+  *dip* (fade, blur, zoom-in) treats the live clip and sits symmetrically across the cut; a *push*
+  (dissolve, slide, zoom-out) holds the outgoing clip's last frame and moves it off after the cut.
+  Neither borrows frames across a cut or shortens the video, so a transition can never clip speech or
+  bring back a deleted word.
+- **Subtitles** — burned-in captions built from the transcript's own word timings, five presets
+  (Clean, Broadcast, Shorts, Word-pop karaoke, Minimal), fully restylable.
+- **Collision-free by construction** — new elements, and anything moved through a placement preset, are
+  nudged clear of the burned-in subtitle band and of whatever else is on screen in that moment
+  (`lib/overlay/layout.ts`). This runs for every caller — the toolbar and the AI planner alike — so two
+  things can't end up sharing the same pixels no matter which one put them there. A direct drag is never
+  overridden: that placement was deliberate.
+
+### The AI sidebar: analyse, propose, apply
+
+Prompting the editor doesn't fire operations blind. For a whole-edit request it first **measures** the
+footage — filler count and seconds, pause count and total dead air, words-per-minute, the longest
+pauses — with the same functions the manual Tools menu uses (`lib/overlay/analysis.ts`), then returns a
+**named, reviewable plan**: findings grounded in those numbers, grouped into steps you can tick on or off
+before anything runs. Only accepted steps execute, one at a time, each reporting what it did.
+
+The planner works from a house style (one accent colour per edit, one transition style for the whole
+video, restrained caption density, contrast rules for text over footage) so an automatic edit reads as
+produced rather than automatic. Operations include cutting by the finished video's own clock
+(`deleteRange`, `keepOnly`, `splitAt` — a highlight reel or a Short is one call, not twenty), and
+`captionPhrase`, which finds a phrase in the transcript and times the caption from its real word
+timings rather than a guessed timestamp — the difference between a kinetic caption that lands on the
+beat and one that's a quarter-second off.
+
+Export burns the whole composition into the file: the cut is rendered by ffmpeg as before, then a
+canvas pass composites every element and transition frame-by-frame through WebCodecs, and the
+**original audio is grafted back with a stream copy** — re-encoding it was never on the table.
+
+Three things follow from all of this, and they are where the port and its extensions deviate from upstream:
+
+- **The isolation headers are scoped to `/rescript`, `/vendor/*`, and `/_next/*`** — not `/(.*)` as
+  upstream sets them. Chalkline's studio pulls images straight from Pollinations and Tavily, and a
+  blanket `Cross-Origin-Embedder-Policy: require-corp` would block every one of them. The narrower scope
+  still isolates the editor's own document *and* the worker scripts it spawns — a dedicated worker
+  inherits its creating document's policy container, and its own response needs the same header or the
+  browser silently refuses to start it. See `next.config.ts`.
+- **`/rescript` has its own root layout** (`src/app/(rescript)/layout.tsx`). The editor owns the whole
+  viewport and carries its own light/dark toggle, so it cannot sit inside Chalkline's dark-only chrome.
+  Navigating between the two is a full page load, by design.
+- **ASR runs single-threaded** (`numThreads = 1` in `transcription.worker.ts`). The onnxruntime-web
+  build this pulls in loads its asyncify wasm regardless of device, and asyncify plus a pthread pool
+  deadlocks during session creation — the model reaches 100% and `pipeline()` never settles or throws.
+  Single-threaded costs some throughput; the alternative is a transcript that never arrives.
+
+Upstream's Google Analytics, Vercel Analytics, and the default telemetry collector at `getrescript.com`
+were left out — those are the upstream project's accounts. `src/rescript/lib/telemetry.ts` stays inert
+unless you point `NEXT_PUBLIC_TELEMETRY_ENDPOINT` at your own, and `src/rescript/lib/sentry.ts` never
+initialises without `NEXT_PUBLIC_SENTRY_DSN`.
+
+The wasm runtimes are not committed — they'd add ~185 MB to the repo. `npm install` runs `patch-package`
+and `scripts/copy-assets.mjs`, which copy ffmpeg core, both onnxruntime builds, and the AAF scaffold into
+`public/vendor/`. This also runs on every fresh install on a deploy host, Railway included.
+
+---
+
 ## 🔑 Environment Variables
 
-All keys are read **server-side only**. Nothing is prefixed with `NEXT_PUBLIC_` — no key ever reaches the client bundle. Generated media is served back from `/api/asset/:id` on the app's own origin.
+Server secrets are read **server-side only**. None of them is prefixed with `NEXT_PUBLIC_` — no key ever
+reaches the client bundle. Generated media is served back from `/api/asset/:id` on the app's own origin.
+The `NEXT_PUBLIC_*` rows at the bottom are the sole exception: they configure the transcript editor's
+telemetry/crash-reporting, are meaningless without a value, and are inert by default.
 
 | Variable | Required | Description |
 |---|---|---|
-| `OMEGA_API_KEY` | **Yes** | Omega C API key for text generation and storyboard planning. Keys start with `oc_`. Get one at [omegaplusapi.com](https://omegaplusapi.com). |
+| `OMEGA_API_KEY` | **Yes** | Omega C API key for text generation, storyboard planning, and the transcript editor's AI sidebar. Keys start with `oc_`. Get one at [omegaplusapi.com](https://omegaplusapi.com). |
 | `OMEGA_BASE_URL` | No | Override the Omega API host. Default: `https://api.omegaplusapi.com` |
-| `CARTESIA_API_KEY` | **Yes** | Cartesia API key for voice narration. Get one at [play.cartesia.ai/keys](https://play.cartesia.ai/keys). Without it, videos still render silently. |
+| `DEEPGRAM_API_KEY` | Recommended | Deepgram key for voice narration — leads over Cartesia when both are set, since its word timings come from transcribing the actual audio rather than an estimate. Get one at [console.deepgram.com](https://console.deepgram.com). |
+| `DEEPGRAM_MODEL` | No | Deepgram TTS model override. Default: `aura-2-hera-en` |
+| `DEEPGRAM_ALIGN_MODEL` | No | Deepgram model used to time the narration's words. Default: `nova-3` |
+| `CARTESIA_API_KEY` | Recommended | Cartesia API key for voice narration — used when Deepgram isn't configured. Get one at [play.cartesia.ai/keys](https://play.cartesia.ai/keys). Without either key, videos still render silently. |
 | `CARTESIA_MODEL` | No | Cartesia TTS model override. Default: `sonic-3` |
 | `CARTESIA_VERSION` | No | Cartesia API version override. Default: `2026-08-14` |
 | `CARTESIA_TIMESTAMPS` | No | Set to `0` to opt out of word timings (falls back to mp3, smaller files). |
-| `POLLINATIONS_API_KEY` | No | Pollinations API key for premium image models. Images work with no key (free tier). Get one at [enter.pollinations.ai/keys](https://enter.pollinations.ai/keys). |
+| `TAVILY_API_KEY` | Recommended | Tavily key for real-photo search (Modern Video's supporting visuals, and the transcript editor's b-roll). Without it, `findPhoto`/`addImage` with a photo query fails cleanly and the planner is told not to plan it. Get one at [tavily.com](https://tavily.com). |
+| `POLLINATIONS_API_KEY` | No | Pollinations API key for premium image models. Images work with no key (free tier, photographic only). Get one at [enter.pollinations.ai/keys](https://enter.pollinations.ai/keys). |
 | `PORT` | No | Server port. Default: `3000` |
+| `NEXT_PUBLIC_SITE_URL` | No | Absolute origin the transcript editor's Open Graph tags resolve against. Default: `http://localhost:3000`. |
+| `NEXT_PUBLIC_TELEMETRY_ENDPOINT` | No | Where the transcript editor's anonymous usage pings go. Unset (the default) means telemetry never fires. |
+| `NEXT_PUBLIC_SENTRY_DSN` | No | Crash reporting for the transcript editor. Unset (the default) means Sentry never initialises. |
 
 ---
 
@@ -305,11 +438,18 @@ No model ID is hardcoded. Catalogues are fetched at runtime from `/api/models?pr
 ## 📦 Scripts
 
 ```bash
-npm run dev      # Start development server (hot reload)
-npm run build    # Create production build
-npm run start    # Start production server
-npm run lint     # Run ESLint
+npm run dev             # Start development server (hot reload)
+npm run build           # Create production build
+npm run start           # Start production server
+npm run lint            # Run ESLint
+npm run test:i18n       # Transcript editor: locale catalogue coverage
+npm run test:timeline   # Transcript editor: NLE + AAF serialization
+npm run test:overlay    # Transcript editor: cuts, transitions, subtitles, timeline maths
+npm run test:placement  # Transcript editor: collision-free element placement
 ```
+
+The rest of the transcript editor's suite runs the same way — `npx tsx tests/<name>-test.ts`. They are
+plain assertion scripts with no runner.
 
 ---
 
@@ -317,17 +457,24 @@ npm run lint     # Run ESLint
 
 ### Railway (Recommended)
 
-This project is optimised for [Railway](https://railway.com) deployment.
+This project is deployed on [Railway](https://railway.com) at
+[whiteboard-video-production.up.railway.app](https://whiteboard-video-production.up.railway.app), tracking
+the `main` branch of this repo.
 
 1. **Connect your GitHub repo** at [railway.com/new](https://railway.com/new)
-2. **Set environment variables** in the Railway dashboard:
-   - `OMEGA_API_KEY` — your Omega C key
-   - `CARTESIA_API_KEY` — your Cartesia key
-   - `POLLINATIONS_API_KEY` — (optional) for premium image models
-3. Railway auto-detects Next.js and runs `npm run build` → `npm run start`
-4. The app is live at your Railway-provided URL
+2. **Set environment variables** in the Railway dashboard — at minimum `OMEGA_API_KEY`; add
+   `DEEPGRAM_API_KEY` and/or `CARTESIA_API_KEY` for narration and `TAVILY_API_KEY` for real-photo search.
+   See [Environment Variables](#-environment-variables) for the full list.
+3. Railway (Nixpacks) detects Next.js, runs `npm install` — which runs this repo's `postinstall`
+   (`patch-package` + `scripts/copy-assets.mjs`, restoring the transcript editor's ~185 MB of wasm
+   runtime into `public/vendor/`) — then `npm run build` → `npm run start`.
+4. The healthcheck hits `/api/capabilities`; a deploy that can't reach Omega, Deepgram/Cartesia, or
+   Tavily still passes it; those degrade per-feature rather than failing the boot.
+5. Push to `main` and Railway redeploys automatically.
 
-> **Note**: A `railway.json` config is included in this repo for optimal build settings. See [Railway Deployment](#railway-deployment-config) below for details.
+Build settings live in `.railway/railway.ts` (Infrastructure as Code, the current Railway convention).
+A `railway.json` is also kept alongside it for tooling that still reads Config as Code; the two describe
+the same build.
 
 ### Other Platforms
 
@@ -380,14 +527,29 @@ Narration is WAV (not mp3) whenever word timings are present — roughly 175 KB 
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+Chalkline is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+**The transcript editor under `src/rescript/` is not MIT.** It is ported from
+[Rescript](https://github.com/wassgha/rescript), which is licensed under **PolyForm Noncommercial
+1.0.0** — see [src/rescript/LICENSE](src/rescript/LICENSE). That license permits use for noncommercial
+purposes only and carries a required notice:
+
+> Copyright (c) 2026 Wassim Gharbi and Rescript contributors (https://github.com/wassgha/rescript)
+
+If this app is ever used commercially, `/rescript` and `src/rescript/` have to come out, or a separate
+license has to be obtained from the upstream author.
 
 ---
 
 ## 🙏 Acknowledgements
 
-- **[Omega C](https://omegaplusapi.com)** — text generation and storyboard planning
-- **[Cartesia](https://cartesia.ai)** — natural voice narration with word-level timings
+- **[Omega C](https://omegaplusapi.com)** — text generation, storyboard planning, and the transcript editor's AI sidebar
+- **[Deepgram](https://deepgram.com)** — voice narration with word-level timings, from transcribing the actual audio
+- **[Cartesia](https://cartesia.ai)** — voice narration fallback, also with word-level timings
 - **[Puter](https://puter.com)** — browser-side image generation
 - **[Pollinations](https://pollinations.ai)** — server-side image fallback
+- **[Tavily](https://tavily.com)** — real-photo search
+- **[Rescript](https://github.com/wassgha/rescript)** by Wassim Gharbi — the transcript-based editor `/rescript` is ported from (PolyForm Noncommercial 1.0.0, see [src/rescript/LICENSE](src/rescript/LICENSE))
+- **[transformers.js](https://github.com/huggingface/transformers.js)**, **[parakeet.js](https://github.com/wassgha/parakeet.js)** & **[onnxruntime-web](https://onnxruntime.ai)** — on-device transcription and speaker diarization
+- **[ffmpeg.wasm](https://ffmpegwasm.netlify.app)** — client-side media cutting, re-encoding, and audio graft
 - **[Lucide](https://lucide.dev)** — beautiful open-source icons

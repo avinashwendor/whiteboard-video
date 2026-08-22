@@ -132,6 +132,74 @@ export const editRequestSchema = z.object({
 });
 export type EditRequest = z.infer<typeof editRequestSchema>;
 
+/**
+ * The transcript editor's AI sidebar. The project view sent here is already
+ * pruned in the browser -- numbered elements, boundary times, a trimmed
+ * transcript -- so nothing carries word-level timings or media across the wire.
+ */
+export const rescriptAgentRequestSchema = z.object({
+  instruction: promptField,
+  context: z.object({
+    duration: z.number().min(0).max(24 * 3600),
+    playhead: z.number().min(0).max(24 * 3600),
+    boundaries: z
+      .array(z.object({ number: z.number().int().min(1), at: z.number().min(0) }))
+      .max(500),
+    elements: z
+      .array(
+        z.object({
+          number: z.number().int().min(1),
+          kind: z.string().trim().max(20),
+          name: z.string().trim().max(120),
+          text: z.string().max(500).optional(),
+          start: z.number().min(0),
+          end: z.number().min(0),
+          position: z.object({ x: z.number(), y: z.number() }),
+        }),
+      )
+      .max(200),
+    subtitles: z.object({
+      enabled: z.boolean(),
+      cueCount: z.number().int().min(0).max(20_000),
+      preset: z.string().trim().max(40).optional(),
+    }),
+    transitions: z
+      .array(
+        z.object({
+          between: z.number().int().min(1),
+          kind: z.string().trim().max(20),
+          duration: z.number().min(0).max(10),
+        }),
+      )
+      .max(500),
+    transcript: z.string().max(12_000).optional(),
+    /** Measured in the browser, so the plan is grounded in the real footage. */
+    analysis: z
+      .object({
+        wordCount: z.number().int().min(0),
+        wordsPerMinute: z.number().min(0).max(1000),
+        speakerCount: z.number().int().min(0).max(64),
+        fillerCount: z.number().int().min(0),
+        fillerSeconds: z.number().min(0),
+        silenceCount: z.number().int().min(0),
+        silenceSeconds: z.number().min(0),
+        longestPauses: z
+          .array(z.object({ at: z.number().min(0), seconds: z.number().min(0) }))
+          .max(12),
+        clipCount: z.number().int().min(0),
+        runsLong: z.boolean(),
+      })
+      .optional(),
+    /** Frame shape, so it can tell a Short from a landscape edit. */
+    aspect: z.number().min(0.1).max(10).optional(),
+    can: z.object({ generateImage: z.boolean(), photoSearch: z.boolean() }),
+  }),
+  /** "propose" describes the edit and waits; "execute" performs it. */
+  mode: z.enum(["propose", "execute"]).optional(),
+  model: modelId.optional(),
+});
+export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
+
 export const createRequestSchema = z.object({
   prompt: promptField,
   model: modelId.optional(),
