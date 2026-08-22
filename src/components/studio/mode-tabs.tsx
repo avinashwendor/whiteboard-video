@@ -14,7 +14,7 @@ export function ModeTabs({
   disabled?: boolean;
 }) {
   return (
-    <div role="tablist" aria-label="Generation mode" className="flex flex-wrap gap-1">
+    <div role="tablist" aria-label="Generation mode" className="flex flex-wrap items-center gap-x-5 gap-y-2">
       {MODE_ORDER.map((mode) => {
         const config = MODE_CONFIG[mode];
         const active = value === mode;
@@ -27,17 +27,16 @@ export function ModeTabs({
             disabled={disabled}
             onClick={() => onChange(mode)}
             className={cn(
-              "group flex h-8 items-center gap-2 rounded-lg px-3 text-[13px] font-medium transition-colors",
+              "group flex items-center gap-2 border-b pb-1 pt-0.5 text-[13px] font-medium transition-colors",
               "disabled:cursor-not-allowed disabled:opacity-50",
-              active ? "bg-surface-hover text-ink" : "text-muted hover:bg-surface-raised hover:text-ink",
+              active ? "border-ink text-ink" : "border-transparent text-muted hover:border-line-strong hover:text-ink",
             )}
           >
             <span
-              className={cn("size-1.5 rounded-full transition-opacity", active ? "opacity-100" : "opacity-35")}
+              className={cn("size-1.5 transition-opacity", active ? "opacity-100" : "opacity-40")}
               style={{ background: config.accent }}
               aria-hidden
             />
-            <config.icon className="size-3.5" aria-hidden />
             {config.label}
           </button>
         );

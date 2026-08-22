@@ -33,7 +33,7 @@ export default function HistoryPage() {
     if (!generation) return;
     openGeneration(generation);
     // A video is a project you carry on editing; everything else is a result.
-    router.push(generation.project ? `/editor/${generation.id}` : "/");
+    router.push(generation.project ? `/editor/${generation.id}` : "/new");
   };
 
   return (
@@ -149,7 +149,7 @@ export default function HistoryPage() {
           <p className="text-[14px] text-muted">
             {history.length ? "Nothing in this filter yet." : "No generations yet."}
           </p>
-          <Button className="mt-4" variant="secondary" size="sm" onClick={() => router.push("/")}>
+          <Button className="mt-4" variant="secondary" size="sm" onClick={() => router.push("/new")}>
             Start creating
           </Button>
         </div>

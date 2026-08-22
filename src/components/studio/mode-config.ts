@@ -1,4 +1,11 @@
-import { Image as ImageIcon, PenLine, Presentation, Volume2, type LucideIcon } from "lucide-react";
+import {
+  Image as ImageIcon,
+  LayoutGrid,
+  PenLine,
+  Presentation,
+  Volume2,
+  type LucideIcon,
+} from "lucide-react";
 import type { Mode } from "@/lib/studio/types";
 
 export interface ModeConfig {
@@ -15,34 +22,43 @@ export interface ModeConfig {
 export const MODE_CONFIG: Record<Mode, ModeConfig> = {
   write: {
     id: "write",
-    label: "Write",
+    label: "Script",
     blurb: "Scripts, stories and copy",
     icon: PenLine,
     accent: "var(--accent-write)",
     placeholder: "Write a 30-second advert for a student note-taking app…",
-    cta: "Write it",
+    cta: "Write the script",
   },
   image: {
     id: "image",
-    label: "Image",
-    blurb: "One prompt, one visual",
+    label: "Still",
+    blurb: "One prompt, one frame",
     icon: ImageIcon,
     accent: "var(--accent-image)",
-    placeholder: "A cinematic photo of Hyderabad at night, seen from a rooftop…",
-    cta: "Generate image",
+    placeholder: "A cinematic still of Hyderabad at night, seen from a rooftop…",
+    cta: "Make the still",
+  },
+  storyboard: {
+    id: "storyboard",
+    label: "Storyboard",
+    blurb: "One brief, a board of frames",
+    icon: LayoutGrid,
+    accent: "var(--accent-story)",
+    placeholder: "Storyboard a 60-second spot for a monsoon-season delivery app…",
+    cta: "Board it out",
   },
   voice: {
     id: "voice",
-    label: "Voice",
+    label: "Voiceover",
     blurb: "Natural narration",
     icon: Volume2,
     accent: "var(--accent-voice)",
     placeholder: "Paste the words you want spoken, in any supported language…",
-    cta: "Speak it",
+    cta: "Record the take",
   },
   create: {
     id: "create",
-    label: "Whiteboard",
+    label: "Video",
     blurb: "A narrated explainer video",
     icon: Presentation,
     accent: "var(--accent-create)",
@@ -51,4 +67,4 @@ export const MODE_CONFIG: Record<Mode, ModeConfig> = {
   },
 };
 
-export const MODE_ORDER: Mode[] = ["create", "write", "image", "voice"];
+export const MODE_ORDER: Mode[] = ["create", "write", "image", "storyboard", "voice"];
