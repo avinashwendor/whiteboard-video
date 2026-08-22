@@ -22,8 +22,8 @@ const nextConfig: NextConfig = {
     // unsafe-none, which leaves Safari users staring at "This browser can't run
     // the editor".
     //
-    // Upstream applies this to `/(.*)` because Rescript is the whole app. Here
-    // it is scoped to the /rescript route: the Chalkline studio pulls images
+    // Upstream applies this to the whole app because the editor is the whole
+    // app there. Here it is scoped to /motionscript: the studio pulls images
     // from Pollinations/Tavily, and cross-origin isolation would block every
     // one of them (they send no Cross-Origin-Resource-Policy). Isolation is a
     // per-document property, so scoping it this way still gives the editor
@@ -46,8 +46,8 @@ const nextConfig: NextConfig = {
       { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
     ];
     return [
-      { source: "/rescript", headers: isolation },
-      { source: "/rescript/:path*", headers: isolation },
+      { source: "/motionscript", headers: isolation },
+      { source: "/motionscript/:path*", headers: isolation },
       // ffmpeg.wasm's core, its pthread worker, and the onnxruntime binaries.
       { source: "/vendor/:path*", headers: workerScripts },
       // The bundled transcription worker, emitted here by the compiler.

@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "MotionScript",
-    url: "/rescript",
+    url: "/motionscript",
     title,
     description,
     images: [
@@ -63,10 +63,15 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-/** Apply stored appearance before paint to avoid a light→dark flash. */
-// Dark unless the stored preference explicitly says light, matching
-// loadAppearance(). Inline so the class lands before first paint.
-const appearanceBootScript = `(function(){try{if(localStorage.getItem("rescript.appearance")!=="light")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}})();`;
+/**
+ * One appearance now, matching the rest of the site.
+ *
+ * Inline so the class lands before first paint rather than after a white
+ * flash. There is no stored preference to read any more — the light theme was
+ * retired when the palette moved onto the Motionhouse greys, which only make
+ * sense on a dark ground.
+ */
+const appearanceBootScript = `document.documentElement.classList.add("dark");`;
 const localeBootScript = buildLocaleBootScript();
 
 export default function MotionScriptLayout({

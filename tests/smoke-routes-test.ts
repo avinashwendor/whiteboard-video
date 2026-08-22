@@ -36,7 +36,7 @@ const ROUTES: Check[] = [
   // keys land. Either way it must not throw.
   { path: "/sign-in" },
   { path: "/sign-up" },
-  { path: "/rescript", expect: ["<!DOCTYPE html>"] },
+  { path: "/motionscript", expect: ["MotionScript"], reject: ["Rescript"] },
 ];
 
 const API: Check[] = [{ path: "/api/capabilities" }, { path: "/api/models" }];

@@ -262,10 +262,17 @@ export default function UploadScreen({
   );
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-zinc-50 to-neutral-50/50 dark:from-zinc-950 dark:to-zinc-900/50">
+    <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain bg-zinc-950">
+      {/* Texture, not decoration: the empty state is mostly ground. */}
+      <div className="ms-ground" aria-hidden>
+        <div className="ms-ground__wash" />
+        <div className="ms-ground__grain" />
+        <div className="ms-ground__sweep" />
+      </div>
+
       {/* min-h-full + items-center centers when content fits; the outer
           overflow-y-auto still lets short viewports (mobile) scroll the top. */}
-      <div className="flex min-h-full items-center justify-center p-6">
+      <div className="relative flex min-h-full items-center justify-center p-6">
         <div className="w-full max-w-xl">
           {!isElectron && (
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

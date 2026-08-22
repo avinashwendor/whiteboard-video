@@ -55,13 +55,13 @@ export function TopBar() {
           </Link>
 
           {/*
-            Rescript lives under its own root layout, so Next falls back to a
+            MotionScript lives under its own root layout, so Next falls back to a
             full page load here rather than a client-side transition. That is
             intended: the editor owns the whole viewport and its own appearance
             toggle. Plain <a> for the same reason.
           */}
           <a
-            href="/rescript"
+            href="/motionscript"
             className="border-b border-transparent pb-1 pt-0.5 text-muted transition-colors hover:text-ink"
           >
             Edit video

@@ -1,11 +1,9 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Moon, Settings, Sun } from "lucide-react";
-import { useAppearance } from "@/rescript/hooks/useAppearance";
+import { Settings } from "lucide-react";
 import { useTelemetryPref } from "@/rescript/hooks/useTelemetryPref";
 import Popover, { PopoverContent, PopoverTrigger } from "./Popover";
-import type { Appearance } from "@/rescript/lib/theme";
 import { useI18n } from "./I18nProvider";
 import {
   UI_LOCALES,
@@ -15,13 +13,14 @@ import {
 
 
 /**
- * Top-bar settings popover. Houses appearance, transcript source, and social
- * links for now — structure is section-based so more prefs can land here later.
+ * Top-bar settings popover. Transcript source, language and telemetry.
+ *
+ * The appearance switch is gone: there is one skin now, and it is the same
+ * one the rest of the site wears.
  */
 export default function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const { appearance, setAppearance } = useAppearance();
   const { enabled: telemetry, setEnabled: setTelemetry } = useTelemetryPref();
   const { t, preference, setPreference } = useI18n();
 
@@ -54,31 +53,6 @@ export default function SettingsMenu() {
           aria-label={t("common.settings")}
           className="z-40 w-[15rem] overflow-hidden"
         >
-          <section className="border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
-            <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
-              {t("settings.appearance")}
-            </p>
-            <div
-              className="grid grid-cols-2 gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800"
-              role="radiogroup"
-              aria-label={t("settings.appearance")}
-            >
-              <AppearanceOption
-                value="light"
-                label={t("settings.light")}
-                icon={Sun}
-                selected={appearance === "light"}
-                onSelect={setAppearance}
-              />
-              <AppearanceOption
-                value="dark"
-                label={t("settings.dark")}
-                icon={Moon}
-                selected={appearance === "dark"}
-                onSelect={setAppearance}
-              />
-            </div>
-          </section>
 
           <section className="border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
             <label className="block text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
@@ -127,36 +101,5 @@ export default function SettingsMenu() {
         </PopoverContent>
       </div>
     </Popover>
-  );
-}
-
-function AppearanceOption({
-  value,
-  label,
-  icon: Icon,
-  selected,
-  onSelect,
-}: {
-  value: Appearance;
-  label: string;
-  icon: typeof Sun;
-  selected: boolean;
-  onSelect: (value: Appearance) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={() => onSelect(value)}
-      className={`flex cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium transition ${
-        selected
-          ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-50"
-          : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-      }`}
-    >
-      <Icon size={14} />
-      {label}
-    </button>
   );
 }
