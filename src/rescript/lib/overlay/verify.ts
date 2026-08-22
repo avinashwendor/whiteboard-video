@@ -67,6 +67,34 @@ interface Placed {
   end: number;
   band: "top" | "center" | "bottom";
   label: string;
+  /**
+   * Which clock the window is on.
+   *
+   * A captionPhrase is timed at runtime from the word timings, so the only
+   * position available here is the transcript's own stamp — which is on the
+   * clock *before* this plan's cuts. Comparing that against an addText time
+   * written for the clock after them would manufacture collisions that do not
+   * happen, so the two are only ever compared with their own kind.
+   */
+  clock: "plan" | "transcript";
+}
+
+/**
+ * Roughly when a phrase is said, from the stamped transcript.
+ *
+ * Only used to tell two kinetic captions apart, so a whole line's precision is
+ * enough — and a line is the smallest thing the transcript is stamped at.
+ */
+function saidAt(transcript: string, phrase: string): number | null {
+  const needle = normalise(phrase);
+  if (!needle) return null;
+  for (const raw of transcript.split("\n")) {
+    const match = /^\[(\d+):(\d\d(?:\.\d+)?)\]\s*(.*)$/.exec(raw.trim());
+    if (!match) continue;
+    if (!normalise(match[3]).includes(needle)) continue;
+    return Number(match[1]) * 60 + Number(match[2]);
+  }
+  return null;
 }
 
 /**
@@ -85,8 +113,19 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   let subtitlesOn = world.subtitlesOn;
   let subtitlePosition = world.subtitlePosition;
   let cutSeen = false;
-  let timedAfterCut = false;
   const placed: Placed[] = [];
+
+  /**
+   * How long the video is by this point in the plan — as an upper bound.
+   *
+   * Cuts only ever shorten, so a time past this is wrong however imprecise the
+   * bound is. `keepOnly` and `deleteRange` are exact; removing fillers and
+   * silences takes off an amount nobody can predict, so they leave the bound
+   * where it was rather than inventing a number to be wrong about. This is the
+   * check that catches the real mistake of the format: a plan that cuts a nine
+   * minute recording down to thirty seconds and then puts a caption at 4:20.
+   */
+  let remaining = world.duration;
 
   const addPlaced = (
     start: number | undefined,
@@ -97,24 +136,19 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   ) => {
     const from = start ?? 0;
     const to = end ?? from + (duration ?? 3);
-    placed.push({ start: from, end: to, band: band(position), label });
+    placed.push({ start: from, end: to, band: band(position), label, clock: "plan" });
   };
 
   for (const op of ops) {
     switch (op.op) {
       case "addText": {
         elements += 1;
-        if (op.start !== undefined && op.start > world.duration) {
+        if (op.start !== undefined && op.start > remaining) {
           problems.push(
-            `addText "${op.text.slice(0, 30)}" starts at ${op.start.toFixed(1)}s but the video is ${world.duration.toFixed(1)}s long.`
+            cutSeen
+              ? `addText "${op.text.slice(0, 30)}" starts at ${op.start.toFixed(1)}s, but after the cuts in this plan the video is at most ${remaining.toFixed(1)}s long.`
+              : `addText "${op.text.slice(0, 30)}" starts at ${op.start.toFixed(1)}s but the video is ${remaining.toFixed(1)}s long.`
           );
-        }
-        // Only a time that a cut actually moves. The start of the video does
-        // not move, and the prompt tells the model to anchor there for exactly
-        // that reason — flagging it would send it back to fix the thing it was
-        // asked to do.
-        if (cutSeen && op.start !== undefined && op.start > 1) {
-          timedAfterCut = true;
         }
         const words = op.text.trim().split(/\s+/).length;
         const life =
@@ -135,13 +169,16 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
             `captionPhrase "${op.phrase}" — those words are not in the transcript, so there is nothing to time it to. Quote the transcript exactly, or use addText with a time.`
           );
         }
-        // Its window comes from the word timings, so it cannot be checked
-        // against the clock here; only its band matters for collisions.
+        // Timed at runtime from the word timings. The transcript stamp is the
+        // best available stand-in, and it is enough to catch two kinetic
+        // captions landing on the same words in the same part of the frame.
+        const at = saidAt(world.transcript, op.phrase);
         placed.push({
-          start: -1,
-          end: -1,
+          start: at ?? -1,
+          end: at === null ? -1 : at + 2 + (op.hold ?? 0.6),
           band: band(op.position ?? "upper-third"),
           label: `caption "${op.phrase.slice(0, 24)}"`,
+          clock: "transcript",
         });
         break;
       }
@@ -224,16 +261,22 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
         }
         break;
 
-      case "deleteRange":
+      case "deleteRange": {
         cutSeen = true;
         if (op.to <= op.from) {
           problems.push(`deleteRange ${op.from}–${op.to} ends before it starts.`);
-        } else if (op.from >= world.duration) {
-          problems.push(
-            `deleteRange starts at ${op.from.toFixed(1)}s but the video is ${world.duration.toFixed(1)}s long.`
-          );
+          break;
         }
+        if (op.from >= remaining) {
+          problems.push(
+            `deleteRange starts at ${op.from.toFixed(1)}s but the video is ${remaining.toFixed(1)}s long${cutSeen ? " by this point in the plan" : ""}.`
+          );
+          break;
+        }
+        const cut = Math.min(op.to, remaining) - op.from;
+        remaining = Math.max(0, remaining - cut);
         break;
+      }
 
       case "keepOnly": {
         cutSeen = true;
@@ -245,22 +288,28 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
           if (range.from < previousEnd) {
             problems.push("keepOnly spans overlap or are out of order. List them in ascending time, without overlaps.");
           }
-          if (range.from >= world.duration) {
+          if (range.from >= remaining) {
             problems.push(
-              `keepOnly asks for ${range.from.toFixed(1)}s, past the end of a ${world.duration.toFixed(1)}s video.`
+              `keepOnly asks for ${range.from.toFixed(1)}s, past the end of a ${remaining.toFixed(1)}s video.`
             );
           }
           previousEnd = range.to;
         }
+        // Everything after this is written against the kept spans, and nothing
+        // else. This is the single biggest shift of the clock a plan can make.
+        remaining = op.ranges.reduce(
+          (n, r) => n + Math.max(0, Math.min(r.to, remaining) - r.from),
+          0
+        );
         break;
       }
 
       case "splitAt":
         cutSeen = true;
         boundaries += 1;
-        if (op.at <= 0 || op.at >= world.duration) {
+        if (op.at <= 0 || op.at >= remaining) {
           problems.push(
-            `splitAt ${op.at.toFixed(1)}s is outside the video, which runs 0–${world.duration.toFixed(1)}s.`
+            `splitAt ${op.at.toFixed(1)}s is outside the video, which runs 0–${remaining.toFixed(1)}s${cutSeen ? " after the cuts already in this plan" : ""}.`
           );
         }
         break;
@@ -280,11 +329,11 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
     }
   }
 
-  if (timedAfterCut) {
-    problems.push(
-      "A caption with an explicit start comes after a cutting operation in this plan. Cuts shorten the video and move everything after them, so either put the cutting operations first and write the later times as they will be afterwards, or drop the explicit start."
-    );
-  }
+  // There is deliberately no complaint about "a caption timed after a cut".
+  // The prompt asks for exactly that — cutting operations first, later times
+  // written for the clock they leave behind — so flagging the shape of it would
+  // send the model back to undo what it was told to do. What matters is whether
+  // the time is *reachable*, and `remaining` above already answers that.
 
   // Two things in the same band at the same moment is the single most visible
   // sign of an automatic edit, and it is cheap to catch here.
@@ -293,6 +342,7 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
       const a = placed[i];
       const b = placed[j];
       if (a.band !== b.band) continue;
+      if (a.clock !== b.clock) continue;
       if (a.start < 0 || b.start < 0) continue;
       if (a.start < b.end && b.start < a.end) {
         problems.push(
@@ -312,10 +362,13 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
     }
   }
 
+  // Density is judged against the video that comes out, not the one that went
+  // in: four captions is restraint across nine minutes and a slideshow across
+  // thirty seconds, and a plan that makes a Short does both in one breath.
   const added = placed.length;
-  if (world.duration > 0 && added > Math.max(4, world.duration / 12)) {
+  if (remaining > 0 && added > Math.max(4, remaining / 12)) {
     problems.push(
-      `${added} things are added to a ${Math.round(world.duration)}s video. That reads as a slideshow — one title, three or four kinetic captions and two or three pictures is a produced edit.`
+      `${added} things are added to a ${Math.round(remaining)}s video. That reads as a slideshow — one title, three or four kinetic captions and two or three pictures is a produced edit.`
     );
   }
 

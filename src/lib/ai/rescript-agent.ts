@@ -225,7 +225,11 @@ The tools:
 You get at most 6 looks. Do not look at something you were already shown above.
 
 When you are ready, reply with the plan instead:
-{"thinking":"how this makes the highest-quality edit","summary":"one sentence, what you did","ops":[ ... ]}`;
+{"thinking":"how this makes the highest-quality edit","summary":"one sentence, what you did","ops":[ ... ]}
+
+"ops" must not be empty. If you are still working out what to do, use a tool — a plan with no operations
+is not a way to think out loud, it is the answer "nothing about this video needs changing", and you will be
+asked to justify it in the summary.`;
 
 /**
  * Proposal mode.
@@ -245,7 +249,8 @@ The looking tools work exactly the same. When you are ready, the plan takes this
  "findings":["what you noticed about this footage, one short sentence each"],
  "steps":[{"title":"Short name","detail":"one sentence on why","ops":[ ... ]}]}
 
-Do NOT use the top-level "ops" field in this mode — put every operation inside a step.
+Do NOT use the top-level "ops" field in this mode — put every operation inside a step, and do not send an
+empty "steps".
 
 Base "findings" on the measurements you were given, not on impressions: quote the filler count, the dead
 air, the pace, the length. Say what you would do about each. If something is already fine, say so rather
@@ -263,6 +268,29 @@ function stripFence(value: string): string {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```$/, "")
     .trim();
+}
+
+/**
+ * Undo the one JSON slip these models actually make.
+ *
+ * Observed live, twice in one session: a complete, well-reasoned five-step
+ * proposal — findings, ordering, colour discipline, the lot — thrown away
+ * because it ended `"hold":1.2"` instead of `"hold":1.2`. A stray quote after a
+ * number. The retry then came back worse each time, so a single mistyped
+ * character cost the best answer of the run.
+ *
+ * The repair is deliberately narrow: a double quote wedged between a numeric
+ * literal and the delimiter that must follow it is not valid JSON under any
+ * reading, so removing it cannot change the meaning of a document that would
+ * otherwise have parsed. Anything more ambitious — balancing braces, closing
+ * strings — starts guessing at intent, and a plan invented by the parser is
+ * worse than no plan.
+ */
+export function repairJson(value: string): string {
+  // The colon must be the one that closes a key — hence the leading quote.
+  // Without it, `"aspect":"9:16",` matches on the colon *inside* the string and
+  // the repair strips a quote that was doing its job.
+  return value.replace(/("\s*:\s*-?\d+(?:\.\d+)?)"(\s*[,}\]])/g, "$1$2");
 }
 
 function firstJsonObject(value: string): string | null {
@@ -633,6 +661,49 @@ function describe(
   };
 }
 
+/**
+ * A sentence describing what a plan does, for when the model did not write one.
+ *
+ * Observed live: a plan can come back complete and correct with `summary` an
+ * empty string, and the panel then reports nothing at all — the edit happens in
+ * silence, which reads as a bug rather than as a terse answer. The schema
+ * defaults it to "" rather than rejecting, because throwing away eleven good
+ * operations over a missing sentence would be the worse trade; so the sentence
+ * is written here instead, from the operations themselves.
+ */
+function summarise(ops: AgentOp[]): string {
+  if (!ops.length) return "Nothing to change.";
+
+  const parts: string[] = [];
+  const has = (name: AgentOp["op"]) => ops.some((o) => o.op === name);
+
+  const frame = ops.find((o) => o.op === "setFrame");
+  if (frame && frame.op === "setFrame" && frame.aspect !== "source") {
+    parts.push(`reframed to ${frame.aspect}`);
+  }
+  if (has("keepOnly")) parts.push("kept the best spans");
+  else if (has("deleteRange")) parts.push("cut a section");
+  if (has("removeFillers")) parts.push("cut the fillers");
+  if (has("removeSilences")) parts.push("cut the dead air");
+  if (has("setAllTransitions") || has("setTransition")) parts.push("set transitions");
+  if (ops.some((o) => o.op === "subtitles" && o.action !== "off")) {
+    parts.push("burned in subtitles");
+  }
+
+  const captions = ops.filter(
+    (o) => o.op === "addText" || o.op === "captionPhrase"
+  ).length;
+  if (captions) parts.push(`added ${captions} caption${captions === 1 ? "" : "s"}`);
+  const images = ops.filter((o) => o.op === "addImage").length;
+  if (images) parts.push(`added ${images} picture${images === 1 ? "" : "s"}`);
+
+  if (!parts.length) {
+    return `Ran ${ops.length} operation${ops.length === 1 ? "" : "s"}.`;
+  }
+  const sentence = parts.join(", ");
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+}
+
 /* ---------------------------------- parsing -------------------------------- */
 
 interface ParsedReply {
@@ -651,23 +722,36 @@ function parseReply(text: string): ParsedReply {
   try {
     value = JSON.parse(candidate);
   } catch (err) {
-    return {
-      call: null,
-      plan: null,
-      problem: `invalid JSON (${err instanceof Error ? err.message : "parse error"})`,
-    };
+    try {
+      value = JSON.parse(repairJson(candidate));
+    } catch {
+      return {
+        call: null,
+        plan: null,
+        problem: `invalid JSON (${err instanceof Error ? err.message : "parse error"})`,
+      };
+    }
   }
 
   if (value && typeof value === "object" && typeof (value as { tool?: unknown }).tool === "string") {
-    const record = value as { tool: string; args?: unknown };
+    const record = value as Record<string, unknown> & { tool: string };
+    // Arguments belong under `args`, and half the time they arrive beside
+    // `tool` instead — `{"tool":"find_phrase","phrase":"four minutes"}`. Both
+    // say the same thing perfectly clearly, and answering "no phrase given" to
+    // the second was the harness being pedantic at its own expense: the model
+    // spent three turns trying to satisfy it and ran out of looks.
+    const loose: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(record)) {
+      if (key === "tool" || key === "args" || key === "thinking") continue;
+      loose[key] = item;
+    }
+    const nested =
+      record.args && typeof record.args === "object"
+        ? (record.args as Record<string, unknown>)
+        : {};
+
     return {
-      call: {
-        tool: record.tool,
-        args:
-          record.args && typeof record.args === "object"
-            ? (record.args as Record<string, unknown>)
-            : {},
-      },
+      call: { tool: record.tool, args: { ...loose, ...nested } },
       plan: null,
       problem: null,
     };
@@ -721,7 +805,31 @@ export async function planRescriptEdit(
   });
 
   const trace: RescriptTraceEntry[] = [];
+  /**
+   * Answers already given, keyed by the call that produced them.
+   *
+   * Observed live: the model will sometimes ask `find_phrase` the same question
+   * twice in a row. Charging a look for an answer it has already been told is
+   * how a six-look budget gets spent on four questions, so a repeat is answered
+   * from here, is not counted, and says so — which is also the fastest way for
+   * the model to notice it is going in a circle.
+   */
+  const answered = new Map<string, string>();
   let looks = 0;
+  /**
+   * Whether an empty plan has already been queried.
+   *
+   * An empty plan is ambiguous, and the ambiguity used to resolve the wrong
+   * way. Observed live: asked to propose an edit, the model spent its turn
+   * reasoning, ended with "let me read the transcript first" — and returned a
+   * plan-shaped object with no operations in it. That was taken as "there is
+   * nothing to do here", so a request to edit a forty-five minute recording
+   * came back having done nothing and saying nothing was wrong.
+   *
+   * So it is asked once. "Nothing to do" is a real answer and stays available;
+   * it just has to be meant.
+   */
+  let queriedEmpty = false;
   let problem = "no output";
   let repaired = false;
 
@@ -738,6 +846,17 @@ export async function planRescriptEdit(
     });
 
     const reply = parseReply(result.text);
+    // Set RESCRIPT_AGENT_DEBUG to a path to see what the model actually said.
+    // The two harness bugs worth having — a plan discarded over a stray quote,
+    // and a tool call with its argument in the wrong place — were both
+    // invisible from the outside: the route answered 200 with an empty plan.
+    if (process.env.RESCRIPT_AGENT_DEBUG) {
+      const { appendFileSync } = await import("node:fs");
+      appendFileSync(
+        process.env.RESCRIPT_AGENT_DEBUG,
+        `\n=== turn ${turn} ===\n${result.text}\n`
+      );
+    }
 
     /* ----------------------------- a look ------------------------------- */
     if (reply.call) {
@@ -753,12 +872,23 @@ export async function planRescriptEdit(
         continue;
       }
 
+      const key = `${reply.call.tool}:${JSON.stringify(reply.call.args)}`;
+      const seen = answered.get(key);
+      if (seen !== undefined) {
+        messages.push({
+          role: "user",
+          content: `You already asked that, and the answer has not changed:\n\n${seen}\n\n(This one was free. ${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left — ask something different, or reply with the plan.)`,
+        });
+        continue;
+      }
+
       looks += 1;
-      const answered = runTool(reply.call, input.context, lines);
-      trace.push({ tool: reply.call.tool, detail: answered.detail });
+      const result2 = runTool(reply.call, input.context, lines);
+      answered.set(key, result2.result);
+      trace.push({ tool: reply.call.tool, detail: result2.detail });
       messages.push({
         role: "user",
-        content: `${answered.result}\n\n(${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left. Use another, or reply with the plan.)`,
+        content: `${result2.result}\n\n(${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left. Use another, or reply with the plan.)`,
       });
       continue;
     }
@@ -798,6 +928,18 @@ export async function planRescriptEdit(
     const everyOp = [...steps.flatMap((s) => s.ops), ...flat.ops];
     const proposed = everyOp.length;
     const askedForNothing = !parsed.ops.length && !parsed.steps.length;
+
+    if (!proposed && askedForNothing && !queriedEmpty) {
+      queriedEmpty = true;
+      messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
+      messages.push({
+        role: "user",
+        content: propose
+          ? "That plan has no steps in it. If you still need to look at something, use a tool. If you are ready, send the steps. If you genuinely believe nothing about this video should change, say exactly why in the summary and send it again."
+          : "That plan has no operations in it. If you still need to look at something, use a tool. If you are ready, send the operations. If you genuinely believe nothing needs changing, say exactly why in the summary and send it again.",
+      });
+      continue;
+    }
 
     if (!proposed && !askedForNothing) {
       problem = rejected[0] ?? "no usable operations";
@@ -848,7 +990,7 @@ export async function planRescriptEdit(
     }
 
     return {
-      summary: parsed.summary,
+      summary: parsed.summary.trim() || summarise(everyOp),
       findings: parsed.findings,
       steps,
       ops: flat.ops,

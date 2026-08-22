@@ -23,6 +23,7 @@ import { subtitleBand, typeScale } from "../src/rescript/lib/overlay/layout";
 import { fittedCharsPerLine } from "../src/rescript/lib/overlay/subtitles";
 import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
 import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+import { repairJson } from "../src/lib/ai/rescript-agent";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -310,13 +311,107 @@ function complainsAbout(raw: unknown[], needle: string, w: PlanWorld = world) {
     { ...world, can: { generateImage: true, photoSearch: false } }
   );
 
-  // A caption timed after a cut is timed against a clock that no longer exists.
+  // The clock shrinks as the plan cuts, and later times are judged against what
+  // is left — the real failure of a "make it a 30 second short" plan.
   complainsAbout(
     [
-      { op: "removeSilences", minDuration: 0.4 },
-      { op: "addText", text: "Later", start: 60, duration: 3 },
+      { op: "keepOnly", ranges: [{ from: 10, to: 25 }, { from: 60, to: 75 }] },
+      { op: "addText", text: "Closing", start: 90, duration: 3 },
     ],
-    "shorten the video"
+    "at most 30.0s"
+  );
+  saysNothing([
+    { op: "keepOnly", ranges: [{ from: 10, to: 25 }, { from: 60, to: 75 }] },
+    { op: "addText", text: "Closing", start: 24, duration: 4, position: "top" },
+  ]);
+  complainsAbout(
+    [
+      { op: "keepOnly", ranges: [{ from: 0, to: 30 }] },
+      { op: "splitAt", at: 45 },
+    ],
+    "outside the video"
+  );
+  // Each cut is written against the clock the one before it left behind, so
+  // they compound rather than each measuring the original.
+  complainsAbout(
+    [
+      { op: "deleteRange", from: 0, to: 100 },
+      { op: "addText", text: "Nope", start: 30, duration: 3 },
+    ],
+    "at most 20.0s"
+  );
+
+  // Two kinetic captions on the same words in the same band. Both are timed
+  // from the transcript, so they are comparable to each other even though
+  // neither is comparable to an addText time.
+  complainsAbout(
+    [
+      { op: "captionPhrase", phrase: "three times faster", position: "upper-third" },
+      { op: "captionPhrase", phrase: "shipped it", position: "upper-third" },
+    ],
+    "same time"
+  );
+
+  // Cuts first and then times written for the clock they leave behind is the
+  // documented shape of a good plan, not a defect. Only an unreachable time is.
+  saysNothing([
+    { op: "removeSilences", minDuration: 0.4 },
+    { op: "addText", text: "Later", start: 60, duration: 3, position: "top" },
+  ]);
+  complainsAbout(
+    [
+      { op: "keepOnly", ranges: [{ from: 0, to: 30 }] },
+      { op: "removeFillers" },
+      { op: "addText", text: "Later", start: 60, duration: 3, position: "top" },
+    ],
+    "at most 30.0s"
+  );
+}
+
+/* ------------------------------ reply parsing ------------------------------ */
+
+{
+  // The exact slips seen from a live model, both of which threw away a complete
+  // plan before the harness learned to tolerate them.
+  const strayAfterFloat =
+    '{"summary":"x","ops":[{"op":"captionPhrase","phrase":"a b","hold":1.2"}]}';
+  const strayBeforeComma =
+    '{"summary":"x","ops":[{"op":"setFrame","aspect":"9:16","focusY":0.4","background":"blur"}]}';
+
+  for (const [label, raw] of [
+    ["stray quote before a closing brace", strayAfterFloat],
+    ["stray quote before a comma", strayBeforeComma],
+  ] as const) {
+    assert(
+      (() => {
+        try {
+          JSON.parse(raw);
+          return false;
+        } catch {
+          return true;
+        }
+      })(),
+      `${label}: the fixture should not be valid JSON to begin with`
+    );
+    const fixed = repairJson(raw);
+    let parsed: { ops?: unknown[] } | null = null;
+    try {
+      parsed = JSON.parse(fixed);
+    } catch {
+      parsed = null;
+    }
+    assert(parsed !== null, `${label}: should parse after repair, got ${fixed}`);
+    assert(
+      siftOps(parsed!.ops as unknown[]).ops.length === 1,
+      `${label}: the repaired operation should survive the schema`
+    );
+  }
+
+  // The repair must not touch anything that already parses.
+  const good = '{"summary":"1.5\" of rain","ops":[],"n":2.5}';
+  assert(
+    repairJson(good) === good,
+    `a valid document must come back untouched, got ${repairJson(good)}`
   );
 }
 
