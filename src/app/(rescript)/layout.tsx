@@ -21,11 +21,11 @@ const marker = Permanent_Marker({
   weight: "400",
 });
 
-// Ported from Rescript's own root layout. Upstream also mounted Google
+// Ported from MotionScript's own root layout. Upstream also mounted Google
 // Analytics and Vercel Web Analytics pointed at getrescript.com's properties;
 // those are the upstream project's accounts, not ours, so they are left out.
 
-const title = "Rescript — edit videos like you edit text";
+const title = "MotionScript — edit videos like you edit text";
 const description =
   "A fully offline, open-source transcript-based video editor. Transcribe with Whisper, cut by deleting words, export with ffmpeg — on your device.";
 
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    siteName: "Rescript",
+    siteName: "MotionScript",
     url: "/rescript",
     title,
     description,
@@ -50,7 +50,7 @@ export const metadata: Metadata = {
         url: "/rescript-og.png",
         width: 1200,
         height: 630,
-        alt: "Rescript — a transcript-based video editor running in the browser",
+        alt: "MotionScript — a transcript-based video editor running in the browser",
       },
     ],
   },
@@ -69,7 +69,7 @@ export const metadata: Metadata = {
 const appearanceBootScript = `(function(){try{if(localStorage.getItem("rescript.appearance")!=="light")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}})();`;
 const localeBootScript = buildLocaleBootScript();
 
-export default function RescriptLayout({
+export default function MotionScriptLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;

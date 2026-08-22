@@ -14,7 +14,7 @@ const Editor = dynamic(() => import("@/rescript/components/Editor"), {
   ),
 });
 
-export default function RescriptPage() {
+export default function MotionScriptPage() {
   return (
     <I18nProvider>
       <Editor />

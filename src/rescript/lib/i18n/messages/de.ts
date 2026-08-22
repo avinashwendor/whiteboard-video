@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** German UI catalog. Every key in {@link en} must be present. */
 export const de: Record<MessageKey, string> = {
-  "app.title": "Rescript — Videos bearbeiten wie Text",
+  "app.title": "MotionScript — Videos bearbeiten wie Text",
   "common.cancel": "Abbrechen",
   "common.close": "Schließen",
   "common.delete": "Löschen",
@@ -23,11 +23,6 @@ export const de: Record<MessageKey, string> = {
   "settings.privacy": "Datenschutz",
   "settings.helpImprove": "Hilf mit, die App zu verbessern",
   "settings.telemetryHelp": "Anonyme Statistiken zur Funktionsnutzung und Absturzberichte senden.",
-  "settings.support": "Support / Feedback",
-  "settings.reportIssue": "Problem melden",
-  "settings.homepage": "Homepage",
-  "settings.github": "GitHub",
-  "settings.followX": "Auf X folgen",
   "model.transcriptSource": "Transkriptquelle",
   "model.language": "Sprache",
   "model.transcriptLanguage": "Transkriptsprache",
@@ -165,14 +160,7 @@ export const de: Record<MessageKey, string> = {
   "import.chooseFileShort": "Datei wählen…",
   "import.chooseFile": "SRT-, VTT- oder JSON-Transkript wählen",
   "import.selected": "{name} ausgewählt",
-  "banner.faster": "Schnellere Transkription und Exporte?",
-  "banner.getDesktop": "Rescript Desktop-App holen",
-  "banner.downloadFor": "Für {platform} herunterladen",
-  "banner.dismiss": "Ausblenden",
-  "social.githubRepo": "GitHub-Repository",
-  "social.discordServer": "Discord-Server",
-  "social.xProfile": "X-Profil",
-  "globalError.title": "Rescript — etwas ist schiefgelaufen",
+  "globalError.title": "MotionScript — etwas ist schiefgelaufen",
   "globalError.heading": "Etwas ist schiefgelaufen",
   "globalError.body":
     "Im Editor ist ein unerwarteter Fehler aufgetreten. Deine gespeicherten Projekte sind noch auf diesem Gerät — nach dem Neuladen sollten sie wieder da sein.",

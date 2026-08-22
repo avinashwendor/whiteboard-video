@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** Korean UI catalog. Every key in {@link en} must be present. */
 export const ko: Record<MessageKey, string> = {
-  "app.title": "Rescript — 텍스트를 편집하듯 동영상 편집",
+  "app.title": "MotionScript — 텍스트를 편집하듯 동영상 편집",
   "common.cancel": "취소",
   "common.close": "닫기",
   "common.delete": "삭제",
@@ -23,11 +23,6 @@ export const ko: Record<MessageKey, string> = {
   "settings.privacy": "개인정보",
   "settings.helpImprove": "앱 개선에 참여",
   "settings.telemetryHelp": "익명의 기능 사용 통계와 충돌 보고서를 보냅니다.",
-  "settings.support": "지원 / 피드백",
-  "settings.reportIssue": "문제 신고",
-  "settings.homepage": "홈페이지",
-  "settings.github": "GitHub",
-  "settings.followX": "X에서 팔로우",
   "model.transcriptSource": "자막 원본",
   "model.language": "언어",
   "model.transcriptLanguage": "자막 언어",
@@ -165,14 +160,7 @@ export const ko: Record<MessageKey, string> = {
   "import.chooseFileShort": "파일 선택…",
   "import.chooseFile": "SRT, VTT 또는 JSON 자막 선택",
   "import.selected": "{name} 선택됨",
-  "banner.faster": "자막 만들기와 내보내기를 더 빠르게 하고 싶나요?",
-  "banner.getDesktop": "Rescript 데스크톱 앱 받기",
-  "banner.downloadFor": "{platform}용 다운로드",
-  "banner.dismiss": "닫기",
-  "social.githubRepo": "GitHub 저장소",
-  "social.discordServer": "Discord 서버",
-  "social.xProfile": "X 프로필",
-  "globalError.title": "Rescript — 문제가 발생했습니다",
+  "globalError.title": "MotionScript — 문제가 발생했습니다",
   "globalError.heading": "문제가 발생했습니다",
   "globalError.body":
     "편집기에서 예상치 못한 오류가 발생했습니다. 저장된 프로젝트는 이 기기에 남아 있으니, 다시 불러오면 복구될 것입니다.",
