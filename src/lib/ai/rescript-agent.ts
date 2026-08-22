@@ -6,15 +6,31 @@ import {
   siftOps,
   type AgentOp,
 } from "@/rescript/lib/overlay/ops-schema";
+import { verifyPlan, type PlanWorld } from "@/rescript/lib/overlay/verify";
 
 /**
  * Turns "put a title card on the first clip and burn in subtitles" into work.
  *
- * Same split as the studio's editor agent: the model reads a pruned view of the
- * project and answers with operations the browser runs against pipelines that
- * already exist. It never writes an asset — an `addImage` is a *request* for a
- * picture, fulfilled by the browser calling the image route — and it never
- * emits anything that is not in the schema.
+ * The model plans; the browser executes. It never writes an asset — an
+ * `addImage` is a *request* for a picture, fulfilled by the browser calling the
+ * image route — and it never emits anything that is not in the schema.
+ *
+ * Between those two things sits a harness, and the harness is most of what makes
+ * the answers good:
+ *
+ *  - It can **read** before it writes. A long recording no longer has to be
+ *    stuffed into one prompt and hoped over; the model asks for the parts of the
+ *    transcript it needs, checks that a phrase it wants to caption is really
+ *    said, and looks at what is already on screen. Short videos still take the
+ *    one-shot path, because a round trip to fetch something already in front of
+ *    you is just latency.
+ *  - Its plan is **verified against the project** before anything runs, by the
+ *    same simulation the browser would otherwise discover one failure at a time.
+ *    Problems go back to the model in its own vocabulary and it gets one attempt
+ *    to fix them, which is where most of the difference between a plan that
+ *    half-lands and one that lands shows up.
+ *  - It remembers **the conversation**, so "make it bigger" and "actually, put
+ *    that at the top instead" mean something.
  */
 
 const SYSTEM = `You are the editor of a video. The person tells you what they want; you answer with the operations that make it happen.
@@ -25,9 +41,6 @@ All times are seconds on the FINISHED video's clock — after cuts, which is wha
 NUMBERING
 Elements are numbered from 1, exactly as they are listed to you. "The first caption" is element 1. Never subtract one from anything.
 Transition boundaries are numbered from 1: boundary 1 is between clip 1 and clip 2.
-
-Reply with JSON only — no prose, no code fence:
-{"reasoning":"think step-by-step about how to make this the highest quality, most dynamic edit. Analyze transcript and plan visuals, text, subtitles, colors, and animations.","summary":"one sentence, what you did","ops":[ ... ]}
 
 OPERATIONS
 
@@ -69,6 +82,15 @@ OPERATIONS
   Burned-in captions, built from the transcript that already exists. presets: clean broadcast shorts karaoke minimal
   "karaoke" lights up each word as it is spoken. Turning subtitles on generates the cues if there are none.
 
+{"op":"setFrame","aspect":"9:16","fit":"cover","zoom":1,"focusX":0.5,"focusY":0.4,"background":"blur"}
+  The SHAPE of the finished video. aspect: source 16:9 9:16 1:1 4:5 4:3 2.39:1
+  "cover" crops the footage to fill the frame — this is what you want for a vertical cut of a landscape
+  recording. "contain" fits the whole picture in and fills the rest with a blurred blow-up of it.
+  focusX/focusY choose which part of the source stays in shot, 0..1 from the top-left; a talking head
+  usually wants focusY around 0.35-0.45 so the face is not cropped at the chin.
+  A request for a Short, a Reel, a TikTok or "vertical" means setFrame to 9:16 BEFORE anything else —
+  captions styled for a Short in a widescreen frame are not a Short.
+
 {"op":"removeFillers"}                       — cut every "um", "uh" and similar
 {"op":"removeSilences","minDuration":0.4}    — cut pauses at least this long
 {"op":"deletePhrase","text":"you know what I mean","occurrence":2}
@@ -77,7 +99,7 @@ OPERATIONS
 
 {"op":"deleteRange","from":42,"to":55}
   Cuts a span of the finished video. Use this for a tangent, a stumble, or dead air that the transcript shows
-  you. The times are the ones stamped in the transcript below.
+  you. The times are the ones stamped in the transcript.
 
 {"op":"keepOnly","ranges":[{"from":12,"to":28},{"from":61,"to":74}]}
   Keeps only these spans and cuts everything else — one operation for a highlight reel, a trailer, or a
@@ -87,8 +109,9 @@ OPERATIONS
 {"op":"captionPhrase","phrase":"three times faster","text":"3× FASTER","style":"badge","position":"upper-third","enter":"pop","hold":0.8}
   Puts words on screen exactly as they are spoken. The browser finds the phrase in the transcript and takes
   the timing from the word timings, so it lands on the beat — use this for every kinetic caption instead of
-  guessing a time with addText. "phrase" must appear in the transcript; "text" is what is shown and can be
-  shorter or capitalised. This is the operation that makes an edit feel produced.
+  guessing a time with addText. "phrase" must appear in the transcript VERBATIM; "text" is what is shown and
+  can be shorter or capitalised. Check with the find_phrase tool if you are not certain. This is the
+  operation that makes an edit feel produced.
 
 {"op":"splitAt","at":30}
   Puts a clip boundary at that second without removing anything. Transitions sit between clips, so if the
@@ -98,22 +121,23 @@ RULES ABOUT ORDER
 Cuts change the clock. Put every cutting operation (removeFillers, removeSilences, deletePhrase,
 deleteRange, keepOnly, splitAt) FIRST, and write every later time — caption starts, boundary numbers — as
 they will be AFTER those cuts. Removing fillers and silences typically takes 5-15% off the length; if you
-cannot work out the new time exactly, place captions relative to the start of the video, which does not
-move.
+cannot work out the new time exactly, prefer captionPhrase (which is timed from the words themselves and is
+immune to this) or place captions relative to the start of the video, which does not move.
 
 DOING A WHOLE EDIT AT ONCE
 When asked for something broad — "edit this for me", "make it a short", "tighten it up", "make it
 publishable" — do the entire job in one plan, in this order:
-  1. removeFillers, then removeSilences (0.35-0.5s is a natural threshold for talking-head footage).
-  2. keepOnly or deleteRange to drop tangents and dead ends, if a target length was named or the material
+  1. setFrame, if the format they asked for is not the shape the footage already is.
+  2. removeFillers, then removeSilences (0.35-0.5s is a natural threshold for talking-head footage).
+  3. keepOnly or deleteRange to drop tangents and dead ends, if a target length was named or the material
      obviously runs long. Respect a requested length: a "30 second short" means the kept spans add up to
      roughly 30 seconds.
-  3. setAllTransitions — a dissolve or a fade of 0.3-0.5s reads well over the jump cuts that step 1 leaves.
-  4. subtitles on, with a preset that matches the format ("shorts" or "karaoke" for vertical/social,
+  4. setAllTransitions — a dissolve or a fade of 0.3-0.5s reads well over the jump cuts that step 2 leaves.
+  5. subtitles on, with a preset that matches the format ("shorts" or "karaoke" for vertical/social,
      "clean" or "broadcast" otherwise).
-  5. One addText title card over the opening two or three seconds, taken from what they actually talk
+  6. One addText title card over the opening two or three seconds, taken from what they actually talk
      about in the transcript. Not a generic word like "Intro".
-  6. Add rich B-roll (addImage) and kinetic text (captionPhrase). A premium edit MUST have high visual variety! Liberally add real photos (query) or generated artwork (prompt) when the speaker mentions concrete concepts, locations, or emotions. Use captionPhrase with striking styles (like badge) and popping colors/animations. Make it look like the best edit in the world.
+  7. B-roll (addImage) and kinetic text (captionPhrase) where the transcript earns them.
 
 HOW TO MAKE IT LOOK EDITED, NOT GENERATED
 These are the rules a working editor applies without thinking. Follow them.
@@ -125,7 +149,7 @@ These are the rules a working editor applies without thinking. Follow them.
 
   Restraint. One idea on screen at a time. A title card OR a kinetic caption, not both. If a caption is
   already up, wait for it to leave before the next one. Across a two-minute video: one title, three or four
-  kinetic captions, two or three pictures. More than that is a slideshow.
+  kinetic captions, two or three pictures. More than that is a slideshow, and it will be rejected.
 
   Colour. Pick ONE accent and use it for everything that needs to pop — the karaoke highlight, a badge, the
   one word you emphasise. Everything else is white with a dark scrim. Never more than two colours plus
@@ -150,6 +174,11 @@ These are the rules a working editor applies without thinking. Follow them.
   the title. Subtitles are smaller than both, and never compete for attention — they are read, not looked
   at.
 
+  Vertical. A 9:16 frame is not a widescreen edit made narrow. There is a third as much width, so captions
+  are shorter and stacked, pictures go full width across the top or the bottom rather than into a corner,
+  and the middle of the frame belongs to the speaker. Subtitles sit centre or low-centre where a thumb is
+  not covering them.
+
 B-ROLL
 When the speaker names something concrete and visual — a place, an object, a company, a chart, a person —
 put a picture over it for the seconds they are talking about it. Use "query" for things that exist and can
@@ -157,7 +186,7 @@ be photographed and "prompt" for things that cannot. Two or three across a coupl
 video; one every ten seconds is a slideshow. Never cover the speaker's face: use a corner or a side, size
 "s" or "m", and let it come and go with a pop or a fade. Hold a picture for as long as they are talking
 about the thing — two to four seconds — and take it away when they move on. A photograph of something real
-beats generated art whenever the thing exists; generate only what cannot be photographed. BE PROACTIVE: even if they don't explicitly ask for pictures, add them to elevate the production quality!
+beats generated art whenever the thing exists; generate only what cannot be photographed.
 
 RULES
 - Answer only with operations that do what was asked. On a narrow request ("add a caption", "cut the ums")
@@ -165,10 +194,38 @@ RULES
   job is what was asked.
 - If they ask for something this deployment cannot do, say so in "summary" and return an empty "ops".
 - Prefer updating an existing element over adding a second one on top of it.
-- Text on video needs contrast: over footage, either give it a background scrim or turn on a colour that
-  reads. White with a dark background is the safe default.
 - If no time is given for a new element, start it at the current playhead and run it for 3 seconds.
 - Never invent an element number that is not in the list.`;
+
+/**
+ * The reply protocol.
+ *
+ * Deliberately a JSON discriminated union rather than the provider's own
+ * function-calling: this endpoint is OpenAI-shaped but the deployment behind it
+ * varies, and a protocol that only needs `response_format: json_object` works on
+ * all of them. The cost is one line of parsing; the benefit is that the harness
+ * does not break when the model behind the id changes.
+ */
+const PROTOCOL = `HOW TO REPLY
+
+Every reply is one JSON object and nothing else — no prose around it, no code fence.
+
+You may LOOK before you answer. To use a tool, reply:
+{"thinking":"why you need this","tool":"<name>","args":{ ... }}
+
+The tools:
+  read_transcript   {"from":40,"to":95}      Lines of the transcript between those seconds of the finished video.
+  search_transcript {"query":"pricing"}      Every line that mentions it, with its time.
+  find_phrase       {"phrase":"three times faster"}
+                                             Whether captionPhrase can time to those exact words, and when they are said.
+                                             Use this before every captionPhrase you are not certain of.
+  inspect           {}                       What is on screen now: elements, subtitles, transitions, the frame.
+  measure           {}                       Counts from the footage: fillers, dead air, pace, clips.
+
+You get at most 6 looks. Do not look at something you were already shown above.
+
+When you are ready, reply with the plan instead:
+{"thinking":"how this makes the highest-quality edit","summary":"one sentence, what you did","ops":[ ... ]}`;
 
 /**
  * Proposal mode.
@@ -182,8 +239,8 @@ RULES
 const PROPOSE_SUFFIX = `
 
 YOU ARE PROPOSING, NOT EXECUTING
-Reply with JSON only:
-{"reasoning":"deep analysis and planning step-by-step",
+The looking tools work exactly the same. When you are ready, the plan takes this shape instead:
+{"thinking":"deep analysis and planning, step by step",
  "summary":"one sentence on the edit you are proposing",
  "findings":["what you noticed about this footage, one short sentence each"],
  "steps":[{"title":"Short name","detail":"one sentence on why","ops":[ ... ]}]}
@@ -195,9 +252,9 @@ air, the pace, the length. Say what you would do about each. If something is alr
 than inventing work.
 
 Group the steps the way an editor would talk about them, cutting steps first, in this order where they
-apply: tighten (fillers, silences), choose (what to keep), pace (transitions), read (subtitles), produce
-(titles, kinetic captions, b-roll). Three to six steps. Every step must carry the operations that do it —
-a step with an empty "ops" is not a step, it is a comment.`;
+apply: shape (the frame), tighten (fillers, silences), choose (what to keep), pace (transitions), read
+(subtitles), produce (titles, kinetic captions, b-roll). Three to six steps. Every step must carry the
+operations that do it — a step with an empty "ops" is not a step, it is a comment.`;
 
 function stripFence(value: string): string {
   const trimmed = value.trim();
@@ -232,9 +289,14 @@ export interface RescriptAgentContext {
     end: number;
     position: { x: number; y: number };
   }>;
-  subtitles: { enabled: boolean; cueCount: number; preset?: string };
+  subtitles: {
+    enabled: boolean;
+    cueCount: number;
+    preset?: string;
+    position?: "top" | "center" | "bottom";
+  };
   transitions: Array<{ between: number; kind: string; duration: number }>;
-  /** Plain transcript with coarse timestamps, trimmed to fit the window. */
+  /** Plain transcript with per-sentence timestamps, on the output clock. */
   transcript?: string;
   /** Measured in the browser — filler counts, dead air, pace. */
   analysis?: {
@@ -251,7 +313,18 @@ export interface RescriptAgentContext {
   };
   /** Frame width ÷ height. Below 1 is a vertical video. */
   aspect?: number;
+  /** The output frame as the project has it set. */
+  frame?: { aspect: string; fit: string; zoom: number };
   can: { generateImage: boolean; photoSearch: boolean };
+}
+
+/** One exchange the person has already had, so follow-ups make sense. */
+export interface RescriptExchange {
+  instruction: string;
+  /** What the assistant said it did. */
+  summary: string;
+  /** Lines from the run log, so "that didn't work" has a referent. */
+  outcome?: string;
 }
 
 export interface RescriptAgentInput {
@@ -259,6 +332,8 @@ export interface RescriptAgentInput {
   context: RescriptAgentContext;
   /** "propose" returns named steps to accept; "execute" returns flat ops. */
   mode?: "propose" | "execute";
+  /** Earlier turns in this conversation, oldest first. */
+  history?: RescriptExchange[];
   model?: string;
   signal?: AbortSignal;
 }
@@ -269,15 +344,224 @@ export interface RescriptStep {
   ops: AgentOp[];
 }
 
+/** One line of what the agent did on the way to its answer. */
+export interface RescriptTraceEntry {
+  tool: string;
+  detail: string;
+}
+
 export interface RescriptPlan {
   summary: string;
   findings: string[];
   steps: RescriptStep[];
   ops: AgentOp[];
   rejected: string[];
+  /** What it looked at, for the log. */
+  trace: RescriptTraceEntry[];
+  /** Problems the verifier found that survived the repair attempt. */
+  warnings: string[];
 }
 
-function describe(context: RescriptAgentContext): string {
+/* -------------------------------- transcript ------------------------------- */
+
+interface TranscriptLine {
+  at: number;
+  text: string;
+}
+
+/**
+ * Split the stamped transcript back into addressable lines.
+ *
+ * The browser builds it as `[m:ss] a whole sentence` precisely so it can be cut
+ * on sentence boundaries; parsing it back is how the reading tools window into a
+ * long recording without the whole thing ever entering the prompt.
+ */
+function parseTranscript(transcript: string | undefined): TranscriptLine[] {
+  if (!transcript) return [];
+  const lines: TranscriptLine[] = [];
+  for (const raw of transcript.split("\n")) {
+    const match = /^\[(\d+):(\d\d(?:\.\d+)?)\]\s*(.*)$/.exec(raw.trim());
+    if (!match) {
+      // A continuation of the previous line rather than a new one.
+      if (lines.length && raw.trim()) lines[lines.length - 1].text += ` ${raw.trim()}`;
+      continue;
+    }
+    lines.push({
+      at: Number(match[1]) * 60 + Number(match[2]),
+      text: match[3],
+    });
+  }
+  return lines;
+}
+
+function stamp(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function renderLines(lines: TranscriptLine[]): string {
+  return lines.map((line) => `[${stamp(line.at)}] ${line.text}`).join("\n");
+}
+
+/** Roughly what fits in the prompt beside everything else. */
+const INLINE_TRANSCRIPT_BUDGET = 9_000;
+
+/**
+ * Every Nth line, for a transcript too long to include whole.
+ *
+ * An outline is not a summary: it is the real sentences, just sparser, so the
+ * model can see the arc of the video and knows where to read in full. Handing it
+ * a truncated first 9,000 characters instead — which is what happened before —
+ * meant a plan for a forty-minute recording could only ever be a plan for its
+ * first six minutes.
+ */
+function outline(lines: TranscriptLine[], budget: number): string {
+  if (!lines.length) return "";
+  const step = Math.max(1, Math.ceil(lines.length / Math.max(1, budget / 90)));
+  const picked = lines.filter((_, i) => i % step === 0);
+  return renderLines(picked);
+}
+
+function normalise(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}'\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* ---------------------------------- tools ---------------------------------- */
+
+interface ToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+function num(args: Record<string, unknown>, key: string): number | null {
+  const value = args[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function str(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * Answer a tool call from the request payload.
+ *
+ * Every tool is a pure function of what the browser already sent, so a look
+ * costs one model round trip and nothing else — no second request to the
+ * browser, no state to keep, and no way for a tool to see anything the person
+ * did not hand over.
+ */
+function runTool(
+  call: ToolCall,
+  context: RescriptAgentContext,
+  lines: TranscriptLine[]
+): { result: string; detail: string } {
+  switch (call.tool) {
+    case "read_transcript": {
+      const from = num(call.args, "from") ?? 0;
+      const to = num(call.args, "to") ?? from + 60;
+      const window = lines.filter((line) => line.at >= from && line.at <= to);
+      if (!window.length) {
+        return {
+          result: `Nothing is said between ${stamp(from)} and ${stamp(to)}.`,
+          detail: `Read ${stamp(from)}–${stamp(to)} — nothing there`,
+        };
+      }
+      // A window is capped so a model that asks for the whole video cannot
+      // simply route around the outline.
+      const capped = renderLines(window).slice(0, 6_000);
+      return {
+        result: capped,
+        detail: `Read the transcript, ${stamp(from)}–${stamp(to)}`,
+      };
+    }
+
+    case "search_transcript": {
+      const query = normalise(str(call.args, "query"));
+      if (!query) return { result: "No query given.", detail: "Searched for nothing" };
+      const hits = lines.filter((line) => normalise(line.text).includes(query));
+      if (!hits.length) {
+        return {
+          result: `"${str(call.args, "query")}" is never said.`,
+          detail: `Searched for "${str(call.args, "query")}" — not said`,
+        };
+      }
+      return {
+        result: renderLines(hits.slice(0, 40)),
+        detail: `Searched for "${str(call.args, "query")}" — ${hits.length} line${hits.length === 1 ? "" : "s"}`,
+      };
+    }
+
+    case "find_phrase": {
+      const phrase = str(call.args, "phrase");
+      const needle = normalise(phrase);
+      if (!needle) return { result: "No phrase given.", detail: "Checked nothing" };
+      const hits = lines.filter((line) => normalise(line.text).includes(needle));
+      if (!hits.length) {
+        return {
+          result: `"${phrase}" does not appear in the transcript, so captionPhrase cannot time to it. Quote the words exactly as they are transcribed, or use addText with a time.`,
+          detail: `Checked "${phrase}" — not in the transcript`,
+        };
+      }
+      return {
+        result: `"${phrase}" is said ${hits.length} time${hits.length === 1 ? "" : "s"}, at ${hits
+          .slice(0, 8)
+          .map((h) => stamp(h.at))
+          .join(", ")}. captionPhrase will time to it.`,
+        detail: `Checked "${phrase}" — said ${hits.length}×`,
+      };
+    }
+
+    case "inspect": {
+      return {
+        result: describeProject(context),
+        detail: "Looked at what is on screen",
+      };
+    }
+
+    case "measure": {
+      return {
+        result: context.analysis
+          ? describeAnalysis(context.analysis)
+          : "Nothing has been measured for this project.",
+        detail: "Measured the footage",
+      };
+    }
+
+    default:
+      return {
+        result: `There is no tool called "${call.tool}". The tools are read_transcript, search_transcript, find_phrase, inspect and measure.`,
+        detail: `Asked for an unknown tool (${call.tool})`,
+      };
+  }
+}
+
+/* -------------------------------- description ------------------------------ */
+
+function describeAnalysis(
+  analysis: NonNullable<RescriptAgentContext["analysis"]>
+): string {
+  return [
+    "MEASURED IN THE FOOTAGE (these are counts, not estimates — plan from them):",
+    `  ${analysis.wordCount} words at ${analysis.wordsPerMinute} wpm across ${analysis.clipCount} clip(s), ${analysis.speakerCount} speaker(s).`,
+    `  ${analysis.fillerCount} filler words, worth ${analysis.fillerSeconds.toFixed(1)}s.`,
+    `  ${analysis.silenceCount} pauses, worth ${analysis.silenceSeconds.toFixed(1)}s of dead air.`,
+    analysis.longestPauses.length
+      ? `  Longest pauses: ${analysis.longestPauses.map((p) => `${p.seconds.toFixed(1)}s at ${p.at.toFixed(1)}s`).join(", ")}.`
+      : "  No pause is long enough to name.",
+    analysis.runsLong
+      ? "  This runs long: choosing what to keep matters more than trimming."
+      : "  This is short enough that trimming is the main job.",
+  ].join("\n");
+}
+
+/** What is on screen, without the transcript. Also the `inspect` tool's answer. */
+function describeProject(context: RescriptAgentContext): string {
   const elements = context.elements.length
     ? context.elements
         .map(
@@ -299,114 +583,279 @@ function describe(context: RescriptAgentContext): string {
         .join("\n")
     : "  (none)";
 
+  const shape = context.aspect
+    ? context.aspect < 0.9
+      ? "vertical (a Short or a Reel)"
+      : context.aspect > 1.5
+        ? "widescreen"
+        : "square-ish"
+    : "unknown";
+
   return [
-    `FINISHED VIDEO: ${context.duration.toFixed(2)}s long. The playhead is at ${context.playhead.toFixed(2)}s.`,
     `ELEMENTS ON SCREEN (numbered as the person sees them):\n${elements}`,
     `CLIP BOUNDARIES:\n${boundaries}`,
     `TRANSITIONS SET:\n${transitions}`,
-    `SUBTITLES: ${context.subtitles.enabled ? `on, ${context.subtitles.cueCount} cues` : "off"}`,
-    context.aspect
-      ? `FRAME: ${context.aspect < 0.9 ? "vertical (a Short or a Reel)" : context.aspect > 1.5 ? "widescreen" : "square-ish"}, ratio ${context.aspect.toFixed(2)}.`
-      : "",
-    context.analysis
-      ? [
-          "MEASURED IN THE FOOTAGE (these are counts, not estimates — plan from them):",
-          `  ${context.analysis.wordCount} words at ${context.analysis.wordsPerMinute} wpm across ${context.analysis.clipCount} clip(s), ${context.analysis.speakerCount} speaker(s).`,
-          `  ${context.analysis.fillerCount} filler words, worth ${context.analysis.fillerSeconds.toFixed(1)}s.`,
-          `  ${context.analysis.silenceCount} pauses, worth ${context.analysis.silenceSeconds.toFixed(1)}s of dead air.`,
-          context.analysis.longestPauses.length
-            ? `  Longest pauses: ${context.analysis.longestPauses.map((p) => `${p.seconds.toFixed(1)}s at ${p.at.toFixed(1)}s`).join(", ")}.`
-            : "  No pause is long enough to name.",
-          context.analysis.runsLong
-            ? "  This runs long: choosing what to keep matters more than trimming."
-            : "  This is short enough that trimming is the main job.",
-        ].join("\n")
-      : "",
-    `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}`,
-    context.transcript
-      ? `TRANSCRIPT OF THE CURRENT CUT. The [m:ss] stamps are seconds on the finished video's clock — the same clock deleteRange, keepOnly and splitAt use:\n${context.transcript}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    `SUBTITLES: ${
+      context.subtitles.enabled
+        ? `on, ${context.subtitles.cueCount} cues, sitting ${context.subtitles.position ?? "bottom"}`
+        : "off"
+    }`,
+    `FRAME: ${context.frame?.aspect ?? "source"} — ${shape}, ratio ${(context.aspect ?? 16 / 9).toFixed(2)}${
+      context.frame ? `, footage ${context.frame.fit === "cover" ? "cropped to fill" : "fitted whole"}` : ""
+    }.`,
+  ].join("\n\n");
 }
+
+function describe(
+  context: RescriptAgentContext,
+  lines: TranscriptLine[]
+): { text: string; windowed: boolean } {
+  const full = context.transcript ?? "";
+  const windowed = full.length > INLINE_TRANSCRIPT_BUDGET;
+
+  const transcriptBlock = !full
+    ? ""
+    : windowed
+      ? `TRANSCRIPT — OUTLINE ONLY. This video is too long to show you whole, so these are its sentences sampled across the whole running time. The [m:ss] stamps are seconds on the finished video's clock — the same clock deleteRange, keepOnly and splitAt use. Use read_transcript to see any stretch in full before you cut it or caption it:\n${outline(lines, INLINE_TRANSCRIPT_BUDGET)}`
+      : `TRANSCRIPT OF THE CURRENT CUT. The [m:ss] stamps are seconds on the finished video's clock — the same clock deleteRange, keepOnly and splitAt use:\n${full}`;
+
+  return {
+    windowed,
+    text: [
+      `FINISHED VIDEO: ${context.duration.toFixed(2)}s long. The playhead is at ${context.playhead.toFixed(2)}s.`,
+      describeProject(context),
+      context.analysis ? describeAnalysis(context.analysis) : "",
+      `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}`,
+      transcriptBlock,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+/* ---------------------------------- parsing -------------------------------- */
+
+interface ParsedReply {
+  call: ToolCall | null;
+  plan: ReturnType<typeof agentPlanSchema.safeParse> | null;
+  problem: string | null;
+}
+
+function parseReply(text: string): ParsedReply {
+  const candidate = firstJsonObject(stripFence(text));
+  if (!candidate) {
+    return { call: null, plan: null, problem: "no JSON object in the reply" };
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(candidate);
+  } catch (err) {
+    return {
+      call: null,
+      plan: null,
+      problem: `invalid JSON (${err instanceof Error ? err.message : "parse error"})`,
+    };
+  }
+
+  if (value && typeof value === "object" && typeof (value as { tool?: unknown }).tool === "string") {
+    const record = value as { tool: string; args?: unknown };
+    return {
+      call: {
+        tool: record.tool,
+        args:
+          record.args && typeof record.args === "object"
+            ? (record.args as Record<string, unknown>)
+            : {},
+      },
+      plan: null,
+      problem: null,
+    };
+  }
+
+  return { call: null, plan: agentPlanSchema.safeParse(value), problem: null };
+}
+
+/* ----------------------------------- loop ---------------------------------- */
+
+/** Looks the model is allowed before it must answer. */
+const MAX_TOOL_CALLS = 6;
+/** Total model turns, including looks, malformed retries and the repair. */
+const MAX_TURNS = 12;
 
 export async function planRescriptEdit(
   input: RescriptAgentInput
 ): Promise<RescriptPlan> {
   const propose = input.mode === "propose";
-  const messages: ChatMessage[] = [
-    { role: "system", content: propose ? SYSTEM + PROPOSE_SUFFIX : SYSTEM },
-    {
-      role: "user",
-      content: `${describe(input.context)}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`,
-    },
-  ];
+  const lines = parseTranscript(input.context.transcript);
+  const brief = describe(input.context, lines);
 
+  const system = [
+    SYSTEM,
+    PROTOCOL,
+    propose ? PROPOSE_SUFFIX : "",
+    brief.windowed
+      ? "\nThis transcript was shown to you as an outline. Do not plan a cut or a caption on a stretch you have not read in full."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const messages: ChatMessage[] = [{ role: "system", content: system }];
+
+  // Earlier turns, compressed: what was asked and what came of it. Enough for
+  // "make that bigger" to resolve, without re-sending plans that already ran.
+  for (const exchange of input.history ?? []) {
+    messages.push({ role: "user", content: exchange.instruction });
+    messages.push({
+      role: "assistant",
+      content: exchange.outcome
+        ? `${exchange.summary}\n(what happened: ${exchange.outcome})`
+        : exchange.summary,
+    });
+  }
+
+  messages.push({
+    role: "user",
+    content: `${brief.text}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`,
+  });
+
+  const trace: RescriptTraceEntry[] = [];
+  let looks = 0;
   let problem = "no output";
+  let repaired = false;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let turn = 0; turn < MAX_TURNS; turn += 1) {
     const result = await omega.generateText({
       messages,
       model: input.model,
-      temperature: attempt === 0 ? 0.3 : 0.15,
-      maxTokens: 1_800,
+      // Cooler on a retry: the first attempt is allowed some judgement, a
+      // second one is being asked to comply with something specific.
+      temperature: turn === 0 ? 0.35 : 0.15,
+      maxTokens: 4_000,
       json: true,
       signal: input.signal,
     });
 
-    const candidate = firstJsonObject(stripFence(result.text));
-    if (candidate) {
-      try {
-        const parsed = agentPlanSchema.safeParse(JSON.parse(candidate));
-        if (parsed.success) {
-          const rejected: string[] = [];
-          const steps: RescriptStep[] = [];
-          for (const step of parsed.data.steps) {
-            const sifted = siftOps(step.ops);
-            rejected.push(...sifted.rejected);
-            // A step whose every operation was malformed is not worth showing:
-            // accepting it would do nothing at all.
-            if (sifted.ops.length) {
-              steps.push({ title: step.title, detail: step.detail, ops: sifted.ops });
-            }
-          }
+    const reply = parseReply(result.text);
 
-          const flat = siftOps(parsed.data.ops);
-          rejected.push(...flat.rejected);
+    /* ----------------------------- a look ------------------------------- */
+    if (reply.call) {
+      messages.push({ role: "assistant", content: result.text.slice(0, 1_200) });
 
-          const proposed = steps.reduce((n, s) => n + s.ops.length, 0);
-          const anything = proposed > 0 || flat.ops.length > 0;
-          const askedForNothing =
-            !parsed.data.ops.length && !parsed.data.steps.length;
-
-          // Something usable, or a deliberate "nothing to do": both are answers.
-          if (anything || askedForNothing) {
-            return {
-              summary: parsed.data.summary,
-              findings: parsed.data.findings,
-              steps,
-              ops: flat.ops,
-              rejected,
-            };
-          }
-          problem = rejected[0] ?? "no usable operations";
-        } else {
-          const issue = parsed.error.issues[0];
-          problem = `${issue.path.join(".") || "root"} ${issue.message}`;
-        }
-      } catch (err) {
-        problem = `invalid JSON (${err instanceof Error ? err.message : "parse error"})`;
+      if (looks >= MAX_TOOL_CALLS) {
+        messages.push({
+          role: "user",
+          content:
+            "That is enough looking — you have used all of them. Reply with the plan now, using what you already know.",
+        });
+        looks += 1;
+        continue;
       }
-    } else {
-      problem = "no JSON object in the reply";
+
+      looks += 1;
+      const answered = runTool(reply.call, input.context, lines);
+      trace.push({ tool: reply.call.tool, detail: answered.detail });
+      messages.push({
+        role: "user",
+        content: `${answered.result}\n\n(${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left. Use another, or reply with the plan.)`,
+      });
+      continue;
     }
 
-    messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
-    messages.push({
-      role: "user",
-      content: `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
-    });
+    /* ---------------------------- a bad reply --------------------------- */
+    if (!reply.plan || !reply.plan.success) {
+      problem =
+        reply.problem ??
+        (reply.plan && !reply.plan.success
+          ? `${reply.plan.error.issues[0]?.path.join(".") || "root"} ${reply.plan.error.issues[0]?.message}`
+          : "unusable reply");
+      messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
+      messages.push({
+        role: "user",
+        content: `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
+      });
+      continue;
+    }
+
+    /* ------------------------------ a plan ------------------------------ */
+    const parsed = reply.plan.data;
+    const rejected: string[] = [];
+    const steps: RescriptStep[] = [];
+    for (const step of parsed.steps) {
+      const sifted = siftOps(step.ops);
+      rejected.push(...sifted.rejected);
+      // A step whose every operation was malformed is not worth showing:
+      // accepting it would do nothing at all.
+      if (sifted.ops.length) {
+        steps.push({ title: step.title, detail: step.detail, ops: sifted.ops });
+      }
+    }
+
+    const flat = siftOps(parsed.ops);
+    rejected.push(...flat.rejected);
+
+    const everyOp = [...steps.flatMap((s) => s.ops), ...flat.ops];
+    const proposed = everyOp.length;
+    const askedForNothing = !parsed.ops.length && !parsed.steps.length;
+
+    if (!proposed && !askedForNothing) {
+      problem = rejected[0] ?? "no usable operations";
+      messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
+      messages.push({
+        role: "user",
+        content: `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
+      });
+      continue;
+    }
+
+    /* --------------------------- verification --------------------------- */
+    const world: PlanWorld = {
+      duration: input.context.duration,
+      boundaryCount: input.context.boundaries.length,
+      elementCount: input.context.elements.length,
+      subtitlesOn: input.context.subtitles.enabled,
+      subtitlePosition: input.context.subtitles.position ?? "bottom",
+      transcript: input.context.transcript ?? "",
+      can: input.context.can,
+    };
+    const problems = proposed ? verifyPlan(everyOp, world) : [];
+
+    if (problems.length && !repaired) {
+      repaired = true;
+      trace.push({
+        tool: "verify",
+        detail: `Checked the plan — ${problems.length} problem${problems.length === 1 ? "" : "s"} to fix`,
+      });
+      messages.push({ role: "assistant", content: result.text.slice(0, 2_500) });
+      messages.push({
+        role: "user",
+        content: [
+          "That plan was checked against the project before running it, and these are wrong:",
+          ...problems.map((p) => `  - ${p}`),
+          "",
+          "Send the whole plan again with those fixed. Keep everything that was right; change only what has to change.",
+        ].join("\n"),
+      });
+      continue;
+    }
+
+    if (problems.length) {
+      trace.push({
+        tool: "verify",
+        detail: `${problems.length} problem${problems.length === 1 ? "" : "s"} could not be resolved`,
+      });
+    }
+
+    return {
+      summary: parsed.summary,
+      findings: parsed.findings,
+      steps,
+      ops: flat.ops,
+      rejected,
+      trace,
+      warnings: problems,
+    };
   }
 
   throw new AppError("malformed_response", {

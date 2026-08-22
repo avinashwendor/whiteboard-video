@@ -1,0 +1,323 @@
+/**
+ * The output frame, and the plan verifier.
+ *
+ * Two things that only fail on the way out: a frame whose arithmetic is a few
+ * percent wrong produces a file nobody notices is wrong until it is uploaded,
+ * and a verifier that is too eager sends the model back to fix a plan that was
+ * already right. Both are pure functions, so both are cheap to pin down here.
+ *
+ * Run with `npx tsx tests/overlay-frame-test.ts`.
+ */
+
+import {
+  DEFAULT_FRAME,
+  DEFAULT_SUBTITLE_STYLE,
+  emptyComposition,
+  frameRatio,
+  frameReframes,
+  isEmptyComposition,
+  outputSize,
+  type FrameSpec,
+} from "../src/rescript/lib/overlay/types";
+import { subtitleBand, typeScale } from "../src/rescript/lib/overlay/layout";
+import { fittedCharsPerLine } from "../src/rescript/lib/overlay/subtitles";
+import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
+import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+
+function assert(value: unknown, message: string): asserts value {
+  if (!value) throw new Error(message);
+}
+
+function close(a: number, b: number, tolerance = 1e-6): boolean {
+  return Math.abs(a - b) <= tolerance;
+}
+
+function frame(patch: Partial<FrameSpec> = {}): FrameSpec {
+  return { ...DEFAULT_FRAME, ...patch };
+}
+
+const WIDE = 16 / 9;
+const TALL = 9 / 16;
+
+/* ---------------------------------- ratio ---------------------------------- */
+
+{
+  assert(
+    close(frameRatio(frame(), WIDE), WIDE),
+    "the source frame is whatever the footage is"
+  );
+  assert(
+    close(frameRatio(frame({ aspect: "9:16" }), WIDE), TALL),
+    "a 9:16 frame ignores the footage's shape"
+  );
+  assert(
+    close(frameRatio(frame({ aspect: "1:1" }), WIDE), 1),
+    "a square frame is square"
+  );
+  assert(
+    close(frameRatio(frame(), 0), WIDE),
+    "an unknown source falls back to widescreen rather than dividing by zero"
+  );
+}
+
+/* -------------------------------- reframing -------------------------------- */
+
+{
+  assert(!frameReframes(frame(), WIDE), "the source frame is not a reframe");
+  assert(
+    frameReframes(frame({ aspect: "9:16" }), WIDE),
+    "widescreen footage in a vertical frame is a reframe"
+  );
+  assert(
+    !frameReframes(frame({ aspect: "16:9" }), WIDE),
+    "a frame that matches the footage is not a reframe, even when named"
+  );
+  assert(
+    frameReframes(frame({ zoom: 1.4 }), WIDE),
+    "a zoom is a reframe on its own"
+  );
+  assert(
+    frameReframes(frame({ focusY: 0.3 }), WIDE),
+    "a moved focus point is a reframe on its own"
+  );
+
+  // Export takes a fast path when there is nothing to burn in. A reframe has to
+  // stop it doing that, or a vertical edit exports as the widescreen original.
+  const empty = emptyComposition();
+  assert(isEmptyComposition(empty, WIDE), "an untouched composition is empty");
+  assert(
+    !isEmptyComposition({ ...empty, frame: frame({ aspect: "9:16" }) }, WIDE),
+    "a reframed composition is never empty, whatever else is on it"
+  );
+}
+
+/* ------------------------------- output size ------------------------------- */
+
+{
+  const cases: [string, number, number, number, number, number][] = [
+    // label, ratio, source w, source h, expected w, expected h
+    ["widescreen stays as shot", WIDE, 1920, 1080, 1920, 1080],
+    ["vertical from widescreen is a standard Short", TALL, 1920, 1080, 1080, 1920],
+    ["vertical from vertical is native", TALL, 1080, 1920, 1080, 1920],
+    ["Instagram portrait", 4 / 5, 1920, 1080, 1080, 1350],
+    ["square from widescreen", 1, 1920, 1080, 1080, 1080],
+    ["anamorphic crops rather than inventing width", 2.39, 1920, 1080, 1920, 804],
+    ["widescreen from vertical", WIDE, 1080, 1920, 1920, 1080],
+  ];
+
+  for (const [label, ratio, sw, sh, ew, eh] of cases) {
+    const size = outputSize(ratio, sw, sh);
+    assert(
+      size.width === ew && size.height === eh,
+      `${label}: expected ${ew}×${eh}, got ${size.width}×${size.height}`
+    );
+    assert(
+      size.width % 2 === 0 && size.height % 2 === 0,
+      `${label}: H.264 needs even dimensions, got ${size.width}×${size.height}`
+    );
+  }
+
+  const asked = outputSize(TALL, 1920, 1080, 720);
+  assert(
+    asked.height === 720 && asked.width === 406,
+    `an explicit height wins and the width follows the frame, got ${asked.width}×${asked.height}`
+  );
+}
+
+/* ---------------------------------- type ----------------------------------- */
+
+{
+  // The correction must be invisible on everything that was already fine.
+  assert(close(typeScale(WIDE), 1), "widescreen type is unchanged");
+  assert(close(typeScale(1), 1), "square type is unchanged");
+  assert(close(typeScale(4 / 5), 1), "4:5 type is unchanged");
+  assert(typeScale(TALL) < 1, "vertical type is pulled back");
+  assert(
+    close(typeScale(TALL), 0.75),
+    `9:16 should scale type to 0.75 of the old unit, got ${typeScale(TALL)}`
+  );
+
+  const style = { ...DEFAULT_SUBTITLE_STYLE };
+  const wide = subtitleBand(style, WIDE);
+  const tall = subtitleBand(style, TALL);
+  assert(
+    tall.h < wide.h,
+    "the subtitle band is a smaller fraction of a taller frame"
+  );
+  assert(
+    wide.y + wide.h <= 1 && tall.y + tall.h <= 1,
+    "the band never runs off the bottom of the frame"
+  );
+
+  // Cue length has to come down with the frame, or the renderer's own width
+  // wrap produces more lines than maxLines and joins the overflow into one.
+  const wideChars = fittedCharsPerLine(style, WIDE);
+  const tallChars = fittedCharsPerLine(style, TALL);
+  assert(
+    wideChars === style.maxCharsPerLine,
+    `a widescreen frame fits the whole taste setting, got ${wideChars}`
+  );
+  assert(
+    tallChars < wideChars && tallChars >= 8,
+    `a vertical frame needs shorter lines, got ${tallChars}`
+  );
+}
+
+/* --------------------------------- verifier -------------------------------- */
+
+const world: PlanWorld = {
+  duration: 120,
+  boundaryCount: 2,
+  elementCount: 1,
+  subtitlesOn: false,
+  subtitlePosition: "bottom",
+  transcript: "[0:04] We shipped it three times faster than last year.",
+  can: { generateImage: true, photoSearch: true },
+};
+
+/** Parse through the real schema, so the verifier only ever sees valid ops. */
+function ops(raw: unknown[]) {
+  const sifted = siftOps(raw);
+  assert(
+    sifted.rejected.length === 0,
+    `test fixture was rejected by the schema: ${sifted.rejected.join("; ")}`
+  );
+  return sifted.ops;
+}
+
+function saysNothing(raw: unknown[], w: PlanWorld = world) {
+  const problems = verifyPlan(ops(raw), w);
+  assert(
+    problems.length === 0,
+    `expected a clean plan, got: ${problems.join(" | ")}`
+  );
+}
+
+function complainsAbout(raw: unknown[], needle: string, w: PlanWorld = world) {
+  const problems = verifyPlan(ops(raw), w);
+  assert(
+    problems.some((p) => p.toLowerCase().includes(needle.toLowerCase())),
+    `expected a complaint about "${needle}", got: ${problems.join(" | ") || "nothing"}`
+  );
+}
+
+{
+  saysNothing([
+    { op: "setFrame", aspect: "9:16", fit: "cover", focusY: 0.4 },
+    { op: "removeFillers" },
+    { op: "subtitles", action: "on", preset: "shorts" },
+    { op: "addText", text: "Shipped", start: 0, duration: 3, position: "top" },
+  ]);
+
+  // A phrase nobody says cannot be timed to, and used to fail one line at a
+  // time in the log after the rest of the edit had already run.
+  complainsAbout(
+    [{ op: "captionPhrase", phrase: "ten times faster", text: "10×" }],
+    "not in the transcript"
+  );
+  saysNothing([
+    {
+      op: "captionPhrase",
+      phrase: "three times faster",
+      text: "3× FASTER",
+      position: "upper-third",
+    },
+  ]);
+
+  // Punctuation and case in the transcript must not defeat the check.
+  saysNothing([
+    { op: "captionPhrase", phrase: "We shipped it", position: "upper-third" },
+  ]);
+
+  complainsAbout(
+    [{ op: "setTransition", between: 7, kind: "dissolve" }],
+    "has 2"
+  );
+  complainsAbout(
+    [{ op: "setAllTransitions", kind: "dissolve" }],
+    "nowhere to put one",
+    { ...world, boundaryCount: 0 }
+  );
+  // Cutting first is what creates the boundaries, so this one is fine.
+  saysNothing(
+    [{ op: "removeFillers" }, { op: "setAllTransitions", kind: "dissolve" }],
+    { ...world, boundaryCount: 0 }
+  );
+
+  complainsAbout(
+    [{ op: "updateElement", element: 4, color: "#ffffff" }],
+    "only ever has 1"
+  );
+  // Adding then addressing what was added is legitimate.
+  saysNothing([
+    { op: "addText", text: "Hello there", start: 0, duration: 4, position: "top" },
+    { op: "updateElement", element: 2, color: "#ffd60a" },
+  ]);
+
+  complainsAbout(
+    [{ op: "deleteRange", from: 200, to: 210 }],
+    "120.0s long"
+  );
+  complainsAbout(
+    [
+      {
+        op: "keepOnly",
+        ranges: [
+          { from: 40, to: 60 },
+          { from: 50, to: 70 },
+        ],
+      },
+    ],
+    "overlap"
+  );
+
+  complainsAbout(
+    [
+      {
+        op: "addText",
+        text: "a rather long line of words to read",
+        start: 2,
+        duration: 1,
+      },
+    ],
+    "too fast to read"
+  );
+
+  // Two captions in the same band at the same moment.
+  complainsAbout(
+    [
+      { op: "addText", text: "One", start: 0, duration: 5, position: "top" },
+      { op: "addText", text: "Two", start: 2, duration: 5, position: "top" },
+    ],
+    "same time"
+  );
+  // The same two, held apart, are fine.
+  saysNothing([
+    { op: "addText", text: "One", start: 0, duration: 4, position: "top" },
+    { op: "addText", text: "Two", start: 5, duration: 4, position: "top" },
+  ]);
+
+  // Nothing goes in the subtitles' band while they are on.
+  complainsAbout(
+    [{ op: "addText", text: "Name here", start: 0, duration: 4, position: "lower-third" }],
+    "burned-in subtitles",
+    { ...world, subtitlesOn: true, subtitlePosition: "bottom" }
+  );
+
+  complainsAbout(
+    [{ op: "addImage", query: "a bridge", start: 1, duration: 3 }],
+    "photo search is not configured",
+    { ...world, can: { generateImage: true, photoSearch: false } }
+  );
+
+  // A caption timed after a cut is timed against a clock that no longer exists.
+  complainsAbout(
+    [
+      { op: "removeSilences", minDuration: 0.4 },
+      { op: "addText", text: "Later", start: 60, duration: 3 },
+    ],
+    "shorten the video"
+  );
+}
+
+console.log("ALL FRAME AND VERIFIER TESTS PASSED");

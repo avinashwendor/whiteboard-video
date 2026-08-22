@@ -162,6 +162,7 @@ export const rescriptAgentRequestSchema = z.object({
       enabled: z.boolean(),
       cueCount: z.number().int().min(0).max(20_000),
       preset: z.string().trim().max(40).optional(),
+      position: z.enum(["top", "center", "bottom"]).optional(),
     }),
     transitions: z
       .array(
@@ -172,7 +173,7 @@ export const rescriptAgentRequestSchema = z.object({
         }),
       )
       .max(500),
-    transcript: z.string().max(12_000).optional(),
+    transcript: z.string().max(200_000).optional(),
     /** Measured in the browser, so the plan is grounded in the real footage. */
     analysis: z
       .object({
@@ -192,10 +193,33 @@ export const rescriptAgentRequestSchema = z.object({
       .optional(),
     /** Frame shape, so it can tell a Short from a landscape edit. */
     aspect: z.number().min(0.1).max(10).optional(),
+    /** The output frame as the project has it set. */
+    frame: z
+      .object({
+        aspect: z.string().trim().max(16),
+        fit: z.string().trim().max(16),
+        zoom: z.number().min(0.1).max(10),
+      })
+      .optional(),
     can: z.object({ generateImage: z.boolean(), photoSearch: z.boolean() }),
   }),
   /** "propose" describes the edit and waits; "execute" performs it. */
   mode: z.enum(["propose", "execute"]).optional(),
+  /**
+   * Earlier turns of this conversation, oldest first. Compressed to what was
+   * asked and what came of it — enough for "make that bigger" to resolve
+   * without re-sending plans that have already run.
+   */
+  history: z
+    .array(
+      z.object({
+        instruction: z.string().trim().max(2_000),
+        summary: z.string().trim().max(600),
+        outcome: z.string().trim().max(1_200).optional(),
+      }),
+    )
+    .max(12)
+    .optional(),
   model: modelId.optional(),
 });
 export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;

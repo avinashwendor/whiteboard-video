@@ -249,6 +249,24 @@ interface EditorState {
   reset: () => void;
 }
 
+/**
+ * Write whatever is open right now, before it stops being what is open.
+ *
+ * The debounce usually beats a person clicking through a project list, but
+ * "usually" is not a persistence strategy — and now that the composition is in
+ * the record, losing the last half-second of a save means losing captions, not
+ * just a trim.
+ */
+async function flushAutosave(): Promise<void> {
+  try {
+    const m = await import("./autosave");
+    await m.flushProjectAutosave();
+  } catch {
+    // A failed save of the outgoing project must not stop the incoming one
+    // from opening; the warning is already logged inside the autosave.
+  }
+}
+
 function bumpAutosave() {
   // Dynamic import avoids a circular dependency with lib/autosave.ts.
   void import("./autosave").then((m) => m.scheduleProjectAutosave());
@@ -458,6 +476,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   openProject: async (id) => {
+    // The project being left is saved before the one being opened is read.
+    await flushAutosave();
     const record = await getProject(id);
     if (!record) throw new Error(en["error.projectMissing"]);
     const file = fileFromProject(record);

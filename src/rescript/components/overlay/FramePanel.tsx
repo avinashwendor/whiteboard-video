@@ -4,12 +4,12 @@ import { useCallback, useMemo, useRef } from "react";
 import { Crop, Maximize2, RotateCcw } from "lucide-react";
 import { useEditorStore } from "@/rescript/lib/store";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
-import { outputSize } from "@/rescript/lib/overlay/compose";
 import { regenerateCues } from "@/rescript/lib/overlay/ops";
 import {
   DEFAULT_FRAME,
   FRAME_ASPECTS,
   frameRatio,
+  outputSize,
   type FrameAspectId,
   type FrameBackground,
   type FrameFit,

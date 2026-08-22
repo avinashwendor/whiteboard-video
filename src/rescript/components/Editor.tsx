@@ -175,7 +175,10 @@ export default function Editor() {
   useDesktopMenu(openFilePicker, isolated);
 
   const startMenuFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
+      // Opening different media replaces the whole project, composition
+      // included, so what is open goes to disk first.
+      await flushProjectAutosave();
       const { source, pendingTranscript } = useEditorStore.getState();
       if (source === "import") {
         if (!pendingTranscript) {

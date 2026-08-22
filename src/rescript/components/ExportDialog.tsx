@@ -17,9 +17,12 @@ import {
   canCompose,
   composeOverlays,
   needsCompositing,
-  outputSize,
 } from "@/rescript/lib/overlay/compose";
-import { FRAME_ASPECTS, frameRatio } from "@/rescript/lib/overlay/types";
+import {
+  FRAME_ASPECTS,
+  frameRatio,
+  outputSize,
+} from "@/rescript/lib/overlay/types";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
 import { formatTime, getEditedDuration, getKeepRanges } from "@/rescript/lib/edits";
 import {

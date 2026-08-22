@@ -389,3 +389,47 @@ export function frameReframes(frame: FrameSpec, sourceAspect: number): boolean {
   // Within a pixel or two of the same shape is not a reframe.
   return Math.abs(target - sourceAspect) > 0.01;
 }
+
+/** Round to an even number of pixels; H.264 requires it on both axes. */
+function even(n: number): number {
+  return Math.max(2, Math.round(n / 2) * 2);
+}
+
+/**
+ * The pixel size of the finished file.
+ *
+ * The frame decides the shape; this decides how many pixels that shape gets,
+ * and the rule is "keep the detail the footage actually has". The output's
+ * shorter side matches the source's shorter side — so a 1920×1080 recording
+ * delivered vertically is 1080×1920, the size everything expects — except where
+ * that would blow the longer side up past what was shot, which is what stops a
+ * 2.39:1 crop of a 16:9 master from being invented out of nothing.
+ *
+ * `targetHeight` overrides the lot; the width still follows the frame.
+ */
+export function outputSize(
+  ratio: number,
+  nativeWidth: number,
+  nativeHeight: number,
+  targetHeight?: number
+): { width: number; height: number } {
+  if (targetHeight && targetHeight > 0) {
+    return { width: even(ratio * targetHeight), height: even(targetHeight) };
+  }
+
+  const shorter = Math.min(nativeWidth, nativeHeight);
+  const longer = Math.max(nativeWidth, nativeHeight);
+
+  let height = ratio >= 1 ? shorter : shorter / ratio;
+  let width = ratio * height;
+
+  if (ratio >= 1 && width > longer) {
+    width = longer;
+    height = width / ratio;
+  } else if (ratio < 1 && height > longer) {
+    height = longer;
+    width = ratio * height;
+  }
+
+  return { width: even(width), height: even(height) };
+}

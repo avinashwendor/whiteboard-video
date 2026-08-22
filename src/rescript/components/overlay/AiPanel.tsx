@@ -37,7 +37,7 @@ import { Button, Empty, formatSeconds } from "./ui";
 
 interface LogEntry {
   id: number;
-  kind: "you" | "summary" | "ok" | "fail" | "note" | "finding";
+  kind: "you" | "summary" | "ok" | "fail" | "note" | "finding" | "look" | "warn";
   text: string;
 }
 
@@ -74,8 +74,15 @@ const SUGGESTIONS = [
   "Generate a hand-drawn rocket in the top right at 5s",
 ];
 
-/** Roughly what fits in the model's window without crowding out the prompt. */
-const TRANSCRIPT_BUDGET = 9_000;
+/**
+ * The whole transcript goes up, not a prompt-sized slice of it.
+ *
+ * The agent windows into it with its own reading tools and is shown an outline
+ * when it is long, so truncating here would only hide the back half of a long
+ * recording from the tools as well — which is what made plans for anything over
+ * ten minutes quietly stop at the ten minute mark.
+ */
+const TRANSCRIPT_BUDGET = 180_000;
 
 let logSequence = 0;
 
@@ -86,6 +93,31 @@ export default function AiPanel() {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  /**
+   * What has been asked and what came of it, oldest first.
+   *
+   * A ref rather than state: nothing renders from it, and a follow-up sent
+   * while the previous answer is still landing must see the completed turn.
+   */
+  const historyRef = useRef<
+    { instruction: string; summary: string; outcome?: string }[]
+  >([]);
+  /**
+   * The current `submitText`, so the repair round can re-enter it.
+   *
+   * A direct call would close over the function from the render that created
+   * it, which is both a lint error and a real staleness bug once the callback
+   * starts depending on the timeline — and the timeline is exactly what the cut
+   * that just ran has changed.
+   */
+  const submitRef = useRef<
+    | ((
+        text?: string,
+        mode?: "propose" | "execute",
+        options?: { repair?: boolean; silent?: boolean }
+      ) => Promise<void>)
+    | null
+  >(null);
 
   const words = useEditorStore((s) => s.words);
   const duration = useEditorStore((s) => s.duration);
@@ -136,6 +168,27 @@ export default function AiPanel() {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [log]);
 
+  // The conversation is about a particular video. Carrying it into the next one
+  // is the same mistake as carrying the captions: "make that bigger" would
+  // refer to an element that no longer exists, and the agent would be handed a
+  // history of edits made to something it can no longer see.
+  //
+  // Driven by a store subscription rather than an effect on the value, so it
+  // fires on a *change* of media and not on the first render of every project.
+  useEffect(
+    () =>
+      useEditorStore.subscribe((state, previous) => {
+        if (state.mediaUrl === previous.mediaUrl) return;
+        abortRef.current?.abort();
+        abortRef.current = null;
+        historyRef.current = [];
+        setLog([]);
+        setProposal(null);
+        setBusy(false);
+      }),
+    []
+  );
+
   const append = useCallback((kind: LogEntry["kind"], text: string) => {
     logSequence += 1;
     setLog((prev) => [...prev.slice(-60), { id: logSequence, kind, text }]);
@@ -180,20 +233,47 @@ export default function AiPanel() {
       : text;
   }, [words, cuts]);
 
-  /** Send an instruction. Defaults to whatever is typed in the box. */
+  /** Keep the turn, so the next one can refer to it. */
+  const remember = useCallback(
+    (instruction: string, summary: string, outcome?: string) => {
+      historyRef.current = [
+        ...historyRef.current,
+        { instruction, summary, outcome },
+      ].slice(-12);
+    },
+    []
+  );
+
+  /**
+   * Send an instruction. Defaults to whatever is typed in the box.
+   *
+   * `repair` marks the automatic second attempt after a failed operation: it
+   * reuses the controller and the busy flag of the turn that spawned it, so
+   * Stop still stops the whole thing and the box does not flicker back to idle
+   * between the two halves. `silent` keeps the machine-written repair
+   * instruction out of the log, where it would read as something the person
+   * said.
+   */
   const submitText = useCallback(async (
     text?: string,
-    mode: "propose" | "execute" = "execute"
+    mode: "propose" | "execute" = "execute",
+    options?: { repair?: boolean; silent?: boolean }
   ) => {
+    const repair = options?.repair ?? false;
     const instruction = (text ?? prompt).trim();
-    if (!instruction || busy) return;
+    if (!instruction) return;
+    if (busy && !repair) return;
 
-    const controller = new AbortController();
+    const controller = repair && abortRef.current
+      ? abortRef.current
+      : new AbortController();
     abortRef.current = controller;
-    setBusy(true);
-    setPrompt("");
-    setProposal(null);
-    append("you", instruction);
+    if (!repair) {
+      setBusy(true);
+      setPrompt("");
+      setProposal(null);
+    }
+    if (!options?.silent) append("you", instruction);
 
     try {
       const overlay = useOverlayStore.getState();
@@ -220,6 +300,7 @@ export default function AiPanel() {
           subtitles: {
             enabled: overlay.subtitles.enabled,
             cueCount: overlay.subtitles.cues.length,
+            position: overlay.subtitles.style.position,
           },
           transitions: overlay.transitions.map((t) => ({
             between: t.index,
@@ -240,9 +321,15 @@ export default function AiPanel() {
             runsLong: analysis.runsLong,
           },
           aspect,
+          frame: {
+            aspect: overlay.frame.aspect,
+            fit: overlay.frame.fit,
+            zoom: overlay.frame.zoom,
+          },
           can,
         },
         mode,
+        history: historyRef.current.slice(-6),
       };
 
       const res = await fetch("/api/rescript/agent", {
@@ -258,6 +345,8 @@ export default function AiPanel() {
         steps?: ProposedStep[];
         ops?: AgentOp[];
         rejected?: string[];
+        trace?: { tool: string; detail: string }[];
+        warnings?: string[];
         error?: { message?: string };
       };
 
@@ -266,8 +355,14 @@ export default function AiPanel() {
         return;
       }
 
+      // What it looked at on the way to the answer, in the order it looked.
+      // Worth showing: it is the difference between an edit that was reasoned
+      // about and one that was guessed, and it is the first thing to read when
+      // an answer is wrong.
+      for (const entry of json.trace ?? []) append("look", entry.detail);
       if (json.summary) append("summary", json.summary);
       for (const finding of json.findings ?? []) append("finding", finding);
+      for (const warning of json.warnings ?? []) append("warn", warning);
       for (const reason of json.rejected ?? []) {
         append("note", `Skipped — ${reason}`);
       }
@@ -307,6 +402,7 @@ export default function AiPanel() {
       const ops = json.ops ?? [];
       if (!ops.length) {
         if (!json.summary) append("note", "Nothing to do for that one.");
+        remember(instruction, json.summary ?? "Nothing to do.");
         return;
       }
 
@@ -322,9 +418,40 @@ export default function AiPanel() {
         controller.signal
       );
 
-      const failed = results.filter((r) => !r.ok).length;
-      if (failed && failed === results.length) {
-        append("note", "Nothing landed. Try saying it a different way.");
+      const failures = results.filter((r) => !r.ok);
+      remember(
+        instruction,
+        json.summary ?? "",
+        failures.length
+          ? `${results.length - failures.length} of ${results.length} operations landed; these did not: ${failures
+              .map((f) => f.message)
+              .join("; ")}`
+          : `all ${results.length} operations landed`
+      );
+
+      if (!failures.length) return;
+
+      if (failures.length === results.length && !repair) {
+        append("note", "Nothing landed. Trying once more with what went wrong.");
+      }
+
+      // One repair round, and only one.
+      //
+      // Everything the model needs to fix a failure is in the failure itself —
+      // a boundary that does not exist reports how many there are, a phrase that
+      // is not said says so — and it is now holding the conversation, so it can
+      // read them. Asking the person to relay a machine's error message back to
+      // the machine was never a reasonable thing to do.
+      if (!repair && !controller.signal.aborted) {
+        await submitRef.current?.(
+          [
+            "Some of that did not work. These operations failed:",
+            ...failures.map((f) => `  - ${f.message}`),
+            "Fix them against the project as it is now, and send only the operations that put them right. Do not repeat the ones that already worked.",
+          ].join("\n"),
+          "execute",
+          { repair: true, silent: true }
+        );
       }
     } catch (err) {
       if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
@@ -334,13 +461,18 @@ export default function AiPanel() {
           err instanceof Error ? err.message : "Something went wrong."
         );
     } finally {
-      abortRef.current = null;
-      setBusy(false);
+      // The repair runs inside its parent's turn, so it must not hand the
+      // panel back to idle while that turn is still unwinding.
+      if (!repair) {
+        abortRef.current = null;
+        setBusy(false);
+      }
     }
   }, [
     prompt,
     busy,
     append,
+    remember,
     timeline,
     duration,
     playhead,
@@ -349,6 +481,10 @@ export default function AiPanel() {
     can,
     buildTranscript,
   ]);
+
+  useEffect(() => {
+    submitRef.current = submitText;
+  }, [submitText]);
 
   /** Run the steps the person kept, in order, reporting each one. */
   const applyProposal = useCallback(async () => {
@@ -599,8 +735,18 @@ function LogLine({ entry }: { entry: LogEntry }) {
     fail: "text-red-600 dark:text-red-400",
     note: "text-amber-600 dark:text-amber-500",
     finding: "text-zinc-500 dark:text-zinc-400",
+    // Looks are the agent's working, not its answer: present, but quiet.
+    look: "text-zinc-400 italic dark:text-zinc-500",
+    warn: "text-amber-600 dark:text-amber-500",
   }[entry.kind];
-  const mark = { ok: "✓", fail: "✕", note: "!", finding: "·" }[entry.kind];
+  const mark = {
+    ok: "✓",
+    fail: "✕",
+    note: "!",
+    finding: "·",
+    look: "→",
+    warn: "△",
+  }[entry.kind];
   return (
     <p className={`flex gap-1.5 pl-1 text-[11px] leading-relaxed ${tone}`}>
       <span aria-hidden className="shrink-0">

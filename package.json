@@ -14,7 +14,8 @@
     "test:i18n": "tsx tests/i18n-test.ts",
     "test:timeline": "tsx tests/serialize-timeline-test.ts",
     "test:overlay": "tsx tests/overlay-test.ts",
-    "test:placement": "tsx tests/overlay-placement-test.ts"
+    "test:placement": "tsx tests/overlay-placement-test.ts",
+    "test:frame": "tsx tests/overlay-frame-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

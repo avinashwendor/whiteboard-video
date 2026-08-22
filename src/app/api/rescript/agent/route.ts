@@ -29,6 +29,7 @@ export async function POST(req: Request) {
       instruction: body.instruction,
       context: body.context,
       mode: body.mode,
+      history: body.history,
       model: body.model,
       signal: req.signal,
     });
