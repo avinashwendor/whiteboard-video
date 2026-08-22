@@ -69,8 +69,6 @@ function settingsLabelForMode(mode: Mode): string {
       return "Production settings — voice, language, speed";
     case "image":
       return "Production settings — provider, model, style, size";
-    case "storyboard":
-      return "Production settings — frames, model, style, size";
     case "write":
       return "Production settings — text model";
   }
@@ -94,7 +92,6 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
   const showText = mode !== "image";
   const showImage =
     mode === "image" ||
-    mode === "storyboard" ||
     (mode === "create" && (settings.sceneArt === "image" || settings.sceneArt === "hybrid"));
   const showVoice = mode === "voice" || mode === "create";
 

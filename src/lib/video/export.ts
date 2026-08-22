@@ -91,7 +91,29 @@ const CHANNELS = 2;
 /** Frames per AudioData packet handed to the encoder. */
 const AUDIO_PACKET = 1_024;
 
-/** True when this browser can render the file rather than record it. */
+/**
+ * Thrown when the offline renderer cannot run on this machine.
+ *
+ * Distinct from a genuine export failure, because the caller should quietly
+ * fall back to recording rather than telling anyone the export broke. The two
+ * used to be the same `Error`, which is why a laptop with WebCodecs but no
+ * usable H.264 encoder got a dead end instead of the recorder path that was
+ * sitting right there.
+ */
+export class EncoderUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EncoderUnavailableError";
+  }
+}
+
+/**
+ * True when this browser exposes the offline encoding APIs.
+ *
+ * Presence is not capability: WebCodecs can be fully present while the GPU
+ * exposes no usable H.264 profile. Use `canRenderOffline` before committing to
+ * the fast path; this one is only good enough to pick a label.
+ */
 export function canExportOffline(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -124,6 +146,25 @@ export async function pickVideoCodec(
     }
   }
   return null;
+}
+
+/**
+ * Whether this machine can actually render, not just whether it has the APIs.
+ *
+ * Answered once and cached: `isConfigSupported` can spin up a hardware encoder
+ * to answer, so asking on every render of a toolbar would be wasteful.
+ */
+let renderable: Promise<boolean> | null = null;
+
+export function canRenderOffline(
+  width = 1280,
+  height = 720,
+  fps = 30,
+  bitrate = 4_500_000,
+): Promise<boolean> {
+  if (!canExportOffline()) return Promise.resolve(false);
+  renderable ??= pickVideoCodec(width, height, fps, bitrate).then((codec) => codec !== null);
+  return renderable;
 }
 
 function aborted(signal?: AbortSignal) {
@@ -221,11 +262,15 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
   const progress = request.onProgress ?? (() => {});
 
   if (!canExportOffline()) {
-    throw new Error("This browser cannot encode video offline.");
+    throw new EncoderUnavailableError("This browser cannot encode video offline.");
   }
 
   const codec = await pickVideoCodec(width, height, fps, bitrate);
-  if (!codec) throw new Error("This browser has no usable H.264 encoder.");
+  if (!codec) {
+    throw new EncoderUnavailableError(
+      "No usable H.264 encoder on this machine — the GPU exposes none and there is no software fallback.",
+    );
+  }
 
   progress(0, "Mixing narration, music and effects");
   const bed = await renderAudioBed(request.audio, duration, request.sound, signal);

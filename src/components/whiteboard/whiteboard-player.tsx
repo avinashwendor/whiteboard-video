@@ -5,6 +5,7 @@ import {
   Download,
   Loader2,
   Maximize2,
+  Minimize2,
   Music,
   Music2,
   Pause,
@@ -29,7 +30,13 @@ import { disposeScene, planSceneCues, prepareScene, type PreparedScene } from ".
 import type { Cue } from "@/lib/video/timing";
 import { useBoardImages } from "./use-board-images";
 import { extensionFor, pickMimeType, startRecording } from "./use-recorder";
-import { canExportOffline, exportVideoFile, type AudioPlacement } from "@/lib/video/export";
+import {
+  canExportOffline,
+  canRenderOffline,
+  EncoderUnavailableError,
+  exportVideoFile,
+  type AudioPlacement,
+} from "@/lib/video/export";
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
 import { scheduleSfx } from "@/lib/video/sfx";
@@ -79,6 +86,11 @@ const DEFAULT_VOICE_DELAY = 0.5;
 const TAIL_SECONDS = 0.62;
 /** Past this much drift the clock snaps instead of easing. */
 const HARD_RESYNC = 0.28;
+/**
+ * Drift between the score and the picture that is worth rebuilding the graph
+ * for. Below this nobody hears it; above it, effects land on the wrong stroke.
+ */
+const SCORE_RESYNC = 0.22;
 /**
  * The closing card, restating the point in one sentence.
  *
@@ -130,7 +142,15 @@ export function WhiteboardPlayer({
   const audioRefs = useRef<Array<HTMLAudioElement | null>>([]);
   const clockRef = useRef({ index: -1, time: 0, last: 0 });
   const exportAbortRef = useRef<AbortController | null>(null);
-  const scoreRef = useRef<{ context: AudioContext; bus: GainNode } | null>(null);
+  const scoreRef = useRef<{
+    context: AudioContext;
+    bus: GainNode;
+    /** Context time that represented the start position when scheduled. */
+    base: number;
+    /** Timeline position the graph was scheduled from. */
+    from: number;
+    rate: number;
+  } | null>(null);
   const exportGraphRef = useRef<{
     context: AudioContext;
     destination: MediaStreamAudioDestinationNode;
@@ -252,6 +272,30 @@ export function WhiteboardPlayer({
     [coverDuration, durations, outroDuration],
   );
 
+  /**
+   * The video's parts, as spans on the timeline.
+   *
+   * A bare slider says how far through you are and nothing else. The scrubber
+   * shows the shape — where the intro ends, how long each scene actually runs,
+   * where the closing card starts — so a scene that drags is visible before
+   * you've watched it.
+   */
+  const segments = useMemo(() => {
+    const parts: Array<{ label: string; at: number; span: number }> = [];
+    if (coverDuration > 0) parts.push({ label: "Intro", at: 0, span: coverDuration });
+    durations.forEach((span, index) => {
+      parts.push({
+        label: `${index + 1}. ${scenes[index]?.heading ?? "Scene"}`,
+        at: offsetOf(index, durations, coverDuration),
+        span,
+      });
+    });
+    if (outroDuration > 0) {
+      parts.push({ label: "Closing", at: total - outroDuration, span: outroDuration });
+    }
+    return parts;
+  }, [coverDuration, durations, outroDuration, scenes, total]);
+
   const [sceneIndex, setSceneIndex] = useState(-1); // -1 is the cover card
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -268,6 +312,25 @@ export function WhiteboardPlayer({
   const mimeType = useMemo(() => (typeof window === "undefined" ? null : pickMimeType()), []);
   /** WebCodecs renders the file; without it we are back to recording it. */
   const offlineExport = useMemo(() => canExportOffline(), []);
+  /**
+   * Whether this machine can actually render, answered by the encoder itself.
+   *
+   * `null` until it replies. The button used to promise "Export MP4" on the
+   * strength of the API existing, then hand back a webm — or nothing at all on
+   * a GPU with no H.264 profile.
+   */
+  const [renderable, setRenderable] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void canRenderOffline(BOARD_WIDTH, BOARD_HEIGHT, EXPORT_FPS).then((ok) => {
+      if (alive) setRenderable(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** Fullscreen puts the controls out of reach, so they move onto the stage. */
+  const [immersive, setImmersive] = useState(false);
   /** The bed the director asked for, if any. */
   const musicMood: MusicMood = (project.musicMood as MusicMood) ?? "calm";
 
@@ -492,7 +555,13 @@ export function WhiteboardPlayer({
     } catch {
       /* already gone */
     }
-    scoreRef.current = { context: live.context, bus: live.context.createGain() };
+    scoreRef.current = {
+      context: live.context,
+      bus: live.context.createGain(),
+      base: 0,
+      from: 0,
+      rate: 1,
+    };
   }, []);
 
   const audioAt = useCallback((index: number) => {
@@ -525,6 +594,7 @@ export function WhiteboardPlayer({
         void context.resume();
 
         const base = context.currentTime + 0.06;
+        const rate = playbackSpeed;
         if (musicMood !== "none") {
           scheduleMusic(context, bus, {
             mood: musicMood,
@@ -532,16 +602,20 @@ export function WhiteboardPlayer({
             duck: score.duck,
             base,
             from: fromSeconds,
+            rate,
           });
         }
-        scheduleSfx(context, bus, score.sfx, 1, { base, from: fromSeconds });
+        scheduleSfx(context, bus, score.sfx, 1, { base, from: fromSeconds, rate });
 
-        scoreRef.current = { context, bus };
+        // Remembered so drift against the picture can be measured: the score
+        // runs on the audio clock once scheduled, while the video clock is
+        // pulled toward the narration every frame.
+        scoreRef.current = { context, bus, base, from: fromSeconds, rate };
       } catch {
         // A blocked audio context costs the score, never the video.
       }
     },
-    [muted, musicMood, score, soundOn, stopScore, total],
+    [muted, musicMood, playbackSpeed, score, soundOn, stopScore, total],
   );
 
   const silence = useCallback(
@@ -578,6 +652,25 @@ export function WhiteboardPlayer({
     silence();
     stopScore();
   }, [silence, stopScore]);
+
+  /**
+   * Stops rather than stalls when the tab goes away.
+   *
+   * The picture is driven by requestAnimationFrame and the voice is not, so a
+   * backgrounded tab freezes the board while the narration carries on talking
+   * over it — and the board is still frozen, now badly out of step, when you
+   * come back. The clock also stops accruing, so the transport lies about where
+   * playback is. Pausing outright is the honest behaviour: you return to a
+   * still frame that matches the time on the scrubber.
+   */
+  useEffect(() => {
+    if (!playing) return;
+    const onHide = () => {
+      if (document.visibilityState === "hidden") stopPlayback();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [playing, stopPlayback]);
 
   /**
    * One frame.
@@ -654,6 +747,39 @@ export function WhiteboardPlayer({
     });
     return () => cancelAnimationFrame(frame);
   }, [advance, playbackSpeed, playing, stopPlayback]);
+
+  /**
+   * Keeps music and effects on the picture.
+   *
+   * Once scheduled, the score runs on the audio clock and nothing can move it.
+   * The video clock is a different animal — it is pulled toward the narration
+   * every frame and jumps outright past `HARD_RESYNC` — so after a stall, a
+   * speed change or a long scene the two separate, and an effect meant to land
+   * on a stroke arrives somewhere else entirely. Rebuilding the graph is the
+   * only way to move a scheduled oscillator, so that is what a big drift does.
+   */
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => {
+      const live = scoreRef.current;
+      if (!live || !soundOn) return;
+      const scoreAt = live.from + (live.context.currentTime - live.base) * live.rate;
+      if (Math.abs(scoreAt - clockRef.current.time) > SCORE_RESYNC) {
+        startScore(clockRef.current.time);
+      }
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [playing, soundOn, startScore]);
+
+  /** A speed change moves the picture immediately; the score has to be re-laid. */
+  useEffect(() => {
+    if (!playing) return;
+    startScore(clockRef.current.time);
+    // Only the rate change should re-lay the score — `startScore` itself is
+    // rebuilt whenever any of its inputs move, and following that would
+    // restart the bed every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackSpeed]);
 
   useEffect(() => {
     for (const audio of audioRefs.current) if (audio) audio.muted = muted;
@@ -755,40 +881,48 @@ export function WhiteboardPlayer({
 
     try {
       if (offlineExport) {
-        // Every clip is placed at the exact second its scene's voice begins,
-        // so the finished file is in step by construction rather than by luck.
-        const audio: AudioPlacement[] = [];
-        scenes.forEach((scene, index) => {
-          const url = scene.audio?.url;
-          const entry = schedule[index];
-          if (!url || !entry) return;
-          audio.push({ url, at: offsetOf(index, durations, coverDuration) + entry.lead });
-        });
+        try {
+          // Every clip is placed at the exact second its scene's voice begins,
+          // so the finished file is in step by construction rather than by luck.
+          const audio: AudioPlacement[] = [];
+          scenes.forEach((scene, index) => {
+            const url = scene.audio?.url;
+            const entry = schedule[index];
+            if (!url || !entry) return;
+            audio.push({ url, at: offsetOf(index, durations, coverDuration) + entry.lead });
+          });
 
-        const blob = await exportVideoFile({
-          width: BOARD_WIDTH,
-          height: BOARD_HEIGHT,
-          fps: EXPORT_FPS,
-          duration: total,
-          paint: paintAt,
-          audio,
-          sound: {
-            sfx: score.sfx,
-            mood: musicMood,
-            duck: score.duck,
-          },
-          onProgress: (fraction, stage) => {
-            setExportProgress(fraction);
-            setExportStage(stage);
-          },
-          signal: controller.signal,
-        });
+          const blob = await exportVideoFile({
+            width: BOARD_WIDTH,
+            height: BOARD_HEIGHT,
+            fps: EXPORT_FPS,
+            duration: total,
+            paint: paintAt,
+            audio,
+            sound: {
+              sfx: score.sfx,
+              mood: musicMood,
+              duck: score.duck,
+            },
+            onProgress: (fraction, stage) => {
+              setExportProgress(fraction);
+              setExportStage(stage);
+            },
+            signal: controller.signal,
+          });
 
-        save(blob, "mp4");
-        return;
+          save(blob, "mp4");
+          return;
+        } catch (err) {
+          // Having the API is not the same as being able to use it: a GPU
+          // that exposes no usable H.264 profile lands here. Recording still
+          // works, so fall through rather than report a broken export.
+          if (!(err instanceof EncoderUnavailableError)) throw err;
+          setExportStage("No usable encoder — recording instead");
+        }
       }
 
-      // No WebCodecs: fall back to recording the canvas in real time.
+      // Either no WebCodecs at all, or none this machine can actually use.
       const canvas = canvasRef.current;
       if (!canvas || !mimeType) throw new Error("This browser cannot export video.");
 
@@ -898,12 +1032,25 @@ export function WhiteboardPlayer({
     }
   };
 
+  const stageRef = useRef<HTMLDivElement>(null);
+
   const goFullscreen = () => {
-    const node = canvasRef.current?.parentElement;
+    const node = stageRef.current;
     if (!node) return;
     if (document.fullscreenElement) void document.exitFullscreen();
     else void node.requestFullscreen?.().catch(() => {});
   };
+
+  /**
+   * Fullscreen used to take the canvas wrapper, which left every control
+   * behind in the page — no pause, no scrubber, nothing but Escape. The stage
+   * goes fullscreen now and carries its own overlay bar.
+   */
+  useEffect(() => {
+    const sync = () => setImmersive(document.fullscreenElement === stageRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
 
   const cycleSpeed = () => {
     const speeds = [1, 1.25, 1.5];
@@ -916,9 +1063,13 @@ export function WhiteboardPlayer({
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       <div
+        ref={stageRef}
         className={cn(
           "group relative overflow-hidden rounded-card border border-line",
           isHyperframes ? "bg-[#07080c]" : "bg-[#f7f5ef]",
+          // Fullscreen hands us the whole screen; centre the frame in it
+          // rather than stretching a 16:9 board to fill a 16:10 laptop panel.
+          immersive && "flex items-center justify-center rounded-none border-0 bg-black",
         )}
         tabIndex={0}
         role="application"
@@ -929,8 +1080,70 @@ export function WhiteboardPlayer({
           ref={canvasRef}
           width={BOARD_WIDTH}
           height={BOARD_HEIGHT}
-          className="block aspect-video w-full"
+          className={cn(
+            "block aspect-video",
+            immersive ? "max-h-full max-w-full object-contain" : "w-full",
+          )}
         />
+
+        {/*
+          The transport, on the stage. Only mounted in fullscreen — in the page
+          the real control row sits right underneath, and two of them would be
+          one too many.
+        */}
+        {immersive && !exporting ? (
+          <div className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-4 bg-gradient-to-t from-black/85 to-transparent px-6 pb-5 pt-12 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={playing ? "Pause" : "Play"}
+              className="grid size-11 shrink-0 place-items-center bg-white/95 text-black transition-colors hover:bg-white"
+            >
+              {playing ? (
+                <Pause className="size-5 fill-current" aria-hidden />
+              ) : (
+                <Play className="size-5 translate-x-px fill-current" aria-hidden />
+              )}
+            </button>
+
+            <div className="flex-1">
+              <Scrubber
+                elapsed={elapsed}
+                total={total}
+                segments={segments}
+                onSeek={seekTo}
+                tone="light"
+              />
+            </div>
+
+            <span className="shrink-0 font-mono text-[12px] tabular-nums text-white/85">
+              {formatTime(elapsed)} / {formatTime(total)}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setMuted((value) => !value)}
+              aria-label={muted ? "Unmute" : "Mute"}
+              disabled={!hasNarration}
+              className="grid size-9 shrink-0 place-items-center text-white/85 transition-colors hover:text-white disabled:opacity-40"
+            >
+              {muted || !hasNarration ? (
+                <VolumeX className="size-5" aria-hidden />
+              ) : (
+                <Volume2 className="size-5" aria-hidden />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={goFullscreen}
+              aria-label="Exit fullscreen"
+              className="grid size-9 shrink-0 place-items-center text-white/85 transition-colors hover:text-white"
+            >
+              <Minimize2 className="size-5" aria-hidden />
+            </button>
+          </div>
+        ) : null}
 
         {!ready ? (
           <div
@@ -1053,20 +1266,11 @@ export function WhiteboardPlayer({
         </button>
 
         <div className="flex min-w-[10rem] flex-1 items-center gap-3">
-          <input
-            type="range"
-            min={0}
-            max={Math.max(total, 0.1)}
-            step={0.05}
-            value={Math.min(elapsed, total)}
-            onChange={(event) => seekTo(Number(event.target.value))}
-            aria-label="Seek"
-            className={cn(
-              "h-1.5 w-full cursor-pointer appearance-none rounded-full bg-surface-hover",
-              "[&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none",
-              "[&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-ink",
-              "[&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white",
-            )}
+          <Scrubber
+            elapsed={elapsed}
+            total={total}
+            segments={segments}
+            onSeek={seekTo}
           />
           <span className="shrink-0 font-mono text-[11px] tabular-nums text-faint">
             {formatTime(elapsed)} / {formatTime(total)}
@@ -1081,7 +1285,7 @@ export function WhiteboardPlayer({
           variant="secondary"
           onClick={exportVideo}
           loading={exporting}
-          disabled={!ready || (!offlineExport && !mimeType)}
+          disabled={!ready || (renderable === false && !mimeType)}
           title={
             offlineExport
               ? "Renders a real H.264 MP4, frame by frame"
@@ -1091,7 +1295,7 @@ export function WhiteboardPlayer({
           }
         >
           {exporting ? null : <Download className="size-3.5" />}
-          {exporting ? "Exporting" : offlineExport ? "Export MP4" : "Export video"}
+          {exporting ? "Exporting" : renderable === false ? "Export video" : "Export MP4"}
         </Button>
       </div>
 
@@ -1128,7 +1332,7 @@ export function WhiteboardPlayer({
       </div>
 
       {exportError ? <p className="text-xs text-danger">{exportError}</p> : null}
-      {!offlineExport ? (
+      {renderable === false ? (
         mimeType ? (
           <p className="text-xs text-faint">
             This browser has no WebCodecs encoder, so export falls back to a real-time recording.
@@ -1155,6 +1359,105 @@ export function WhiteboardPlayer({
 }
 
 /* --------------------------------- timeline -------------------------------- */
+
+/**
+ * A timeline you can read, not just drag.
+ *
+ * Each part of the video gets a proportional lane, so the intro card, four
+ * scenes and the closing card are visible as the different lengths they are.
+ * Dragging works anywhere on the track — including a press-and-drag, which a
+ * plain range input only gives you if you happen to grab the thumb.
+ */
+function Scrubber({
+  elapsed,
+  total,
+  segments,
+  onSeek,
+  tone = "page",
+}: {
+  elapsed: number;
+  total: number;
+  segments: Array<{ label: string; at: number; span: number }>;
+  onSeek: (seconds: number) => void;
+  /** `light` for the fullscreen bar, which sits on black rather than on the page. */
+  tone?: "page" | "light";
+}) {
+  const lane = tone === "light" ? "bg-white/25" : "bg-surface-hover";
+  const fill = tone === "light" ? "bg-white" : "bg-ink";
+  const track = useRef<HTMLDivElement>(null);
+  const span = Math.max(total, 0.1);
+  const progress = clamp01(elapsed / span);
+
+  const seekFromEvent = useCallback(
+    (clientX: number) => {
+      const node = track.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      onSeek(clamp01((clientX - rect.left) / Math.max(1, rect.width)) * span);
+    },
+    [onSeek, span],
+  );
+
+  return (
+    <div
+      ref={track}
+      role="slider"
+      tabIndex={0}
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(span)}
+      aria-valuenow={Math.round(elapsed)}
+      aria-valuetext={`${formatTime(elapsed)} of ${formatTime(span)}`}
+      onPointerDown={(event) => {
+        // Capture so a drag that leaves the track keeps scrubbing, which is
+        // what every video player does and a range input does not.
+        event.currentTarget.setPointerCapture(event.pointerId);
+        seekFromEvent(event.clientX);
+      }}
+      onPointerMove={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromEvent(event.clientX);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          onSeek(elapsed + 5);
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          onSeek(elapsed - 5);
+        }
+      }}
+      className="group/scrub relative h-6 w-full cursor-pointer touch-none select-none"
+    >
+      {/* the lanes */}
+      <div className="absolute inset-x-0 top-1/2 flex h-1.5 -translate-y-1/2 gap-px overflow-hidden rounded-full">
+        {segments.map((segment) => (
+          <span
+            key={segment.at}
+            title={`${segment.label} · ${segment.span.toFixed(1)}s`}
+            style={{ width: `${(segment.span / span) * 100}%` }}
+            className={cn("h-full", lane)}
+          />
+        ))}
+      </div>
+
+      {/* played */}
+      <div
+        className={cn("pointer-events-none absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full", fill)}
+        style={{ width: `${progress * 100}%` }}
+      />
+
+      {/* the head */}
+      <span
+        className={cn(
+          "pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full transition-transform group-hover/scrub:scale-125",
+          fill,
+        )}
+        style={{ left: `${progress * 100}%` }}
+        aria-hidden
+      />
+    </div>
+  );
+}
 
 function offsetOf(index: number, durations: number[], coverDuration = DEFAULT_COVER_SECONDS): number {
   if (index < 0) return 0;

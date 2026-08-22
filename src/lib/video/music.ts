@@ -86,6 +86,8 @@ export function scheduleMusic(
     base?: number;
     /** Timeline position playback starts at, so a scrub joins mid-bed. */
     from?: number;
+    /** Playback rate of the picture, so the bed keeps step at 1.25x. */
+    rate?: number;
   },
 ) {
   if (options.mood === "none" || options.duration <= 0) return;
@@ -94,8 +96,9 @@ export function scheduleMusic(
 
   const base = options.base ?? 0;
   const from = options.from ?? 0;
+  const rate = options.rate && options.rate > 0 ? options.rate : 1;
   /** Timeline seconds -> this context's clock. */
-  const when = (t: number) => base + (t - from);
+  const when = (t: number) => base + (t - from) / rate;
 
   const master = ctx.createGain();
   const level = (options.level ?? 1) * spec.level;
