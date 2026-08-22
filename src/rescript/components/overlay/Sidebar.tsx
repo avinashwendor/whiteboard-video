@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Captions,
+  Crop,
   Layers,
   Redo2,
   Shuffle,
@@ -13,6 +14,7 @@ import {
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import AiPanel from "./AiPanel";
 import ElementsPanel from "./ElementsPanel";
+import FramePanel from "./FramePanel";
 import InspectorPanel from "./InspectorPanel";
 import SubtitlesPanel from "./SubtitlesPanel";
 import TransitionsPanel from "./TransitionsPanel";
@@ -20,13 +22,14 @@ import TransitionsPanel from "./TransitionsPanel";
 /**
  * The composition side of the editor.
  *
- * Five tabs rather than one long scroll, because the four jobs are genuinely
+ * Separate tabs rather than one long scroll, because the jobs are genuinely
  * separate: describing a change, adding things, styling the thing that is
- * selected, captions, and cuts. Selecting an element on the video jumps to
- * Style, since that is what you wanted when you clicked it.
+ * selected, captions, cuts, and the shape of the output. Selecting an element
+ * on the video jumps to Style, since that is what you wanted when you clicked
+ * it.
  */
 
-type Tab = "ai" | "elements" | "style" | "subtitles" | "transitions";
+type Tab = "ai" | "elements" | "style" | "subtitles" | "transitions" | "frame";
 
 const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   { id: "ai", label: "AI", icon: Sparkles },
@@ -34,6 +37,7 @@ const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   { id: "style", label: "Style", icon: SlidersHorizontal },
   { id: "subtitles", label: "Subs", icon: Captions },
   { id: "transitions", label: "Cuts", icon: Shuffle },
+  { id: "frame", label: "Frame", icon: Crop },
 ];
 
 export default function Sidebar() {
@@ -103,6 +107,7 @@ export default function Sidebar() {
       {tab === "style" && <InspectorPanel />}
       {tab === "subtitles" && <SubtitlesPanel />}
       {tab === "transitions" && <TransitionsPanel />}
+      {tab === "frame" && <FramePanel />}
     </div>
   );
 }

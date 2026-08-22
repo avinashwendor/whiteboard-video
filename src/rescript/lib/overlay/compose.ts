@@ -9,7 +9,7 @@ import {
   transitionWindows,
   type OutputTimeline,
 } from "./timeline";
-import { isEmptyComposition, type Composition } from "./types";
+import { frameRatio, isEmptyComposition, type Composition } from "./types";
 
 /**
  * Burns the composition into the cut.
@@ -33,7 +33,10 @@ export interface ComposeOptions {
   source: Blob;
   composition: Composition;
   timeline: OutputTimeline;
-  /** Output height. The width follows the source's aspect, rounded to even. */
+  /**
+   * Output height. The width follows the composition's **frame**, rounded to
+   * even — which is how a 1080×1920 file comes out of a 1920×1080 recording.
+   */
   targetHeight?: number;
   fps?: number;
   /** True when the source has an audio track to graft back. */
@@ -52,8 +55,11 @@ export function canCompose(): boolean {
 }
 
 /** Nothing to burn in — the caller should ship ffmpeg's output untouched. */
-export function needsCompositing(composition: Composition): boolean {
-  return !isEmptyComposition(composition);
+export function needsCompositing(
+  composition: Composition,
+  sourceAspect = 0
+): boolean {
+  return !isEmptyComposition(composition, sourceAspect);
 }
 
 /** H.264 profile that this machine will actually accept, best first. */
@@ -149,6 +155,45 @@ function even(n: number): number {
 }
 
 /**
+ * The pixel size of the finished file.
+ *
+ * The frame decides the shape; this decides how many pixels that shape gets,
+ * and the rule is "keep the detail the footage actually has". The output's
+ * shorter side matches the source's shorter side — so a 1920×1080 recording
+ * delivered vertically is 1080×1920, the size everything expects — except where
+ * that would blow the longer side up past what was shot, which is what stops a
+ * 2.39:1 crop of a 16:9 master from being invented out of nothing.
+ *
+ * `targetHeight` overrides the lot; the width still follows the frame.
+ */
+export function outputSize(
+  ratio: number,
+  nativeWidth: number,
+  nativeHeight: number,
+  targetHeight?: number
+): { width: number; height: number } {
+  if (targetHeight && targetHeight > 0) {
+    return { width: even(ratio * targetHeight), height: even(targetHeight) };
+  }
+
+  const shorter = Math.min(nativeWidth, nativeHeight);
+  const longer = Math.max(nativeWidth, nativeHeight);
+
+  let height = ratio >= 1 ? shorter : shorter / ratio;
+  let width = ratio * height;
+
+  if (ratio >= 1 && width > longer) {
+    width = longer;
+    height = width / ratio;
+  } else if (ratio < 1 && height > longer) {
+    height = longer;
+    width = ratio * height;
+  }
+
+  return { width: even(width), height: even(height) };
+}
+
+/**
  * Capture the outgoing clip's last frame for every push transition.
  *
  * Done up front, in one pass, because seeking backwards mid-render is what
@@ -159,8 +204,6 @@ async function captureFreezeFrames(
   video: HTMLVideoElement,
   composition: Composition,
   timeline: OutputTimeline,
-  width: number,
-  height: number,
   fps: number
 ): Promise<Map<number, HTMLCanvasElement>> {
   const frames = new Map<number, HTMLCanvasElement>();
@@ -179,12 +222,15 @@ async function captureFreezeFrames(
     const at = Math.max(0, window.boundary.outTime - 1 / fps);
     await seekTo(video, at);
 
+    // Captured at the source's own size, never at the output's. Stretching it
+    // into the frame here would distort the held picture the moment the two
+    // shapes disagree — which is exactly the case a vertical edit is.
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) continue;
-    ctx.drawImage(video, 0, 0, width, height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     frames.set(window.boundary.index, canvas);
   }
   return frames;
@@ -225,8 +271,17 @@ export async function composeOverlays({
       throw new Error("The rendered video has no picture to composite onto.");
     }
 
-    const height = even(targetHeight ?? nativeHeight);
-    const width = even((nativeWidth / nativeHeight) * height);
+    // The frame decides the shape of the file; the requested height decides how
+    // big it is. "Original" means the source's height, which for a reframe is
+    // the sane reading of it — a 1080p recording makes a 1080-tall Short.
+    const sourceAspect = nativeWidth / nativeHeight;
+    const ratio = frameRatio(composition.frame, sourceAspect);
+    const { width, height } = outputSize(
+      ratio,
+      nativeWidth,
+      nativeHeight,
+      targetHeight
+    );
     const duration = Number.isFinite(video.duration)
       ? video.duration
       : timeline.duration;
@@ -251,14 +306,7 @@ export async function composeOverlays({
     if (!ctx) throw new Error("Could not open a drawing surface.");
 
     onProgress?.(0.04, "Reading clip edges");
-    const freezes = await captureFreezeFrames(
-      video,
-      composition,
-      timeline,
-      width,
-      height,
-      fps
-    );
+    const freezes = await captureFreezeFrames(video, composition, timeline, fps);
 
     const target = new ArrayBufferTarget();
     const muxer = new Muxer({

@@ -10,7 +10,7 @@
 
 import { paintComposition, type FrameSize } from "./render";
 import type { ActiveTransition } from "./timeline";
-import type { Composition } from "./types";
+import { DEFAULT_FRAME, type Composition, type FrameSpec } from "./types";
 
 export interface FrameSources {
   /** The live source frame for this output time. */
@@ -41,26 +41,96 @@ function sourceSize(src: CanvasImageSource): { w: number; h: number } | null {
 }
 
 /**
- * Draw a source to fill `size`, preserving aspect ratio and cropping the
- * overflow. `scale` zooms about the centre; `dx`/`dy` shift in output pixels.
+ * Where a source lands inside the frame, before any transition offset.
+ *
+ * Split out from the drawing so the blurred backdrop and the picture itself are
+ * laid out by the same arithmetic — a backdrop computed independently drifts
+ * from the picture the moment a focus point or a zoom is involved.
  */
-function drawCover(
+function placement(
+  intrinsic: { w: number; h: number },
+  size: FrameSize,
+  frame: FrameSpec,
+  fit: FrameSpec["fit"],
+  scale: number
+): { x: number; y: number; w: number; h: number } {
+  const base =
+    fit === "cover"
+      ? Math.max(size.width / intrinsic.w, size.height / intrinsic.h)
+      : Math.min(size.width / intrinsic.w, size.height / intrinsic.h);
+  const zoom = frame.zoom > 0 ? frame.zoom : 1;
+  const w = intrinsic.w * base * zoom * scale;
+  const h = intrinsic.h * base * zoom * scale;
+
+  // The focus point is the bit of the *source* held at the centre of the frame.
+  // When the picture is smaller than the frame on an axis there is nothing to
+  // choose between, so it is simply centred; when it is larger, the offset is
+  // clamped so panning can never expose an edge.
+  const place = (
+    frameLength: number,
+    drawn: number,
+    focus: number
+  ): number => {
+    if (drawn <= frameLength) return (frameLength - drawn) / 2;
+    const wanted = frameLength / 2 - focus * drawn;
+    return Math.max(frameLength - drawn, Math.min(0, wanted));
+  };
+
+  return {
+    x: place(size.width, w, frame.focusX),
+    y: place(size.height, h, frame.focusY),
+    w,
+    h,
+  };
+}
+
+/**
+ * Draw a source into `size` under the project's frame.
+ *
+ * `cover` crops to fill and is what makes a 16:9 recording usable as a Short;
+ * `contain` fits the whole picture and fills the rest with the chosen backdrop.
+ * `scale` zooms about the centre for transitions; `dx`/`dy` shift in output
+ * pixels for the push family.
+ */
+function drawSource(
   ctx: CanvasRenderingContext2D,
   src: CanvasImageSource,
   size: FrameSize,
+  frame: FrameSpec,
   scale = 1,
   dx = 0,
   dy = 0
 ) {
   const intrinsic = sourceSize(src);
   if (!intrinsic) return;
-  // `contain`, not `cover`: the output canvas is created at the media's own
-  // aspect ratio, so these agree — but if a source ever disagrees, letterboxing
-  // it is right and cropping the person's footage is not.
-  const fit = Math.min(size.width / intrinsic.w, size.height / intrinsic.h) * scale;
-  const w = intrinsic.w * fit;
-  const h = intrinsic.h * fit;
-  ctx.drawImage(src, (size.width - w) / 2 + dx, (size.height - h) / 2 + dy, w, h);
+
+  const spot = placement(intrinsic, size, frame, frame.fit, scale);
+
+  // A contained picture leaves the frame showing through. Black is honest;
+  // a blurred blow-up of the same frame is what every social tool does, and it
+  // is the difference between a Short that looks made and one that looks
+  // letterboxed.
+  const gapX = spot.w < size.width - 1;
+  const gapY = spot.h < size.height - 1;
+  if (frame.fit === "contain" && (gapX || gapY)) {
+    if (frame.background === "blur") {
+      const back = placement(intrinsic, size, frame, "cover", scale);
+      ctx.save();
+      // Blur radius follows the frame, not the source, so a 4K and a 720p
+      // version of the same edit look the same.
+      ctx.filter = `blur(${Math.max(8, size.height * 0.045)}px)`;
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(src, back.x + dx * 0.35, back.y + dy * 0.35, back.w, back.h);
+      ctx.restore();
+      ctx.filter = "none";
+    } else if (frame.background === "white") {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, size.width, size.height);
+    }
+    // "black" needs nothing: the frame was already cleared to black.
+  }
+
+  ctx.drawImage(src, spot.x + dx, spot.y + dy, spot.w, spot.h);
 }
 
 /** Peaks at 1 in the middle of the window and returns to 0 at both ends. */
@@ -80,7 +150,8 @@ function paintVideoLayer(
   ctx: CanvasRenderingContext2D,
   size: FrameSize,
   sources: FrameSources,
-  active: ActiveTransition | null
+  active: ActiveTransition | null,
+  frame: FrameSpec
 ) {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, size.width, size.height);
@@ -88,7 +159,7 @@ function paintVideoLayer(
   const { live, freeze } = sources;
 
   if (!active) {
-    if (live) drawCover(ctx, live, size);
+    if (live) drawSource(ctx, live, size, frame);
     return;
   }
 
@@ -99,7 +170,7 @@ function paintVideoLayer(
       ctx.filter = `blur(${intensity * size.height * 0.035}px)`;
     }
     const scale = active.kind === "zoomIn" ? 1 + 0.28 * intensity : 1;
-    if (live) drawCover(ctx, live, size, scale);
+    if (live) drawSource(ctx, live, size, frame, scale);
     ctx.restore();
     ctx.filter = "none";
 
@@ -116,7 +187,7 @@ function paintVideoLayer(
   // push: the incoming clip is live underneath, the held outgoing frame moves
   // off over it. Without a freeze there is nothing to move, so it plays as a
   // straight cut — which is the honest degradation.
-  if (live) drawCover(ctx, live, size);
+  if (live) drawSource(ctx, live, size, frame);
   if (!freeze) return;
 
   const p = easeOut(active.progress);
@@ -124,23 +195,23 @@ function paintVideoLayer(
   switch (active.kind) {
     case "dissolve":
       ctx.globalAlpha = 1 - p;
-      drawCover(ctx, freeze, size);
+      drawSource(ctx, freeze, size, frame);
       break;
     case "zoomOut":
       ctx.globalAlpha = 1 - p;
-      drawCover(ctx, freeze, size, 1 + 0.35 * p);
+      drawSource(ctx, freeze, size, frame, 1 + 0.35 * p);
       break;
     case "slideLeft":
-      drawCover(ctx, freeze, size, 1, -size.width * p, 0);
+      drawSource(ctx, freeze, size, frame, 1, -size.width * p, 0);
       break;
     case "slideRight":
-      drawCover(ctx, freeze, size, 1, size.width * p, 0);
+      drawSource(ctx, freeze, size, frame, 1, size.width * p, 0);
       break;
     case "slideUp":
-      drawCover(ctx, freeze, size, 1, 0, -size.height * p);
+      drawSource(ctx, freeze, size, frame, 1, 0, -size.height * p);
       break;
     case "slideDown":
-      drawCover(ctx, freeze, size, 1, 0, size.height * p);
+      drawSource(ctx, freeze, size, frame, 1, 0, size.height * p);
       break;
     default:
       break;
@@ -160,6 +231,8 @@ export function paintFrame(
   composition: Composition,
   t: number
 ) {
-  paintVideoLayer(ctx, size, sources, active);
+  // A composition restored from an older save has no frame; falling back keeps
+  // it rendering exactly as it did rather than throwing on the first paint.
+  paintVideoLayer(ctx, size, sources, active, composition.frame ?? DEFAULT_FRAME);
   paintComposition(ctx, composition, size, t);
 }

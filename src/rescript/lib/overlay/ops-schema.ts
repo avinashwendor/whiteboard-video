@@ -310,6 +310,36 @@ export const captionPhraseOp = z.object({
   hold: z.number().min(0).max(6).optional(),
 });
 
+export const FRAME_ASPECT_IDS = [
+  "source",
+  "16:9",
+  "9:16",
+  "1:1",
+  "4:5",
+  "4:3",
+  "2.39:1",
+] as const;
+
+/**
+ * The shape of the finished video.
+ *
+ * "Make this a Short" is a request about the frame before it is a request about
+ * captions, and until this op existed the model could style a vertical edit
+ * without being able to make one — it would answer with Shorts subtitles burned
+ * into a widescreen file.
+ */
+export const setFrameOp = z.object({
+  op: z.literal("setFrame"),
+  aspect: z.enum(FRAME_ASPECT_IDS),
+  /** "cover" crops to fill; "contain" fits the whole picture in. */
+  fit: z.enum(["cover", "contain"]).optional(),
+  zoom: z.number().min(1).max(3).optional(),
+  /** The point of the source held at the centre of the frame, 0..1. */
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+  background: z.enum(["black", "blur", "white"]).optional(),
+});
+
 export const agentOpSchema = z.discriminatedUnion("op", [
   addTextOp,
   addImageOp,
@@ -330,6 +360,7 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   keepOnlyOp,
   splitAtOp,
   captionPhraseOp,
+  setFrameOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

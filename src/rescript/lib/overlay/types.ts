@@ -269,6 +269,8 @@ export interface Composition {
   elements: OverlayElement[];
   subtitles: SubtitleTrack;
   transitions: Transition[];
+  /** The shape of the output. See the frame section below. */
+  frame: FrameSpec;
 }
 
 export function emptyComposition(): Composition {
@@ -281,14 +283,109 @@ export function emptyComposition(): Composition {
       generated: false,
     },
     transitions: [],
+    frame: { ...DEFAULT_FRAME },
   };
 }
 
-/** True when there is nothing to composite and export can take the fast path. */
-export function isEmptyComposition(c: Composition): boolean {
+/**
+ * True when there is nothing to composite and export can take the fast path.
+ *
+ * `sourceAspect` decides whether the frame counts as work: reframing a 16:9
+ * recording to 9:16 is a re-render even with no captions on it, while a frame
+ * that matches the footage is not.
+ */
+export function isEmptyComposition(
+  c: Composition,
+  sourceAspect = 0
+): boolean {
   return (
     c.elements.every((e) => e.hidden) &&
     (!c.subtitles.enabled || c.subtitles.cues.length === 0) &&
-    c.transitions.every((t) => t.kind === "none" || t.duration <= 0)
+    c.transitions.every((t) => t.kind === "none" || t.duration <= 0) &&
+    !frameReframes(c.frame ?? DEFAULT_FRAME, sourceAspect)
   );
+}
+
+/* --------------------------------- frame ---------------------------------- */
+
+/**
+ * The shape of the finished video.
+ *
+ * Until this existed the output was always the source's own aspect, which made
+ * a vertical deliverable impossible: you could edit a 16:9 recording and export
+ * it, and that was the only answer available. A frame is a *target* — the
+ * composition's 0..1 coordinates are relative to it, not to the footage — so
+ * the same overlays reframe with the picture rather than sliding off it.
+ */
+export type FrameAspectId =
+  | "source"
+  | "16:9"
+  | "9:16"
+  | "1:1"
+  | "4:5"
+  | "4:3"
+  | "2.39:1";
+
+export const FRAME_ASPECTS: {
+  id: FrameAspectId;
+  label: string;
+  hint: string;
+  /** Width ÷ height. Null means "whatever the footage is". */
+  ratio: number | null;
+}[] = [
+  { id: "source", label: "Source", hint: "As shot", ratio: null },
+  { id: "16:9", label: "16:9", hint: "Landscape", ratio: 16 / 9 },
+  { id: "9:16", label: "9:16", hint: "Shorts, Reels, TikTok", ratio: 9 / 16 },
+  { id: "1:1", label: "1:1", hint: "Square feed", ratio: 1 },
+  { id: "4:5", label: "4:5", hint: "Instagram portrait", ratio: 4 / 5 },
+  { id: "4:3", label: "4:3", hint: "Classic", ratio: 4 / 3 },
+  { id: "2.39:1", label: "2.39:1", hint: "Anamorphic", ratio: 2.39 },
+];
+
+/** How the footage sits inside a frame it does not match. */
+export type FrameFit = "cover" | "contain";
+
+/** What fills the frame where `contain` leaves the footage short. */
+export type FrameBackground = "black" | "blur" | "white";
+
+export interface FrameSpec {
+  aspect: FrameAspectId;
+  fit: FrameFit;
+  /** Extra zoom on top of the fit, 1 = none. */
+  zoom: number;
+  /**
+   * The point of the *source* picture held at the centre of the frame, in its
+   * own 0..1 coordinates. 0.5/0.5 is the middle; a talking head shot off to one
+   * side is why this is adjustable at all.
+   */
+  focusX: number;
+  focusY: number;
+  background: FrameBackground;
+}
+
+export const DEFAULT_FRAME: FrameSpec = {
+  aspect: "source",
+  fit: "cover",
+  zoom: 1,
+  focusX: 0.5,
+  focusY: 0.5,
+  background: "blur",
+};
+
+/** Width ÷ height of the output, given what the footage is. */
+export function frameRatio(frame: FrameSpec, sourceAspect: number): number {
+  const preset = FRAME_ASPECTS.find((a) => a.id === frame.aspect);
+  const ratio = preset?.ratio ?? null;
+  if (ratio && Number.isFinite(ratio) && ratio > 0) return ratio;
+  return sourceAspect > 0 ? sourceAspect : 16 / 9;
+}
+
+/** True when the frame changes the picture and must therefore be rendered. */
+export function frameReframes(frame: FrameSpec, sourceAspect: number): boolean {
+  if (frame.zoom !== 1) return true;
+  if (frame.focusX !== 0.5 || frame.focusY !== 0.5) return true;
+  if (frame.aspect === "source") return false;
+  const target = frameRatio(frame, sourceAspect);
+  // Within a pixel or two of the same shape is not a reframe.
+  return Math.abs(target - sourceAspect) > 0.01;
 }

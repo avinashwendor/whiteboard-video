@@ -43,7 +43,10 @@ import {
   deleteProject,
   fileFromProject,
   getProject,
+  type ProjectRecord,
 } from "./projects";
+import type { Composition } from "./overlay/types";
+import { useOverlayStore } from "./overlay/store";
 import {
   addSpeaker as addSpeakerEntry,
   findSpeakerByName,
@@ -331,6 +334,32 @@ function pushEdit(
   bumpAutosave();
 }
 
+/**
+ * Bring a stored composition back to life.
+ *
+ * Everything in it survives IndexedDB as plain data except the `blob:` URLs of
+ * pictures dragged in from disk: those are valid only for the page that minted
+ * them. The bytes were saved beside the composition, so each one is re-minted
+ * here; anything without stored bytes keeps its src and renders as a
+ * placeholder, which is the honest outcome.
+ */
+function rehydrateComposition(record: ProjectRecord): Composition {
+  const composition = record.composition!;
+  const assets = record.assets;
+  if (!assets) return composition;
+
+  return {
+    ...composition,
+    elements: composition.elements.map((element) => {
+      if (element.kind !== "image") return element;
+      if (!element.src.startsWith("blob:")) return element;
+      const bytes = assets[element.id];
+      if (!bytes) return element;
+      return { ...element, src: URL.createObjectURL(bytes) };
+    }),
+  };
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   videoFile: null,
   mediaUrl: null,
@@ -377,6 +406,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (imported && imported.length === 0) return;
     const prev = get().mediaUrl;
     if (prev) URL.revokeObjectURL(prev);
+    // Captions, overlays, transitions and the frame belong to the project that
+    // was open, not to the editor. Loading different media without this is what
+    // put the last video's subtitles over the new one.
+    useOverlayStore.getState().reset();
     const current = get().source;
     const speakers = imported
       ? speakersFromWords(imported, options?.speakers ?? [])
@@ -430,6 +463,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const file = fileFromProject(record);
     const prev = get().mediaUrl;
     if (prev) URL.revokeObjectURL(prev);
+    // Clear first, then restore: a project saved before the composition layer
+    // existed has no composition, and "no composition" must mean an empty one
+    // rather than whatever happened to be on screen a moment ago.
+    const overlay = useOverlayStore.getState();
+    overlay.reset();
+    if (record.composition) {
+      overlay.loadComposition(rehydrateComposition(record));
+    }
     const manualCuts = record.manualCuts ?? [];
     const sceneBoundaries = record.sceneBoundaries ?? [];
     const speakers = speakersFromWords(record.words, record.speakers ?? []);
@@ -975,6 +1016,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setExportOpen: (exportOpen) => set({ exportOpen }),
 
   reset: () => {
+    useOverlayStore.getState().reset();
     const { mediaUrl, exportUrl } = get();
     if (mediaUrl) URL.revokeObjectURL(mediaUrl);
     if (exportUrl) URL.revokeObjectURL(exportUrl);

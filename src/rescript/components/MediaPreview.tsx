@@ -90,6 +90,12 @@ export default function MediaPreview() {
   // through the same renderer the exporter uses. Keeping it at opacity 0 rather
   // than hiding it matters — a display:none or visibility:hidden video is free
   // to stop producing frames, and drawImage would then paint nothing.
+  //
+  // It is also taken out of the layout entirely. While it sat in the flow the
+  // stage could only ever be the shape of the footage, because the canvas was
+  // measured off this element's box; the output frame is a property of the
+  // project now, so the video is pinned behind the stage and its size is
+  // nobody's business but the decoder's.
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-zinc-50/70 p-3 sm:p-4 dark:bg-zinc-950/70">
       <div className="relative flex min-h-0 flex-1 items-center justify-center">
@@ -97,11 +103,10 @@ export default function MediaPreview() {
           ref={refCb}
           src={mediaUrl}
           playsInline
-          onClick={togglePlay}
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          className="max-h-full max-w-full rounded-sm bg-black opacity-0 shadow-lg shadow-zinc-900/10 dark:shadow-black/40"
+          className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
         />
         <OverlayStage onBackgroundClick={togglePlay} />
       </div>

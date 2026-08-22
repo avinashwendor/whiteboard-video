@@ -17,7 +17,9 @@ import {
   canCompose,
   composeOverlays,
   needsCompositing,
+  outputSize,
 } from "@/rescript/lib/overlay/compose";
+import { FRAME_ASPECTS, frameRatio } from "@/rescript/lib/overlay/types";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
 import { formatTime, getEditedDuration, getKeepRanges } from "@/rescript/lib/edits";
 import {
@@ -113,6 +115,8 @@ export default function ExportDialog() {
   const compositionElements = useOverlayStore((s) => s.elements);
   const compositionSubtitles = useOverlayStore((s) => s.subtitles);
   const compositionTransitions = useOverlayStore((s) => s.transitions);
+  const compositionFrame = useOverlayStore((s) => s.frame);
+  const sourceAspect = useOverlayStore((s) => s.sourceAspect);
   /**
    * Whether captions, overlays or transitions have to be rendered into the
    * file. Recomputed here rather than read once at export time so the format
@@ -120,13 +124,49 @@ export default function ExportDialog() {
    */
   const hasComposition = useMemo(
     () =>
-      needsCompositing({
-        elements: compositionElements,
-        subtitles: compositionSubtitles,
-        transitions: compositionTransitions,
-      }),
-    [compositionElements, compositionSubtitles, compositionTransitions]
+      needsCompositing(
+        {
+          elements: compositionElements,
+          subtitles: compositionSubtitles,
+          transitions: compositionTransitions,
+          frame: compositionFrame,
+        },
+        sourceAspect
+      ),
+    [
+      compositionElements,
+      compositionSubtitles,
+      compositionTransitions,
+      compositionFrame,
+      sourceAspect,
+    ]
   );
+
+  /**
+   * The size the file will actually be.
+   *
+   * Worth stating outright rather than leaving to be discovered on download:
+   * once the frame can differ from the footage, "1080p" no longer tells you the
+   * shape of what you are about to get.
+   */
+  const frameSize = useMemo(() => {
+    const videoEl = useEditorStore.getState().videoEl as HTMLVideoElement | null;
+    const nativeWidth = videoEl?.videoWidth || 1920;
+    const nativeHeight = videoEl?.videoHeight || 1080;
+    const scaled =
+      resolution === "original" ? null : Number.parseInt(resolution, 10);
+    const ratio = frameRatio(compositionFrame, nativeWidth / nativeHeight);
+    // The ffmpeg pass scales to the requested height first; the compositor then
+    // sizes the frame against that picture, so the same number is used here.
+    const base = scaled
+      ? { width: (nativeWidth / nativeHeight) * scaled, height: scaled }
+      : { width: nativeWidth, height: nativeHeight };
+    return outputSize(ratio, base.width, base.height);
+  }, [compositionFrame, resolution]);
+
+  const frameLabel =
+    FRAME_ASPECTS.find((a) => a.id === compositionFrame.aspect)?.label ??
+    "Source";
   const editedDuration = useMemo(
     () => getEditedDuration(cuts, duration),
     [cuts, duration]
@@ -236,7 +276,7 @@ export default function ExportDialog() {
       // Compositing runs as a second pass over ffmpeg's output, so the cut
       // itself is unaffected by whether there is anything on top of it.
       const burnIn =
-        activeTab === "video" && needsCompositing(composition);
+        activeTab === "video" && needsCompositing(composition, sourceAspect);
       // Keep the container honest with what the compositor can actually emit.
       const container: VideoExportFormat = burnIn ? "mp4" : videoFormat;
 
@@ -305,6 +345,7 @@ export default function ExportDialog() {
     videoFormat,
     resolution,
     timeline,
+    sourceAspect,
     setStatus,
     setExportUrl,
   ]);
@@ -520,6 +561,10 @@ export default function ExportDialog() {
               disabled={exporting}
               onChange={setResolutionOption}
             />
+            <p className="-mt-2 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              {frameLabel} frame — {frameSize.width}×{frameSize.height}. Change it
+              in the Frame tab.
+            </p>
           </div>
         )}
 

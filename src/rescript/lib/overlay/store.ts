@@ -6,7 +6,10 @@ import {
   DEFAULT_EXIT,
   DEFAULT_SUBTITLE_STYLE,
   emptyComposition,
+  DEFAULT_FRAME,
+  frameRatio,
   type Composition,
+  type FrameSpec,
   type ImageElement,
   type OverlayElement,
   type ShapeElement,
@@ -53,10 +56,18 @@ export interface OverlayState extends Composition {
   past: Composition[];
   future: Composition[];
 
-  /** Frame aspect (w/h) of the loaded media, for sizing new elements. */
+  /**
+   * Aspect (w/h) of the **output frame** — what the composition's 0..1
+   * coordinates are relative to. Derived from `frame` and `sourceAspect`; never
+   * set directly.
+   */
   aspect: number;
+  /** Aspect (w/h) of the loaded media itself, for reframing arithmetic. */
+  sourceAspect: number;
 
-  setAspect: (aspect: number) => void;
+  setSourceAspect: (aspect: number) => void;
+  /** Change the output frame. Undoable, like any other composition edit. */
+  setFrame: (patch: Partial<FrameSpec>) => void;
 
   addElement: (element: OverlayElement) => string;
   addText: (partial?: Partial<TextElement>) => string;
@@ -102,6 +113,7 @@ function snapshot(s: OverlayState): Composition {
     elements: s.elements,
     subtitles: s.subtitles,
     transitions: s.transitions,
+    frame: s.frame,
   };
 }
 
@@ -114,10 +126,11 @@ function snapshot(s: OverlayState): Composition {
  */
 function clearOfSubtitles(
   elements: OverlayElement[],
-  subtitles: OverlayState["subtitles"]
+  subtitles: OverlayState["subtitles"],
+  aspect: number
 ): OverlayElement[] {
   if (!subtitles.enabled || !subtitles.cues.length) return elements;
-  const band = subtitleBand(subtitles.style);
+  const band = subtitleBand(subtitles.style, aspect);
 
   let changed = false;
   const next = elements.map((element) => {
@@ -154,8 +167,21 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     past: [],
     future: [],
     aspect: 16 / 9,
+    sourceAspect: 16 / 9,
 
-    setAspect: (aspect) => set({ aspect: aspect > 0 ? aspect : 16 / 9 }),
+    setSourceAspect: (sourceAspect) => {
+      const next = sourceAspect > 0 ? sourceAspect : 16 / 9;
+      if (get().sourceAspect === next) return;
+      set({ sourceAspect: next, aspect: frameRatio(get().frame, next) });
+    },
+
+    setFrame: (patch) => {
+      const frame = { ...get().frame, ...patch };
+      // The output shape is what every rect is a fraction of, so it is kept
+      // beside the frame rather than recomputed by each reader.
+      set({ aspect: frameRatio(frame, get().sourceAspect) });
+      commit({ frame });
+    },
 
     addElement: (element) => {
       const { elements, subtitles } = get();
@@ -170,7 +196,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         element.start,
         element.end,
         elements,
-        subtitles
+        subtitles,
+        undefined,
+        get().aspect
       );
       const rect = blocked.length
         ? nudgeClear(element.rect, blocked)
@@ -293,7 +321,8 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         element.end,
         elements,
         subtitles,
-        id
+        id,
+        get().aspect
       );
       get().updateElement(id, {
         rect: blocked.length ? nudgeClear(rect, blocked) : rect,
@@ -364,7 +393,10 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
 
     setSubtitleEnabled: (enabled) => {
       const subtitles = { ...get().subtitles, enabled };
-      commit({ subtitles, elements: clearOfSubtitles(get().elements, subtitles) });
+      commit({
+        subtitles,
+        elements: clearOfSubtitles(get().elements, subtitles, get().aspect),
+      });
     },
 
     setSubtitleStyle: (patch) => {
@@ -375,7 +407,10 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       // Moving the subtitles to the middle of the frame is exactly when an
       // existing caption ends up underneath them, so the elements are re-checked
       // against the new band rather than left where they were.
-      commit({ subtitles, elements: clearOfSubtitles(get().elements, subtitles) });
+      commit({
+        subtitles,
+        elements: clearOfSubtitles(get().elements, subtitles, get().aspect),
+      });
     },
 
     setCues: (cues) =>
@@ -440,7 +475,8 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     replaceTransitions: (transitions) =>
       commit({ transitions: [...transitions].sort((a, b) => a.index - b.index) }),
 
-    loadComposition: (composition) =>
+    loadComposition: (composition) => {
+      const frame = composition.frame ?? { ...DEFAULT_FRAME };
       set({
         elements: composition.elements ?? [],
         subtitles: composition.subtitles ?? {
@@ -450,10 +486,15 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
           generated: false,
         },
         transitions: composition.transitions ?? [],
+        frame,
+        aspect: frameRatio(frame, get().sourceAspect),
         selectedId: null,
+        // A loaded composition is a new starting point, not a step: undoing
+        // into the previous project's captions is the bug this store had.
         past: [],
         future: [],
-      }),
+      });
+    },
 
     undo: () => {
       const state = get();
@@ -461,6 +502,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       if (!previous) return;
       set({
         ...previous,
+        aspect: frameRatio(previous.frame ?? state.frame, state.sourceAspect),
         past: state.past.slice(0, -1),
         future: [snapshot(state), ...state.future].slice(0, MAX_UNDO),
         selectedId: previous.elements.some((e) => e.id === state.selectedId)
@@ -475,6 +517,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       if (!next) return;
       set({
         ...next,
+        aspect: frameRatio(next.frame ?? state.frame, state.sourceAspect),
         past: [...state.past, snapshot(state)].slice(-MAX_UNDO),
         future: state.future.slice(1),
         selectedId: next.elements.some((e) => e.id === state.selectedId)
@@ -483,14 +526,26 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       });
     },
 
-    reset: () =>
+    reset: () => {
+      // Every blob URL this composition owns dies with it. Without this a
+      // project switch leaks the whole overlay image set for the life of the
+      // tab — and a decoded 4K still is not a small thing to leak.
+      for (const element of get().elements) {
+        if (element.kind !== "image") continue;
+        if (!element.src.startsWith("blob:")) continue;
+        URL.revokeObjectURL(element.src);
+        forgetImage(element.src);
+      }
+      const fresh = emptyComposition();
       set({
-        ...emptyComposition(),
+        ...fresh,
+        aspect: frameRatio(fresh.frame, get().sourceAspect),
         selectedId: null,
         gestureActive: false,
         past: [],
         future: [],
-      }),
+      });
+    },
   };
 });
 
@@ -501,5 +556,6 @@ export function currentComposition(): Composition {
     elements: s.elements,
     subtitles: s.subtitles,
     transitions: s.transitions,
+    frame: s.frame,
   };
 }

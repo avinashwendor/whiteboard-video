@@ -31,16 +31,32 @@ export function overlaps(a: Rect, b: Rect, pad = 0): boolean {
 }
 
 /**
+ * How much of a frame's height one unit of type is worth, as a fraction.
+ *
+ * Mirrors `typeUnit` in the renderer, which pulls type back on frames taller
+ * than 4:3. This module works in normalised units and never sees a pixel, so it
+ * needs the same correction expressed as a fraction of frame height — otherwise
+ * the band it reserves for a vertical video is nearly twice the strip the
+ * subtitles actually occupy, and everything gets shoved off the frame to dodge
+ * empty space.
+ */
+export function typeScale(aspect: number): number {
+  if (!(aspect > 0)) return 1;
+  return Math.min(1, aspect * (4 / 3));
+}
+
+/**
  * The strip the burned-in subtitles occupy.
  *
  * Derived from the style rather than assumed, because the presets move: the
  * "Shorts" look sits mid-frame at 7% of frame height over two lines, and
  * anything placed by the "centre" rule would land straight on top of it.
  */
-export function subtitleBand(style: SubtitleStyle): Rect {
+export function subtitleBand(style: SubtitleStyle, aspect = 16 / 9): Rect {
   // Line height in the renderer is 1.25em, plus the padding a background slab
   // adds either side.
-  const height = style.fontSize * 1.25 * style.maxLines + style.fontSize * 0.6;
+  const unit = style.fontSize * typeScale(aspect);
+  const height = unit * 1.25 * style.maxLines + unit * 0.6;
   const y =
     style.position === "top"
       ? style.margin
@@ -147,14 +163,15 @@ export function blockedFor(
     style: SubtitleStyle;
     cues: Array<{ start: number; end: number }>;
   },
-  excludeId?: string
+  excludeId?: string,
+  aspect = 16 / 9
 ): Rect[] {
   const blocked = occupiedDuring(elements, start, end, excludeId);
 
   const subtitlesShowing =
     subtitles.enabled &&
     subtitles.cues.some((c) => c.start < end && c.end > start);
-  if (subtitlesShowing) blocked.push(subtitleBand(subtitles.style));
+  if (subtitlesShowing) blocked.push(subtitleBand(subtitles.style, aspect));
 
   return blocked;
 }

@@ -40,6 +40,9 @@ export default function SubtitlesPanel() {
   const at = useOutputTime();
 
   const subtitles = useOverlayStore((s) => s.subtitles);
+  // Cue length is capped by how much fits across the output frame, so a change
+  // of frame restyles the captions as much as a change of font size does.
+  const aspect = useOverlayStore((s) => s.aspect);
   const setEnabled = useOverlayStore((s) => s.setSubtitleEnabled);
   const setStyle = useOverlayStore((s) => s.setSubtitleStyle);
   const setCues = useOverlayStore((s) => s.setCues);
@@ -51,21 +54,21 @@ export default function SubtitlesPanel() {
   const regenerate = useCallback(
     (overrides?: Parameters<typeof setStyle>[0]) => {
       const style = { ...useOverlayStore.getState().subtitles.style, ...overrides };
-      setCues(cuesFromStyle(words, cuts, style));
+      setCues(cuesFromStyle(words, cuts, style, aspect));
     },
-    [words, cuts, setCues]
+    [words, cuts, setCues, aspect]
   );
 
   // Cues drift out of date as words are cut; say so rather than quietly
   // showing captions for lines that are no longer in the video.
   const stale = useMemo(() => {
     if (!subtitles.cues.length) return false;
-    const fresh = cuesFromStyle(words, cuts, subtitles.style);
+    const fresh = cuesFromStyle(words, cuts, subtitles.style, aspect);
     if (fresh.length !== subtitles.cues.length) return true;
     return fresh.some(
       (cue, i) => Math.abs(cue.start - subtitles.cues[i].start) > 0.05
     );
-  }, [words, cuts, subtitles.cues, subtitles.style]);
+  }, [words, cuts, subtitles.cues, subtitles.style, aspect]);
 
   const activeIndex = subtitles.cues.findIndex(
     (cue) => at >= cue.start && at < cue.end

@@ -77,7 +77,9 @@ export default function OverlayStage({
   const transitions = useOverlayStore((s) => s.transitions);
   const selectedId = useOverlayStore((s) => s.selectedId);
   const select = useOverlayStore((s) => s.select);
-  const setAspect = useOverlayStore((s) => s.setAspect);
+  const frame = useOverlayStore((s) => s.frame);
+  const aspect = useOverlayStore((s) => s.aspect);
+  const setSourceAspect = useOverlayStore((s) => s.setSourceAspect);
 
   const timeline = useOutputTimeline();
 
@@ -94,49 +96,71 @@ export default function OverlayStage({
   const freezeCache = useRef(new Map<number, HTMLCanvasElement>());
 
   // Live values for the animation frame, which must not re-subscribe per frame.
-  const live = useRef({ elements, subtitles, transitions, timeline, words, duration, manualCuts });
+  const live = useRef({ elements, subtitles, transitions, frame, timeline, words, duration, manualCuts });
   useEffect(() => {
-    live.current = { elements, subtitles, transitions, timeline, words, duration, manualCuts };
-  }, [elements, subtitles, transitions, timeline, words, duration, manualCuts]);
+    live.current = { elements, subtitles, transitions, frame, timeline, words, duration, manualCuts };
+  }, [elements, subtitles, transitions, frame, timeline, words, duration, manualCuts]);
+
+  // Held frames are the outgoing clip's last picture, at the previous project's
+  // size and from the previous project's footage. Keeping them across a media
+  // change paints one video's frame into another's transition.
+  const mediaUrl = useEditorStore((s) => s.mediaUrl);
+  useEffect(() => {
+    freezeCache.current.clear();
+  }, [mediaUrl]);
 
   /* ------------------------------ geometry ------------------------------- */
 
-  // Track exactly where the video is painted inside the host so the canvas and
-  // the handle layer sit on the same pixels at any window size.
+  // The stage is the *output frame*, not the video element.
+  //
+  // It used to be the video's own painted box, which meant the preview could
+  // only ever be the shape of the footage — there was nowhere to put a vertical
+  // edit of a landscape recording. Now the largest box of the project's aspect
+  // that fits the panel is measured, and the <video> underneath is only a
+  // decoder: what it looks like, and where, no longer matters.
   useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!videoEl || !host) return;
+    if (!host) return;
 
     const measure = () => {
       const hostRect = host.getBoundingClientRect();
-      const videoRect = videoEl.getBoundingClientRect();
-      if (!videoRect.width || !videoRect.height) return;
-      setBox({
-        left: videoRect.left - hostRect.left,
-        top: videoRect.top - hostRect.top,
-        width: videoRect.width,
-        height: videoRect.height,
-      });
-      // The store types the element as HTMLMediaElement because audio-only
-      // projects mount an <audio>; this stage only ever renders for video.
-      const asVideo = videoEl as HTMLVideoElement;
-      if (asVideo.videoWidth && asVideo.videoHeight) {
-        setAspect(asVideo.videoWidth / asVideo.videoHeight);
+      if (!hostRect.width || !hostRect.height) return;
+
+      // Report the footage's own shape so the reframe has something to work
+      // from. The store types the element as HTMLMediaElement because
+      // audio-only projects mount an <audio>; this stage only renders video.
+      const asVideo = videoEl as HTMLVideoElement | null;
+      if (asVideo?.videoWidth && asVideo.videoHeight) {
+        setSourceAspect(asVideo.videoWidth / asVideo.videoHeight);
       }
+
+      const ratio = aspect > 0 ? aspect : 16 / 9;
+      let width = hostRect.width;
+      let height = width / ratio;
+      if (height > hostRect.height) {
+        height = hostRect.height;
+        width = height * ratio;
+      }
+      setBox({
+        left: (hostRect.width - width) / 2,
+        top: (hostRect.height - height) / 2,
+        width,
+        height,
+      });
     };
 
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(videoEl);
     observer.observe(host);
-    videoEl.addEventListener("loadedmetadata", measure);
+    if (videoEl) observer.observe(videoEl);
+    videoEl?.addEventListener("loadedmetadata", measure);
     window.addEventListener("resize", measure);
     return () => {
       observer.disconnect();
-      videoEl.removeEventListener("loadedmetadata", measure);
+      videoEl?.removeEventListener("loadedmetadata", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [videoEl, setAspect]);
+  }, [videoEl, aspect, setSourceAspect]);
 
   /* -------------------------------- paint -------------------------------- */
 
@@ -214,6 +238,7 @@ export default function OverlayStage({
             elements: state.elements,
             subtitles: state.subtitles,
             transitions: state.transitions,
+            frame: state.frame,
           },
           t
         );
@@ -693,7 +718,10 @@ function InlineTextEditor({
         top: element.rect.y * box.height,
         width: element.rect.w * box.width,
         height: element.rect.h * box.height,
-        fontSize: element.fontSize * box.height,
+        // Matches the canvas: type is measured against the same corrected unit
+        // the renderer uses, or editing in place would show a different size to
+        // the one that gets drawn.
+        fontSize: element.fontSize * Math.min(box.height, box.width * (4 / 3)),
         lineHeight: element.lineHeight,
         fontWeight: element.fontWeight,
         color: element.color,

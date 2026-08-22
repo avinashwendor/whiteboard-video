@@ -14,6 +14,7 @@ import {
 } from "./languages";
 import type { MediaKind } from "./media";
 import type { ManualCut, SceneBoundary, SpeakerInfo, Word } from "./types";
+import type { Composition } from "./overlay/types";
 
 const DB_NAME = "rescript-projects";
 const DB_VERSION = 1;
@@ -49,6 +50,23 @@ export interface ProjectRecord extends ProjectMeta {
   sceneBoundaries?: SceneBoundary[];
   /** Named speakers (optional for older saves — derived from words when missing). */
   speakers?: SpeakerInfo[];
+  /**
+   * Captions, overlays, transitions and the output frame.
+   *
+   * Optional because saves written before the composition layer existed do not
+   * have one — and because it is genuinely absent for a project that has only
+   * ever been cut. Absent means "an empty composition", never "keep whatever
+   * the last project had", which is the whole reason it is stored per project.
+   */
+  composition?: Composition;
+  /**
+   * Bytes behind any overlay image that came from the person's own disk, keyed
+   * by element id. A `blob:` URL is only valid for the page that minted it, so
+   * without these an uploaded logo comes back as a placeholder on the next
+   * visit. Generated and searched pictures are served from /api/asset and need
+   * nothing here.
+   */
+  assets?: Record<string, Blob>;
   /** Original media bytes. */
   media: Blob;
   /** MIME type used when reconstructing a File. */
@@ -189,6 +207,8 @@ export async function putProject(input: ProjectWrite): Promise<string> {
     manualCuts: input.manualCuts ?? [],
     sceneBoundaries: input.sceneBoundaries ?? [],
     speakers: input.speakers ?? [],
+    composition: input.composition,
+    assets: input.assets,
     media: input.media,
     mediaType: input.mediaType,
     createdAt: createdAt ?? now,

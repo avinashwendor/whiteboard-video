@@ -1,8 +1,16 @@
 /**
  * Debounced autosave of the current editor project into IndexedDB.
+ *
+ * Two stores are written as one record. The transcript store owns the cut; the
+ * overlay store owns the captions, the overlays, the transitions and the output
+ * frame. They are deliberately separate in memory — see `overlay/store.ts` — but
+ * they are one *project*, and saving only half of it is what let a composition
+ * outlive the video it was made for.
  */
 
 import { useEditorStore } from "./store";
+import { useOverlayStore } from "./overlay/store";
+import { isEmptyComposition } from "./overlay/types";
 import { putProject } from "./projects";
 
 const DEBOUNCE_MS = 500;
@@ -45,11 +53,56 @@ export async function flushProjectAutosave(): Promise<void> {
   }
 }
 
+/**
+ * Pull the bytes back out of every `blob:` overlay image.
+ *
+ * Those URLs die with the page, so the composition alone would restore an
+ * uploaded picture as a placeholder. A fetch of a live blob URL is a memory
+ * read, not a network call.
+ */
+async function collectAssets(
+  elements: ReturnType<typeof useOverlayStore.getState>["elements"]
+): Promise<Record<string, Blob> | undefined> {
+  const wanted = elements.filter(
+    (e) => e.kind === "image" && e.src.startsWith("blob:")
+  );
+  if (!wanted.length) return undefined;
+
+  const assets: Record<string, Blob> = {};
+  await Promise.all(
+    wanted.map(async (element) => {
+      if (element.kind !== "image") return;
+      try {
+        const res = await fetch(element.src);
+        assets[element.id] = await res.blob();
+      } catch {
+        // A revoked URL is not worth failing the save over; the element comes
+        // back as a placeholder, exactly as it would have before.
+      }
+    })
+  );
+  return Object.keys(assets).length ? assets : undefined;
+}
+
 async function writeSnapshot() {
   const s = useEditorStore.getState();
   if (s.status !== "ready") return;
   if (!s.videoFile || !s.mediaKind) return;
+
+  const overlay = useOverlayStore.getState();
+  const composition = {
+    elements: overlay.elements,
+    subtitles: overlay.subtitles,
+    transitions: overlay.transitions,
+    frame: overlay.frame,
+  };
+  // The composition counts as work: a project whose only edit is "make it
+  // vertical and burn in captions" has an untouched transcript and still has to
+  // be saved.
+  const hasComposition = !isEmptyComposition(composition, overlay.sourceAspect);
+
   if (
+    !hasComposition &&
     s.words.length === 0 &&
     s.manualCuts.length === 0 &&
     s.sceneBoundaries.length === 0
@@ -58,6 +111,14 @@ async function writeSnapshot() {
   }
 
   try {
+    const assets = await collectAssets(overlay.elements);
+
+    // The project can be closed while the blobs are being read back. Writing
+    // then would stamp this composition onto whatever is open now, which is the
+    // same class of bug as never resetting it in the first place.
+    const now = useEditorStore.getState();
+    if (now.videoFile !== s.videoFile || now.status !== "ready") return;
+
     // putProject preserves createdAt for an existing id within its own
     // transaction, so no separate read pass here.
     const id = await putProject({
@@ -72,6 +133,8 @@ async function writeSnapshot() {
       manualCuts: s.manualCuts,
       sceneBoundaries: s.sceneBoundaries,
       speakers: s.speakers,
+      composition,
+      assets,
       media: s.videoFile,
       mediaType: s.videoFile.type,
     });
@@ -81,4 +144,27 @@ async function writeSnapshot() {
   } catch (err) {
     console.warn("Failed to autosave project.", err);
   }
+}
+
+/**
+ * Save when the composition changes, not only when the cut does.
+ *
+ * The transcript store calls `scheduleProjectAutosave` from inside its own
+ * actions; the overlay store is ported-adjacent code with a different shape, so
+ * it is watched from outside instead. Undo/redo and gestures all land here,
+ * which is what we want — the debounce collapses a drag into one write.
+ */
+if (typeof window !== "undefined") {
+  useOverlayStore.subscribe((state, previous) => {
+    if (
+      state.elements === previous.elements &&
+      state.subtitles === previous.subtitles &&
+      state.transitions === previous.transitions &&
+      state.frame === previous.frame
+    ) {
+      return;
+    }
+    if (useEditorStore.getState().status !== "ready") return;
+    scheduleProjectAutosave();
+  });
 }

@@ -204,12 +204,12 @@ function subtitleSize(size: SizeName | undefined, current: number): number {
   return { xs: 0.034, s: 0.044, m: 0.055, l: 0.068, xl: 0.086 }[size];
 }
 
-function regenerateCues(style?: Partial<SubtitleStyle>) {
+export function regenerateCues(style?: Partial<SubtitleStyle>) {
   const editor = useEditorStore.getState();
   const overlay = useOverlayStore.getState();
   const merged = { ...overlay.subtitles.style, ...style };
   const cuts = getCutRanges(editor.words, editor.duration, editor.manualCuts);
-  const cues = cuesFromStyle(editor.words, cuts, merged);
+  const cues = cuesFromStyle(editor.words, cuts, merged, overlay.aspect);
   overlay.setCues(cues);
   return cues.length;
 }
@@ -664,6 +664,29 @@ async function runOne(
       return {
         ok: true,
         message: `“${(op.text ?? op.phrase).slice(0, 32)}” on screen at ${start.toFixed(1)}s, as it is said`,
+      };
+    }
+
+    case "setFrame": {
+      const patch: Record<string, unknown> = { aspect: op.aspect };
+      if (op.fit) patch.fit = op.fit;
+      if (op.zoom !== undefined) patch.zoom = op.zoom;
+      if (op.focusX !== undefined) patch.focusX = op.focusX;
+      if (op.focusY !== undefined) patch.focusY = op.focusY;
+      if (op.background) patch.background = op.background;
+      overlay.setFrame(patch);
+
+      // Cue line length is a function of the frame, so captions cut for the old
+      // shape are re-broken for the new one. Same reasoning as the Frame panel.
+      const subtitles = useOverlayStore.getState().subtitles;
+      if (subtitles.cues.length) regenerateCues();
+
+      return {
+        ok: true,
+        message:
+          op.aspect === "source"
+            ? "Frame back to the shape it was shot in"
+            : `Frame is now ${op.aspect}`,
       };
     }
 

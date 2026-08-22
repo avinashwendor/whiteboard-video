@@ -28,6 +28,24 @@ export interface FrameSize {
   height: number;
 }
 
+/**
+ * Pixels that one unit of "fraction of frame height" is worth for *type*.
+ *
+ * Type is specified as a fraction of frame height, which is the correct unit
+ * for a landscape frame and wrong for a tall one: in 9:16 the height is nearly
+ * twice the width, so a caption at 0.07 of it is half the width of the phone
+ * before a single letter is measured. Referencing a 4:3-equivalent height
+ * instead leaves every landscape and square frame exactly as it was — for those
+ * the height is already the smaller number — and only pulls type back on frames
+ * taller than 4:3, which is precisely where the old unit broke down.
+ *
+ * Rects are untouched: a box that is half the frame should stay half the frame
+ * whatever its shape. Only the type inside it is corrected.
+ */
+export function typeUnit(size: FrameSize): number {
+  return Math.min(size.height, size.width * (4 / 3));
+}
+
 /* ------------------------------ image registry ------------------------------ */
 
 const images = new Map<string, HTMLImageElement>();
@@ -243,7 +261,7 @@ function drawText(
   state: DrawState,
   box: Px
 ) {
-  const fontPx = el.fontSize * size.height;
+  const fontPx = el.fontSize * typeUnit(size);
   if (fontPx <= 0) return;
 
   setFont(ctx, el, fontPx);
@@ -494,7 +512,7 @@ export function paintSubtitle(
   size: FrameSize,
   t: number
 ) {
-  const fontPx = style.fontSize * size.height;
+  const fontPx = style.fontSize * typeUnit(size);
   if (fontPx <= 0) return;
 
   ctx.save();

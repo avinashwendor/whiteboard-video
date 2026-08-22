@@ -123,13 +123,38 @@ export function buildCues(
   return cues.filter((c) => c.end > c.start);
 }
 
+/**
+ * How many characters actually fit on one line of this frame.
+ *
+ * `maxCharsPerLine` is a taste setting — "break these captions short" — and it
+ * was tuned against a widescreen frame. On a vertical one the same number is a
+ * line half again as wide as the phone, and the renderer's own width wrap then
+ * produces more lines than `maxLines` allows, which it resolves by joining the
+ * overflow into a single line that runs off both edges.
+ *
+ * So the taste setting is capped by the geometry. The renderer wraps at 86% of
+ * the frame width and average glyph width is about 0.52em for the weights these
+ * presets use; the type unit is the same one `render.ts` applies.
+ */
+export function fittedCharsPerLine(
+  style: SubtitleStyle,
+  aspect: number
+): number {
+  const safeAspect = aspect > 0 ? aspect : 16 / 9;
+  const unitPerWidth = style.fontSize * Math.min(1 / safeAspect, 4 / 3);
+  if (!(unitPerWidth > 0)) return style.maxCharsPerLine;
+  const fits = Math.floor(0.86 / (0.52 * unitPerWidth));
+  return Math.max(8, Math.min(style.maxCharsPerLine, fits));
+}
+
 export function cuesFromStyle(
   words: Word[],
   cuts: TimeRange[],
-  style: SubtitleStyle
+  style: SubtitleStyle,
+  aspect = 16 / 9
 ): SubtitleCue[] {
   return buildCues(words, cuts, {
-    maxCharsPerLine: style.maxCharsPerLine,
+    maxCharsPerLine: fittedCharsPerLine(style, aspect),
     maxLines: style.maxLines,
   });
 }
