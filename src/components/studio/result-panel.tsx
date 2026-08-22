@@ -9,12 +9,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
 import type { Generation } from "@/lib/studio/types";
-import { MODE_CONFIG } from "./mode-config";
-import { ScriptResult, StillResult, StoryboardResult, VoiceoverResult } from "./results";
+import { configFor } from "./mode-config";
+import { ScriptResult, StillResult, VoiceoverResult } from "./results";
 import { ResultActions } from "./result-actions";
 
 export function ResultPanel({ generation }: { generation: Generation }) {
-  const config = MODE_CONFIG[generation.mode];
+  const config = configFor(generation.mode);
 
   return (
     <Card className="animate-rise overflow-hidden">
@@ -69,8 +69,6 @@ function ResultBody({ generation }: { generation: Generation }) {
       return <ScriptResult generation={generation} />;
     case "image":
       return <StillResult generation={generation} />;
-    case "storyboard":
-      return <StoryboardResult generation={generation} />;
     case "voice":
       return <VoiceoverResult generation={generation} />;
     case "create":

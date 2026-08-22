@@ -186,6 +186,14 @@ export interface ScheduleWindow {
   base?: number;
   /** Video-timeline position playback is starting at. */
   from?: number;
+  /**
+   * Playback rate the picture is running at.
+   *
+   * Effects are placed on the context clock once and then run on their own,
+   * so a 1.25x preview would drift a quarter-second further out of step every
+   * second unless the timeline is compressed to match.
+   */
+  rate?: number;
 }
 
 /**
@@ -204,9 +212,10 @@ export function scheduleSfx(
 ) {
   const base = window.base ?? 0;
   const from = window.from ?? 0;
+  const rate = window.rate && window.rate > 0 ? window.rate : 1;
 
   for (const event of events) {
-    const at = base + (event.at - from);
+    const at = base + (event.at - from) / rate;
     if (event.at < from || at < base - 0.001) continue;
     VOICES[event.name]?.(ctx, out, at, (event.gain ?? 1) * master);
   }

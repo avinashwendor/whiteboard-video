@@ -26,6 +26,9 @@ function NewProduction() {
   const params = useSearchParams();
   const style = params.get("style");
   const mode = params.get("mode");
+  // Remounting is the reset: the thread lives in component state, so a new
+  // token gives you an empty composer without a reducer or a context flag.
+  const fresh = params.get("fresh");
 
   useEffect(() => {
     if (style === "hyperframes" || style === "whiteboard") {
@@ -34,10 +37,10 @@ function NewProduction() {
   }, [style, updateSettings]);
 
   useEffect(() => {
-    if (mode === "write" || mode === "image" || mode === "storyboard" || mode === "voice") {
+    if (mode === "write" || mode === "image" || mode === "voice") {
       setMode(mode);
     }
   }, [mode, setMode]);
 
-  return <StudioChat />;
+  return <StudioChat key={fresh ?? "thread"} />;
 }
