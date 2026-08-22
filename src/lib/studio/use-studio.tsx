@@ -12,6 +12,7 @@ import {
 } from "react";
 import { generateImage } from "@/lib/ai/image/client";
 import { castVoice } from "./casting";
+import { playReadyChime } from "@/lib/video/chime";
 import { renderThumbnail } from "@/components/whiteboard/thumbnail";
 import type { SceneSpec } from "@/lib/whiteboard/scene";
 import type { ImageStyle, ModelInfo, VoiceInfo } from "@/lib/ai/types";
@@ -940,6 +941,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         }
 
         await commit({ ...generation });
+
+        // A video takes minutes, so people go and do something else. The chime
+        // only fires when the tab is actually hidden -- if you were watching,
+        // you already saw it land and a sound you did not need is just noise.
+        if (document.visibilityState === "hidden") playReadyChime();
       } catch (err) {
         if (signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
           setCurrent(null);

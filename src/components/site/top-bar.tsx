@@ -66,6 +66,18 @@ export function TopBar() {
             Edit video
           </a>
 
+          <Link
+            href="/signin"
+            className={cn(
+              "border-b pb-1 pt-0.5 transition-colors",
+              pathname === "/signin"
+                ? "border-ink text-ink"
+                : "border-transparent text-muted hover:text-ink",
+            )}
+          >
+            Sign in
+          </Link>
+
           {/*
             A standing way out of whatever you are looking at. The timestamp
             remounts the composer, so this opens an empty thread even when you

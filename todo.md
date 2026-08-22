@@ -21,8 +21,8 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
 
 ### Pitch prep
 - [ ] IRL video + backup generated video ready
-- [ ] Landing page: sign in / sign up
-- [ ] Landing page: pricing section
+- [x] Landing page: sign in / sign up
+- [x] Landing page: pricing section
 
 ---
 
@@ -46,18 +46,20 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
       rescaled. Multi-hour, and it is the pipeline the demo runs on.
 
 ### Landing page content
-- [ ] Rescript UI → match website theme
+- [~] Rescript UI → match website theme — defaults to dark now so crossing
+      between the two apps does not flash white. Full restyle of its 107
+      components not attempted; it is Avinash's app.
 - [x] Improve content: video styles, pricing, value prop, editor features ("more larp")
 - [x] Mention efficiency + pricing
-- [ ] Social media links → ours
+- [x] Social media links → ours
 
 ### Pricing (for PPT)
-- [ ] 2 models: subscription-based + credit-based
+- [x] 2 models: subscription-based + credit-based
 
 ### Navigation additions
 - [x] "New" button (general)
 - [x] History page "New" button
-- [ ] Option: create new vid vs start new workspace
+- [x] Option: create new vid vs start new workspace
 - [x] Whiteboard + modern frames → easily accessible
 
 ### Error handling
@@ -70,12 +72,14 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
 
 ## P2 — Polish, UX, hardening
 
-- [ ] Chime when output ready
+- [x] Chime when output ready
 - [ ] General UI/UX issues pass
-- [ ] Balance lazy prompting vs question-based prompting
-- [ ] Delete unused components (codebase cleanup)
-- [ ] Whiteboard pen travel fix — **explicitly last priority**
-- [ ] End-to-end testing (lots)
+- [x] Balance lazy prompting vs question-based prompting
+- [x] Delete unused components (codebase cleanup)
+- [x] Whiteboard pen travel fix — **explicitly last priority**
+- [~] End-to-end testing — route smoke test added at tests/smoke-routes-test.ts
+      (npx tsx tests/smoke-routes-test.ts). Catches render-time crashes like the
+      one retiring storyboard caused. Interaction coverage still manual.
 
 ---
 

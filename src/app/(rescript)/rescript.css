@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Class-based dark mode (user preference). Default is light. */
+/* Class-based dark mode (user preference). Default is dark, to match the site. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Field, Select, Slider } from "@/components/ui/field";
 import { cn } from "@/lib/utils/cn";
 import { useStudio } from "@/lib/studio/use-studio";
 import { IMAGE_SIZES, type Mode } from "@/lib/studio/types";
 import { IMAGE_STYLES } from "@/lib/ai/prompt-engineering";
 import { PuterConnection } from "./puter-connection";
+import { chimeEnabled, playReadyChime, setChimeEnabled } from "@/lib/video/chime";
 
 const STYLE_OPTIONS = [
   { value: "auto", label: "Auto — pick for me" },
@@ -77,6 +78,12 @@ function settingsLabelForMode(mode: Mode): string {
 export function AdvancedSettings({ mode }: { mode: Mode }) {
   const { settings, updateSettings, catalogues, capabilities } = useStudio();
   const [open, setOpen] = useState(false);
+  // Read lazily so the server-rendered markup does not depend on localStorage.
+  const [chime, setChime] = useState(true);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChime(chimeEnabled());
+  }, []);
 
   const imageModels = catalogues.imageModels[settings.imageProvider] ?? [];
   const voicesForLanguage = catalogues.voices.filter((voice) =>
@@ -409,6 +416,29 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
               </>
             ) : null}
           </div>
+
+          {/*
+            Kept out of the grid above: it is a preference about this browser,
+            not a production setting, and it applies whatever mode you are in.
+          */}
+          <label className="flex cursor-pointer items-center justify-between gap-4 border-t border-line pt-4">
+            <span>
+              <span className="block text-[13px] text-ink">Chime when a generation lands</span>
+              <span className="block pt-0.5 text-[12px] text-faint">
+                Only if this tab is in the background.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={chime}
+              onChange={(event) => {
+                setChime(event.target.checked);
+                setChimeEnabled(event.target.checked);
+                if (event.target.checked) playReadyChime();
+              }}
+              className="size-4 shrink-0 accent-[var(--text)]"
+            />
+          </label>
         </div>
       ) : null}
     </div>

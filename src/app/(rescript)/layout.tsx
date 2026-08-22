@@ -64,7 +64,9 @@ export const metadata: Metadata = {
 };
 
 /** Apply stored appearance before paint to avoid a light→dark flash. */
-const appearanceBootScript = `(function(){try{if(localStorage.getItem("rescript.appearance")==="dark")document.documentElement.classList.add("dark")}catch(e){}})();`;
+// Dark unless the stored preference explicitly says light, matching
+// loadAppearance(). Inline so the class lands before first paint.
+const appearanceBootScript = `(function(){try{if(localStorage.getItem("rescript.appearance")!=="light")document.documentElement.classList.add("dark")}catch(e){document.documentElement.classList.add("dark")}})();`;
 const localeBootScript = buildLocaleBootScript();
 
 export default function RescriptLayout({

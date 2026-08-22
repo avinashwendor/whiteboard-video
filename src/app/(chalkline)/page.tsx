@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { EntryHub } from "@/components/studio/entry-hub";
 import { SiteFooter } from "@/components/site/site-footer";
 import { Economics, EditorFeatures, VideoStyles } from "@/components/site/value-sections";
+import { Pricing } from "@/components/site/pricing";
 
 const Dither = dynamic(() => import("@/components/ui/dither"), {
   ssr: false,
@@ -135,6 +136,10 @@ export default function StudioPage() {
 
           <div className="mt-16 sm:mt-20">
             <Economics />
+          </div>
+
+          <div className="mt-16 sm:mt-20">
+            <Pricing />
           </div>
         </section>
 

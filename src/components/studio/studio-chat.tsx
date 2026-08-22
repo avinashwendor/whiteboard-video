@@ -12,6 +12,7 @@ import {
 import { WhiteboardPlayer } from "@/components/whiteboard/whiteboard-player";
 import { Markdown } from "@/lib/utils/markdown";
 import { cn } from "@/lib/utils/cn";
+import { enhancePrompt } from "@/lib/studio/api";
 import { useStudio } from "@/lib/studio/use-studio";
 import { MAX_PROMPT_CHARS } from "@/lib/validation/schemas";
 import type { Generation, Mode } from "@/lib/studio/types";
@@ -206,6 +207,8 @@ export function StudioChat() {
               />
             </div>
 
+            <Sharpen mode={mode} disabled={running} />
+
             <ModeOptions mode={mode} disabled={running} />
 
             <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-2">
@@ -253,6 +256,95 @@ export function StudioChat() {
       {/* The lower half of the empty state. Two equal spacers put the composer
           on the centre line; removing this one drops it to the bottom. */}
       {docked ? null : <div className="min-h-0 flex-1" />}
+    </div>
+  );
+}
+
+/* --------------------------------- sharpen -------------------------------- */
+
+/**
+ * The middle ground between a lazy prompt and an interrogation.
+ *
+ * Six words is a perfectly good way to start, and being asked four questions
+ * before anything happens is how people close a tab. But "a video about UPI"
+ * really does make a worse video than a brief that says who it is for and what
+ * it should land. So: type whatever you like and send it, or spend one click
+ * having the prompt written out properly and see what changed before you
+ * commit to it.
+ *
+ * Only offered on short prompts. Past a sentence or two you have already told
+ * it what you want.
+ */
+function Sharpen({ mode, disabled }: { mode: Mode; disabled: boolean }) {
+  const { prompt, setPrompt, settings } = useStudio();
+  const [busy, setBusy] = useState(false);
+  const [previous, setPrevious] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const words = prompt.trim().split(/\s+/).filter(Boolean).length;
+  const worthOffering = words >= 3 && words <= 14 && mode !== "voice";
+
+  if (previous === null && !worthOffering) return null;
+
+  const sharpen = async () => {
+    const original = prompt.trim();
+    if (!original) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      const result = await enhancePrompt({
+        prompt: original,
+        style: mode === "image" ? (settings.imageStyle as string) : undefined,
+      });
+      if (result.used && result.used !== original) {
+        setPrevious(original);
+        setPrompt(result.used);
+      }
+    } catch {
+      // A brief that will not rewrite is not a reason to block sending the
+      // one you already have.
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pt-2.5">
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#4e4e4a]">
+        Brief
+      </span>
+
+      {previous === null ? (
+        <button
+          type="button"
+          onClick={() => void sharpen()}
+          disabled={disabled || busy}
+          className="flex items-center gap-2 border-b border-transparent pb-0.5 text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+        >
+          {busy ? <AsciiSpinner variant="braille" className="text-create" /> : null}
+          {busy ? "Writing it out" : "Sharpen this for me"}
+        </button>
+      ) : (
+        <>
+          <span className="text-[12.5px] text-create">Sharpened</span>
+          <button
+            type="button"
+            onClick={() => {
+              setPrompt(previous);
+              setPrevious(null);
+            }}
+            disabled={disabled}
+            className="border-b border-transparent pb-0.5 text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-ink"
+          >
+            Use what I wrote
+          </button>
+        </>
+      )}
+
+      {failed ? (
+        <span className="text-[12px] text-faint">Couldn&rsquo;t rewrite it — send yours.</span>
+      ) : null}
     </div>
   );
 }
