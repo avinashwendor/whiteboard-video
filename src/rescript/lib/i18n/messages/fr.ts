@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** French UI catalog. Every key in {@link en} must be present. */
 export const fr: Record<MessageKey, string> = {
-  "app.title": "Rescript — montez vos vidéos comme du texte",
+  "app.title": "MotionScript — montez vos vidéos comme du texte",
   "common.cancel": "Annuler",
   "common.close": "Fermer",
   "common.delete": "Supprimer",
@@ -23,11 +23,6 @@ export const fr: Record<MessageKey, string> = {
   "settings.privacy": "Confidentialité",
   "settings.helpImprove": "Aider à améliorer l’app",
   "settings.telemetryHelp": "Envoyer des statistiques anonymes d’utilisation des fonctionnalités et des rapports de plantage.",
-  "settings.support": "Assistance / retours",
-  "settings.reportIssue": "Signaler un problème",
-  "settings.homepage": "Page d’accueil",
-  "settings.github": "GitHub",
-  "settings.followX": "Suivre sur X",
   "model.transcriptSource": "Source de transcription",
   "model.language": "Langue",
   "model.transcriptLanguage": "Langue de transcription",
@@ -165,14 +160,7 @@ export const fr: Record<MessageKey, string> = {
   "import.chooseFileShort": "Choisir un fichier…",
   "import.chooseFile": "Choisir une transcription SRT, VTT ou JSON",
   "import.selected": "{name} sélectionné",
-  "banner.faster": "Vous voulez des transcriptions et exports plus rapides ?",
-  "banner.getDesktop": "Obtenir l’app de bureau Rescript",
-  "banner.downloadFor": "Télécharger pour {platform}",
-  "banner.dismiss": "Ignorer",
-  "social.githubRepo": "Dépôt GitHub",
-  "social.discordServer": "Serveur Discord",
-  "social.xProfile": "Profil X",
-  "globalError.title": "Rescript — une erreur est survenue",
+  "globalError.title": "MotionScript — une erreur est survenue",
   "globalError.heading": "Une erreur est survenue",
   "globalError.body":
     "L’éditeur a rencontré une erreur inattendue. Vos projets enregistrés sont toujours sur cet appareil ; un rechargement devrait les restaurer.",

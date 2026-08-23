@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MODE_CONFIG, MODE_ORDER } from "@/components/studio/mode-config";
+import { configFor, MODE_CONFIG, MODE_ORDER } from "@/components/studio/mode-config";
 import { clearHistory, removeGeneration } from "@/lib/studio/history";
 import { useStudio } from "@/lib/studio/use-studio";
 import type { Mode } from "@/lib/studio/types";
@@ -45,19 +45,31 @@ export default function HistoryPage() {
             Everything you&apos;ve generated, stored in this browser only.
           </p>
         </div>
-        {history.length ? (
+        <div className="flex items-center gap-2">
+          {history.length ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                clearHistory();
+                refreshHistory();
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              Clear all
+            </Button>
+          ) : null}
+
+          {/* The way out of the archive and back to making something. */}
           <Button
             size="sm"
-            variant="ghost"
-            onClick={() => {
-              clearHistory();
-              refreshHistory();
-            }}
+            variant="primary"
+            onClick={() => router.push(`/new?fresh=${Date.now()}`)}
           >
-            <Trash2 className="size-3.5" />
-            Clear all
+            <Plus className="size-3.5" />
+            New
           </Button>
-        ) : null}
+        </div>
       </div>
 
       {history.length ? (
@@ -81,7 +93,7 @@ export default function HistoryPage() {
       {filtered.length ? (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((generation) => {
-            const config = MODE_CONFIG[generation.mode];
+            const config = configFor(generation.mode);
             const thumbnail = generation.image?.url ?? generation.project?.cover?.url;
             return (
               <li key={generation.id} className="animate-rise">

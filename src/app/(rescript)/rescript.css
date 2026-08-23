@@ -1,26 +1,83 @@
 @import "tailwindcss";
 
-/* Class-based dark mode (user preference). Default is light. */
+/*
+ * MotionScript wears the Motionhouse skin.
+ *
+ * The editor was authored light-first against Tailwind zinc, with rounded
+ * corners throughout — 865 zinc classes and 109 rounded ones across a hundred
+ * components. Rewriting those by hand would be a week of churn and a week of
+ * regressions, so the palette is retuned at the theme layer instead: redefine
+ * what zinc *means* and every one of those classes lands on the house greys
+ * at once. Same for the radii, which all collapse to zero.
+ *
+ * The upshot is that the editor restyles wholesale without a single component
+ * being touched, and any component added later inherits the skin for free.
+ */
+
+/* One appearance, matching the rest of the site. */
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /*
+   * Zinc, remapped onto the Motionhouse greys. Ordered light-to-dark as
+   * Tailwind expects, so zinc-100 is still the brightest text and zinc-950 is
+   * still the deepest ground — only the actual colours move.
+   */
+  --color-zinc-50: #f7f7f5;
+  --color-zinc-100: #f2f2f0;
+  --color-zinc-200: #c9c9c4;
+  --color-zinc-300: #a8a8a2;
+  --color-zinc-400: #8a8a85;
+  --color-zinc-500: #6e6e6a;
+  --color-zinc-600: #4e4e4a;
+  --color-zinc-700: #2a2a2c;
+  --color-zinc-800: #171719;
+  --color-zinc-900: #0e0e10;
+  --color-zinc-950: #0a0a0b;
+
+  /* Neutral shadows the same scale so the two never disagree. */
+  --color-neutral-400: #8a8a85;
+  --color-neutral-500: #6e6e6a;
+  --color-neutral-600: #4e4e4a;
+
+  /* Squared, like everything else. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+}
+
+/*
+ * Tailwind resolves rounded-full to an effectively infinite radius rather
+ * than to a theme variable, so it has to be squared on its own. Motionhouse
+ * has no round corners anywhere, including its dots and its play button.
+ */
+.rounded-full {
+  border-radius: 0;
+}
 
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-html {
-  color-scheme: light;
-}
+html,
 html.dark {
   color-scheme: dark;
 }
 
 body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  background: #0a0a0b;
+  color: #f2f2f0;
 }
 
 ::selection {
-  background: rgba(99, 102, 241, 0.05);
+  background: rgba(242, 242, 240, 0.2);
+  color: #f2f2f0;
 }
 
 /*
@@ -30,10 +87,10 @@ body {
  * highlight that includes the spaces between words.
  */
 .transcript-words [data-wid][data-sel] {
-  background-color: rgb(199 210 254 / 0.5);
+  background-color: rgba(95, 208, 138, 0.26);
 }
 .transcript-words [data-wid][data-sel].word-deleted {
-  background-color: rgb(254 202 202 / 0.7);
+  background-color: rgba(196, 87, 78, 0.34);
 }
 
 /*
@@ -52,15 +109,14 @@ body {
 /* Slim scrollbars for panels and the timeline */
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: #d4d4d8 transparent;
+  scrollbar-color: rgba(242, 242, 240, 0.12) transparent;
 }
 .scrollbar-thin::-webkit-scrollbar {
   height: 8px;
   width: 8px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #d4d4d8;
-  border-radius: 4px;
+  background: rgba(242, 242, 240, 0.12);
 }
 .scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
@@ -125,22 +181,4 @@ body {
 .tl-word-handle:hover > span {
   opacity: 1 !important;
   width: 2px;
-}
-
-.dark ::selection {
-  background: rgba(99, 102, 241, 0.28);
-}
-
-.dark .transcript-words [data-wid][data-sel] {
-  background-color: rgb(67 56 202 / 0.45);
-}
-.dark .transcript-words [data-wid][data-sel].word-deleted {
-  background-color: rgb(153 27 27 / 0.55);
-}
-
-.dark .scrollbar-thin {
-  scrollbar-color: #52525b transparent;
-}
-.dark .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #52525b;
 }

@@ -3,7 +3,7 @@
 import { useId } from "react";
 import { useI18n } from "./I18nProvider";
 
-/** Filled silhouette of the Rescript "R", used to clip the sliding bars. */
+/** Filled silhouette of the MotionScript "R", used to clip the sliding bars. */
 const R_PATH =
   "M45.5 44L57 61H4.5C1.71605 60.1158 0.837624 59.04 0 56.5V52V44V35V26.5V17.5V9V4.5C0.902895 2.15806 1.75648 1.08485 4.5 0H37.5C46.5678 1.963 49.8193 4.07203 53.5 9C55.4387 11.5376 56.3089 13.4198 57.5 17.5C57.9279 20.9844 57.8419 22.8121 57.5 26C56.4745 30.0901 55.5524 32.0111 53.5 35C50.039 40.2343 46.4414 42.1446 37.5 44H45.5Z";
 

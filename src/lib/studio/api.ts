@@ -6,13 +6,34 @@ import type { ModelInfo, VoiceInfo } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
 
-/** One error type for everything the browser gets back from our routes. */
+/**
+ * One error type for everything the browser gets back from our routes.
+ *
+ * `kind` is the part a person can act on. "The provider is busy, try again" and
+ * "you are offline" both used to arrive as one vague sentence, which left the
+ * only available move — retry — looking equally pointless in both cases.
+ */
+export type ApiErrorKind = "offline" | "network" | "server" | "provider" | "request";
+
 export class ApiError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  readonly kind: ApiErrorKind;
+  /** HTTP status, when the server answered at all. */
+  readonly status?: number;
+  /** Whether trying the same thing again could plausibly work. */
+  readonly retryable: boolean;
+
+  constructor(
+    code: string,
+    message: string,
+    options: { kind?: ApiErrorKind; status?: number; retryable?: boolean } = {},
+  ) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.kind = options.kind ?? "provider";
+    this.status = options.status;
+    this.retryable = options.retryable ?? this.kind !== "request";
   }
 }
 
@@ -46,16 +67,47 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;
-    throw new ApiError("network", "Couldn't reach the server. Check your connection.");
+
+    // `fetch` rejects identically whether the machine is off the network or
+    // the server is simply down, so ask the browser which one it is. The two
+    // need different things from the person reading the message.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      throw new ApiError("offline", "You're offline. Reconnect and try again.", {
+        kind: "offline",
+      });
+    }
+    throw new ApiError("network", "Couldn't reach the server — it may be restarting.", {
+      kind: "network",
+    });
   }
 
   const json = (await res.json().catch(() => null)) as (T & { success?: boolean }) | Failure | null;
 
   if (!res.ok || !json || (json as Failure).success === false) {
     const failure = json as Failure | null;
+
+    // A route that failed on purpose answers with a code and a sentence.
+    // Anything else — an HTML crash page, a proxy timeout, a truncated body —
+    // came from the server itself, and saying so stops people re-reading their
+    // prompt for a mistake that is not in it.
+    if (!failure?.error) {
+      throw new ApiError(
+        "server_error",
+        res.status
+          ? `The server returned ${res.status}. This is on our side, not your prompt.`
+          : "The server returned an unreadable response.",
+        { kind: "server", status: res.status, retryable: res.status !== 501 },
+      );
+    }
+
+    const code = failure.error.code ?? "provider_error";
     throw new ApiError(
-      failure?.error?.code ?? "provider_error",
-      failure?.error?.message ?? "Something went wrong. Try again in a moment.",
+      code,
+      failure.error.message ?? "Something went wrong. Try again in a moment.",
+      {
+        kind: code === "invalid_request" || code === "unsupported" ? "request" : "provider",
+        status: res.status,
+      },
     );
   }
 

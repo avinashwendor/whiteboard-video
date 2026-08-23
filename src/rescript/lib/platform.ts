@@ -2,11 +2,11 @@ export const isElectron =
   typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent);
 
 /**
- * Desktop platforms the app ships builds for. Ported from the marketing site
- * (getrescript.com `src/lib/platform.ts`) so the two agree on what `/download`
- * expects in its `platform` query param. "mobile" is local to this app: the
- * site never needs it, but the in-app banner must not pitch a desktop build to
- * a phone.
+ * Which desktop the app is running on.
+ *
+ * The download banner this once fed is gone — there is no MotionScript
+ * desktop build to pitch — but the detection still drives keyboard hints and
+ * the Electron menu, so it stays.
  */
 export type Platform =
   | "mac-arm"
@@ -41,14 +41,6 @@ export function detectPlatform(): Platform {
     return "mac-arm";
   }
   return "unknown";
-}
-
-export const DOWNLOAD_PAGE_URL = "https://www.getrescript.com/#download";
-
-/** The site's `/download` route reads this param (see its parsePlatformParam). */
-export function downloadUrlFor(platform: Platform): string {
-  if (platform === "mobile" || platform === "unknown") return DOWNLOAD_PAGE_URL;
-  return `https://www.getrescript.com/download?platform=${platform}`;
 }
 
 export const PLATFORM_LABEL: Record<Platform, string> = {

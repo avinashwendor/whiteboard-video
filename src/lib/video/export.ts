@@ -91,7 +91,29 @@ const CHANNELS = 2;
 /** Frames per AudioData packet handed to the encoder. */
 const AUDIO_PACKET = 1_024;
 
-/** True when this browser can render the file rather than record it. */
+/**
+ * Thrown when the offline renderer cannot run on this machine.
+ *
+ * Distinct from a genuine export failure, because the caller should quietly
+ * fall back to recording rather than telling anyone the export broke. The two
+ * used to be the same `Error`, which is why a laptop with WebCodecs but no
+ * usable H.264 encoder got a dead end instead of the recorder path that was
+ * sitting right there.
+ */
+export class EncoderUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EncoderUnavailableError";
+  }
+}
+
+/**
+ * True when this browser exposes the offline encoding APIs.
+ *
+ * Presence is not capability: WebCodecs can be fully present while the GPU
+ * exposes no usable H.264 profile. Use `canRenderOffline` before committing to
+ * the fast path; this one is only good enough to pick a label.
+ */
 export function canExportOffline(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -124,6 +146,25 @@ export async function pickVideoCodec(
     }
   }
   return null;
+}
+
+/**
+ * Whether this machine can actually render, not just whether it has the APIs.
+ *
+ * Answered once and cached: `isConfigSupported` can spin up a hardware encoder
+ * to answer, so asking on every render of a toolbar would be wasteful.
+ */
+let renderable: Promise<boolean> | null = null;
+
+export function canRenderOffline(
+  width = 1280,
+  height = 720,
+  fps = 30,
+  bitrate = 4_500_000,
+): Promise<boolean> {
+  if (!canExportOffline()) return Promise.resolve(false);
+  renderable ??= pickVideoCodec(width, height, fps, bitrate).then((codec) => codec !== null);
+  return renderable;
 }
 
 function aborted(signal?: AbortSignal) {
@@ -221,11 +262,15 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
   const progress = request.onProgress ?? (() => {});
 
   if (!canExportOffline()) {
-    throw new Error("This browser cannot encode video offline.");
+    throw new EncoderUnavailableError("This browser cannot encode video offline.");
   }
 
   const codec = await pickVideoCodec(width, height, fps, bitrate);
-  if (!codec) throw new Error("This browser has no usable H.264 encoder.");
+  if (!codec) {
+    throw new EncoderUnavailableError(
+      "No usable H.264 encoder on this machine — the GPU exposes none and there is no software fallback.",
+    );
+  }
 
   progress(0, "Mixing narration, music and effects");
   const bed = await renderAudioBed(request.audio, duration, request.sound, signal);
@@ -239,14 +284,48 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
     ...(bed
       ? { audio: { codec: "aac", sampleRate: SAMPLE_RATE, numberOfChannels: CHANNELS } }
       : {}),
+    /*
+     * Some encoders do not hand back a first chunk stamped exactly zero — a
+     * hardware H.264 encoder that reorders frames can emit its first chunk a
+     * frame late, and the muxer's default `strict` mode rejects it outright.
+     *
+     * `cross-track-offset` rather than `offset` because both tracks are
+     * measured from the same timeline: video from `index / fps`, audio from
+     * `sample / SAMPLE_RATE`. Shifting them independently would slide the
+     * narration against the picture by however much the video track happened
+     * to be out; shifting both by the earliest keeps them locked together.
+     */
+    firstTimestampBehavior: "cross-track-offset",
   });
 
   let encodeError: Error | null = null;
 
+  /**
+   * Hands a chunk to the muxer without letting a failure escape.
+   *
+   * These callbacks run inside the encoder, so a throw here does not reach the
+   * loop that could stop the export — it just happens again on the next chunk,
+   * and the next. One bad first timestamp produced three thousand identical
+   * errors and no usable diagnosis. The first failure is kept and the rest are
+   * dropped; the render loop checks `encodeError` and stops.
+   */
+  const mux = <T>(add: (chunk: T, meta?: unknown) => void) => {
+    return (chunk: T, meta?: unknown) => {
+      if (encodeError) return;
+      try {
+        add(chunk, meta);
+      } catch (err) {
+        encodeError = err instanceof Error ? err : new Error(String(err));
+      }
+    };
+  };
+
   const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    output: mux((chunk, meta) =>
+      muxer.addVideoChunk(chunk as EncodedVideoChunk, meta as never),
+    ),
     error: (err) => {
-      encodeError = err;
+      encodeError ??= err;
     },
   });
   videoEncoder.configure({
@@ -306,9 +385,11 @@ export async function exportVideoFile(request: ExportRequest): Promise<Blob> {
   if (bed) {
     progress(1, "Encoding audio");
     const audioEncoder = new AudioEncoder({
-      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      output: mux((chunk, meta) =>
+        muxer.addAudioChunk(chunk as EncodedAudioChunk, meta as never),
+      ),
       error: (err) => {
-        encodeError = err;
+        encodeError ??= err;
       },
     });
     audioEncoder.configure({

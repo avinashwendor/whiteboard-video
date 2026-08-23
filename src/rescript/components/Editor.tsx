@@ -17,7 +17,6 @@ import { useIsDesktopLayout } from "@/rescript/hooks/useIsDesktopLayout";
 import { useTranscriber } from "@/rescript/hooks/useTranscriber";
 import { detectMediaKind, MEDIA_ACCEPT } from "@/rescript/lib/media";
 import TopBar from "./TopBar";
-import DesktopAppBanner from "./DesktopAppBanner";
 import UploadScreen from "./UploadScreen";
 import TranscriptPanel from "./TranscriptPanel";
 import MediaPreview from "./MediaPreview";
@@ -373,7 +372,6 @@ export default function Editor() {
 
   return (
     <div className="relative flex h-dvh flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <DesktopAppBanner />
       {status === "idle" ? (
         <>
           {isElectron && <TopBar>

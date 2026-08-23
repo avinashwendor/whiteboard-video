@@ -60,6 +60,27 @@ export function EntryHub() {
           </Panel>
 
           <Panel
+            href="/history"
+            className="border-t border-line"
+            minHeight="min-h-[150px]"
+            padding="p-7 sm:p-8"
+            background="bg-surface hover:bg-surface-raised"
+          >
+            <div>
+              <span className="font-mono text-[11px] tracking-[0.14em] text-dim">04</span>
+              <h3 className="mt-3 text-[20px] font-medium tracking-[-0.02em] text-ink sm:text-[22px]">
+                Carry on with something
+              </h3>
+              <p className="mt-2 text-pretty text-[13px] leading-relaxed text-muted">
+                Everything you have made is still here. Reopen a project in the editor rather than
+                starting from nothing.
+              </p>
+            </div>
+
+            <Footing label="Open history" arrow="→" />
+          </Panel>
+
+          <Panel
             href="/new?style=hyperframes"
             className="border-t border-line"
             minHeight="min-h-[200px]"

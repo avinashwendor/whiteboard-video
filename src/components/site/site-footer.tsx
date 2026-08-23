@@ -8,6 +8,18 @@ import Link from "next/link";
  * type, which is the point: the studio is what the letters are made of.
  */
 
+/**
+ * Where to find the project.
+ *
+ * The repository is real. The two handles are not claimed yet — swap the hrefs
+ * when they are, rather than leaving text that looks like a link and is not.
+ */
+const SOCIALS = [
+  { name: "GitHub", href: "https://github.com/avinashwendor/whiteboard-video" },
+  { name: "X", href: "https://x.com/motionhouse_ai" },
+  { name: "Discord", href: "https://discord.gg/motionhouse" },
+];
+
 const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
   {
     title: "Produce",
@@ -44,7 +56,8 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
     links: [
       { label: "History", href: "/history" },
       { label: "Examples", href: "/#production-entry-hub" },
-      { label: "Prompt guide", href: "/#production-entry-hub" },
+      { label: "Pricing", href: "/#pricing" },
+      { label: "Sign in", href: "/signin" },
     ],
   },
 ];
@@ -76,10 +89,16 @@ export function SiteFooter() {
 
           <p className="mt-9 text-[13px] text-muted">Find us at</p>
           <div className="mt-3 flex gap-4 font-mono text-[11px] uppercase tracking-[0.14em] text-dim">
-            {["GitHub", "X", "Discord"].map((name) => (
-              <span key={name} className="transition-colors hover:text-ink">
-                {name}
-              </span>
+            {SOCIALS.map((social) => (
+              <a
+                key={social.name}
+                href={social.href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="transition-colors hover:text-ink"
+              >
+                {social.name}
+              </a>
             ))}
           </div>
 

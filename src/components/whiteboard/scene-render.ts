@@ -93,6 +93,15 @@ const MIN_STROKE = 0.09;
 const MAX_STROKE = 0.75;
 /** How long the marker takes to cross the board between two strokes. */
 const TRAVEL_SECONDS = 1.1;
+/**
+ * Shortest arc worth drawing.
+ *
+ * Where strokes are shoulder to shoulder there is no gap to travel in, so the
+ * pen borrows this much from the end of the stroke it is leaving. Long enough
+ * to read as a movement, short enough that the ink it abandons is already all
+ * but complete.
+ */
+const MIN_TRAVEL = 0.22;
 
 function textBox(prim: Extract<Prim, { kind: "text" }>): Box {
   const width = Math.min(prim.maxWidth, prim.text.length * prim.size * 0.52);
@@ -571,6 +580,15 @@ export function drawScene(
   ctx.lineJoin = "round";
 
   const pen: PenState = { nib: null, lastEnd: null };
+  /**
+   * Start fraction of the stroke the pen is currently following.
+   *
+   * Prims overlap by design, so more than one can be mid-draw. Whichever came
+   * later in the array used to win by accident; the hand follows the stroke
+   * that started most recently instead, which is the one a person would be
+   * drawing.
+   */
+  let newest = -Infinity;
 
   scene.beats.forEach((beat, beatIndex) => {
     const cue = cues[beatIndex];
@@ -591,7 +609,8 @@ export function drawScene(
       if (prim.kind === "text") {
         // A pen accelerating into a word and easing out of it.
         const written = drawText(ctx, prim.prim, easeInOutCubic(slice), fontHand);
-        if (written?.writing && slice < 1) {
+        if (written?.writing && slice < 1 && prim.from >= newest) {
+          newest = prim.from;
           pen.nib = { x: written.x, y: written.y + (1 - settle) * 10, color: COLOURS.ink, lift: 0 };
           pen.lastEnd = null;
         } else if (written) {
@@ -624,7 +643,8 @@ export function drawScene(
           ctx.lineDashOffset = rough.length * (1 - drawn);
 
           const point = pointOn(rough, drawn);
-          if (point && drawn > 0.005) {
+          if (point && drawn > 0.005 && prim.from >= newest) {
+            newest = prim.from;
             pen.nib = {
               x: point.x,
               y: point.y + (1 - settle) * 10,
@@ -648,20 +668,37 @@ export function drawScene(
     ctx.restore();
   });
 
-  // Nothing is being inked: the marker rests where it finished, then lifts and
-  // travels so that it arrives exactly as the next stroke is due. A long pause
-  // in the narration therefore shows a hand waiting over the board rather than
-  // an empty frame with no hand in it at all.
+  /*
+   * The marker between strokes.
+   *
+   * Two things used to go wrong here. Prims tile a beat back to back with a
+   * sliver of overlap, so there was never a frame with nothing inking — which
+   * meant this whole block was unreachable inside a beat and the nib simply
+   * jumped from the end of one stroke to the start of the next. And during
+   * that overlap two prims were live at once, so whichever came later in the
+   * array won, and the pen snapped forward before the first had finished.
+   *
+   * Now the pen leaves a stroke slightly before its ink ends and arrives at
+   * the next one exactly as it begins, borrowing the lead-in from the tail of
+   * the stroke it is leaving when there is no real gap. Still a pure function
+   * of time — no velocity, no springs — because `drawScene` is what the
+   * exporter calls, frame by frame, out of order.
+   */
+  const travel = nextStroke(scene, cues, time);
   const resting = pen.lastEnd;
-  if (!pen.nib && resting) {
-    const travel = nextStroke(scene, cues, time);
-    if (travel) {
-      const from = Math.max(resting.at, travel.at - TRAVEL_SECONDS);
+
+  if (travel && resting && time < travel.at) {
+    // Never eat more of the outgoing stroke than it can spare.
+    const spare = Math.max(0, travel.at - resting.at);
+    const lead = Math.min(TRAVEL_SECONDS, Math.max(MIN_TRAVEL, spare));
+    const from = travel.at - lead;
+
+    if (time >= from) {
       const t = smootherstep(range(time, from, travel.at));
       pen.nib = {
-        x: lerp(resting.x, travel.x, t),
+        x: lerp(pen.nib?.x ?? resting.x, travel.x, t),
         // An arc, not a slide: the marker comes off the board and back down.
-        y: lerp(resting.y, travel.y, t) - Math.sin(t * Math.PI) * 46,
+        y: lerp(pen.nib?.y ?? resting.y, travel.y, t) - Math.sin(t * Math.PI) * 46,
         color: COLOURS.ink,
         lift: Math.sin(t * Math.PI),
       };

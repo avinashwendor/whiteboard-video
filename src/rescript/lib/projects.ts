@@ -1,5 +1,5 @@
 /**
- * IndexedDB persistence for Rescript projects.
+ * IndexedDB persistence for MotionScript projects.
  *
  * Stores the original media blob + transcript words so a refresh can restore
  * the editor without re-uploading or re-transcribing. Caps at MAX_PROJECTS
