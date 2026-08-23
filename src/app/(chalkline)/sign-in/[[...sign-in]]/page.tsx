@@ -21,8 +21,8 @@ export default function Page() {
       </p>
       <SignIn appearance={CLERK_APPEARANCE} />
       <p className="pt-6 text-[12.5px] leading-relaxed text-faint">
-        You don&rsquo;t need an account to make a video — the studio runs in your browser either
-        way. Signing in is for keeping projects across devices.
+        New here? The trial is fourteen days and needs no card — sign up and it starts with the
+        account.
       </p>
     </div>
   );
