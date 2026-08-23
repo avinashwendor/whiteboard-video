@@ -64,6 +64,6 @@ async function main() {
   },
 });
   console.log("\n=== PLAN ===");
-  console.log(JSON.stringify(plan, null, 2).slice(0, 3000));
+  console.log(JSON.stringify(plan, null, 2));
 }
 await main();

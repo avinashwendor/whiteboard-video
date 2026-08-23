@@ -229,7 +229,10 @@ When you are ready, reply with the plan instead:
 
 "ops" must not be empty. If you are still working out what to do, use a tool — a plan with no operations
 is not a way to think out loud, it is the answer "nothing about this video needs changing", and you will be
-asked to justify it in the summary.`;
+asked to justify it in the summary.
+
+Keep "thinking" to a few sentences. It shares one budget with the plan, and a reply that reasons at length
+runs out of room and arrives with no plan in it at all — which costs you the turn and helps nobody.`;
 
 /**
  * Proposal mode.
@@ -468,6 +471,15 @@ export interface RescriptAgentInput {
    * the reasoning arrives while it is being written rather than afterwards.
    */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Stand in for the model. Tests only.
+   *
+   * The loop's job is to converge against a model that misbehaves — repeats
+   * itself, ignores the budget, answers in the wrong shape — and the only
+   * honest way to check that it does is to hand it one that always misbehaves.
+   * Paying a provider to maybe reproduce a loop is not a test.
+   */
+  generate?: (input: TextGenerationInput) => Promise<string>;
 }
 
 export interface RescriptStep {
@@ -917,8 +929,10 @@ class ThinkingTap {
  */
 async function runTurn(
   input: TextGenerationInput,
-  onEvent: ((event: AgentEvent) => void) | undefined
+  onEvent: ((event: AgentEvent) => void) | undefined,
+  generate?: (input: TextGenerationInput) => Promise<string>
 ): Promise<string> {
+  if (generate) return generate(input);
   if (!onEvent) return (await omega.generateText(input)).text;
 
   const tap = new ThinkingTap();
@@ -944,6 +958,25 @@ interface ParsedReply {
   call: ToolCall | null;
   plan: ReturnType<typeof agentPlanSchema.safeParse> | null;
   problem: string | null;
+}
+
+/**
+ * True when a reply carries reasoning and nothing else.
+ *
+ * Distinguished from a deliberate empty plan by what the model actually wrote:
+ * an answer of "nothing needs changing" has a summary in it, and a reply that
+ * ran out of room has only `thinking`.
+ */
+function onlyReasoning(text: string): boolean {
+  const objects = jsonObjects(stripFence(text));
+  if (!objects.length) return false;
+  return objects.every((candidate) => {
+    const hasThinking = /"thinking"\s*:/.test(candidate);
+    const hasAnswer = REPLY_KEYS.some((key) =>
+      new RegExp(`"${key}"\\s*:`).test(candidate)
+    );
+    return hasThinking && !hasAnswer;
+  });
 }
 
 /** Keys that mean "this object is the reply", not a fragment beside it. */
@@ -1024,8 +1057,27 @@ function parseReply(text: string): ParsedReply {
 
 /** Looks the model is allowed before it must answer. */
 const MAX_TOOL_CALLS = 6;
+/**
+ * Turns spent on a look that taught it nothing — a repeat, or one asked after
+ * the budget is gone.
+ *
+ * There has to be a cap, and the reason is a loop that shipped: a repeated
+ * question was answered from cache and told it was "free", which meant it cost
+ * no look and made no progress. A model that kept asking the same thing spun
+ * until the turn limit and the person got "That edit couldn't be worked out"
+ * after ninety seconds of nothing. Free was the bug.
+ */
+const MAX_WASTED_LOOKS = 3;
+/**
+ * Empty plans tolerated before giving up.
+ *
+ * Two: one to catch a turn that simply went nowhere, and one more in case the
+ * nudge itself was misread. Past that it is not going to produce work, and
+ * saying so beats returning silence dressed as an answer.
+ */
+const MAX_EMPTY_PLANS = 2;
 /** Total model turns, including looks, malformed retries and the repair. */
-const MAX_TURNS = 12;
+const MAX_TURNS = 16;
 
 export async function planRescriptEdit(
   input: RescriptAgentInput
@@ -1041,6 +1093,29 @@ export async function planRescriptEdit(
     brief.windowed
       ? "\nThis transcript was shown to you as an outline. Do not plan a cut or a caption on a stretch you have not read in full."
       : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  /**
+   * The same brief with the tools taken out.
+   *
+   * Swapped in when looking stops being productive, so the model is not still
+   * being shown a vocabulary it is being told not to use.
+   */
+  const closedSystem = [
+    SYSTEM,
+    propose ? PROPOSE_SUFFIX : "",
+    `HOW TO REPLY
+
+Reply with one JSON object and nothing else — no prose, no code fence. There are no tools; you have already
+seen everything you are going to see, and a reply that asks for one will be discarded.
+
+${
+  propose
+    ? '{"thinking":"…","summary":"one sentence on the edit you are proposing","findings":[…],"steps":[{"title":"…","detail":"…","ops":[ … ]}]}'
+    : '{"thinking":"…","summary":"one sentence, what you did","ops":[ … ]}'
+}`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1076,6 +1151,16 @@ export async function planRescriptEdit(
    */
   const answered = new Map<string, string>();
   let looks = 0;
+  /** Looks that returned nothing new. See MAX_WASTED_LOOKS. */
+  let wasted = 0;
+  /**
+   * Whether the tools have been taken away.
+   *
+   * Asking it to stop looking is not enough — it will keep reaching for a tool
+   * it can still see. So the vocabulary is withdrawn from the system message
+   * as well, which is what actually ends the loop.
+   */
+  let toolsClosed = false;
   /**
    * Whether an empty plan has already been queried.
    *
@@ -1090,6 +1175,8 @@ export async function planRescriptEdit(
    * it just has to be meant.
    */
   let queriedEmpty = false;
+  /** Empty plans seen. See the branch that handles them. */
+  let emptyPlans = 0;
   let problem = "no output";
   let repaired = false;
 
@@ -1105,11 +1192,12 @@ export async function planRescriptEdit(
         // Cooler on a retry: the first attempt is allowed some judgement, a
         // second one is being asked to comply with something specific.
         temperature: turn === 0 ? 0.35 : 0.15,
-        maxTokens: 4_000,
+        maxTokens: 12_000,
         json: true,
         signal: input.signal,
       },
-      emit
+      emit,
+      input.generate
     );
     const result = { text };
 
@@ -1130,23 +1218,45 @@ export async function planRescriptEdit(
     if (reply.call) {
       messages.push({ role: "assistant", content: result.text.slice(0, 1_200) });
 
-      if (looks >= MAX_TOOL_CALLS) {
-        messages.push({
-          role: "user",
-          content:
-            "That is enough looking — you have used all of them. Reply with the plan now, using what you already know.",
-        });
-        looks += 1;
-        continue;
-      }
-
       const key = `${reply.call.tool}:${JSON.stringify(reply.call.args)}`;
       const seen = answered.get(key);
-      if (seen !== undefined) {
-        messages.push({
-          role: "user",
-          content: `You already asked that, and the answer has not changed:\n\n${seen}\n\n(This one was free. ${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left — ask something different, or reply with the plan.)`,
-        });
+      const spent = looks >= MAX_TOOL_CALLS;
+
+      // A look that teaches it nothing: one it has already had, or one past the
+      // budget. Both cost a turn, so both have to be counted, or the loop has
+      // no bottom.
+      if (toolsClosed || spent || seen !== undefined) {
+        wasted += 1;
+
+        // Closing the tools persuades most models; one that reaches for them
+        // anyway is not going to be talked round, and every further turn is a
+        // turn the person waits for nothing. Stop rather than spend the budget
+        // proving it.
+        if (wasted > MAX_WASTED_LOOKS + 1) {
+          problem = "it kept asking to look instead of answering";
+          break;
+        }
+
+        const answer =
+          seen !== undefined
+            ? `You already asked that, and the answer has not changed:\n\n${seen}`
+            : "You have used all of your looks.";
+
+        if (wasted >= MAX_WASTED_LOOKS) {
+          toolsClosed = true;
+          // Withdrawing the vocabulary is the part that works. Telling it to
+          // stop while the tools are still described to it does not.
+          messages[0] = { role: "system", content: closedSystem };
+          messages.push({
+            role: "user",
+            content: `${answer}\n\nThe tools are now closed. Reply with the plan itself and nothing else, using what you already know.`,
+          });
+        } else {
+          messages.push({
+            role: "user",
+            content: `${answer}\n\nAsk something different, or reply with the plan.`,
+          });
+        }
         continue;
       }
 
@@ -1158,6 +1268,29 @@ export async function planRescriptEdit(
       messages.push({
         role: "user",
         content: `${result2.result}\n\n(${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left. Use another, or reply with the plan.)`,
+      });
+      continue;
+    }
+
+    /* ------------------ a reply that is only reasoning ------------------- */
+    //
+    // The reply shares one output budget between `thinking` and the plan, and a
+    // model that reasons at length spends the lot: what arrives is a truncated
+    // object with nothing in it but working-out. Seen at 15,799 characters of
+    // `thinking` and no plan. It parses — every field of the plan schema has a
+    // default — so without this it would look like a considered "nothing to do".
+    if (reply.plan?.success && onlyReasoning(result.text)) {
+      wasted += 1;
+      if (wasted > MAX_WASTED_LOOKS + 1) {
+        problem = "every reply was reasoning with no plan in it";
+        break;
+      }
+      emit?.({ type: "retry", reason: "the reply was all reasoning and no plan" });
+      messages.push({ role: "assistant", content: result.text.slice(0, 600) });
+      messages.push({
+        role: "user",
+        content:
+          "That reply was reasoning with no plan in it — you spent the whole budget thinking. Keep \"thinking\" to one or two sentences and send the plan itself.",
       });
       continue;
     }
@@ -1202,14 +1335,42 @@ export async function planRescriptEdit(
     const proposed = everyOp.length;
     const askedForNothing = !parsed.ops.length && !parsed.steps.length;
 
-    if (!proposed && askedForNothing && !queriedEmpty) {
+    if (!proposed && askedForNothing) {
+      /**
+       * "Nothing to do" has to be argued for.
+       *
+       * An empty plan carrying an empty summary is not a judgement, it is a
+       * turn that went nowhere — and taking it at face value is how "edit this
+       * for me end to end" came back having done nothing, with no reason given.
+       * A model that genuinely thinks the video is fine can say so; one that
+       * cannot even manage a sentence is asked again.
+       */
+      const justified = parsed.summary.trim().length > 0;
+      if (justified && queriedEmpty) {
+        return {
+          summary: parsed.summary,
+          findings: parsed.findings,
+          steps,
+          ops: flat.ops,
+          rejected,
+          trace,
+          warnings: [],
+        };
+      }
+
+      emptyPlans += 1;
+      if (emptyPlans > MAX_EMPTY_PLANS) {
+        problem = "it returned an empty plan and could not say why";
+        break;
+      }
+
       queriedEmpty = true;
       messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
       messages.push({
         role: "user",
         content: propose
-          ? "That plan has no steps in it. If you still need to look at something, use a tool. If you are ready, send the steps. If you genuinely believe nothing about this video should change, say exactly why in the summary and send it again."
-          : "That plan has no operations in it. If you still need to look at something, use a tool. If you are ready, send the operations. If you genuinely believe nothing needs changing, say exactly why in the summary and send it again.",
+          ? "That plan has no steps in it. If you still need to look at something, use a tool. If you are ready, send the steps. If you genuinely believe nothing about this video should change, say exactly why in the summary — an empty summary is not an answer."
+          : "That plan has no operations in it. If you still need to look at something, use a tool. If you are ready, send the operations. If you genuinely believe nothing needs changing, say exactly why in the summary — an empty summary is not an answer.",
       });
       continue;
     }
@@ -1275,8 +1436,14 @@ export async function planRescriptEdit(
     };
   }
 
+  // Naming what actually went wrong. "Try describing it a different way" is
+  // useless advice when the model spent every turn re-reading the transcript
+  // rather than answering — the person's wording was never the problem.
+  const ranOut = looks >= MAX_TOOL_CALLS || wasted > 0;
   throw new AppError("malformed_response", {
-    userMessage: "That edit couldn't be worked out. Try describing it a different way.",
-    detail: `rescript plan validation failed: ${problem}`,
+    userMessage: ranOut
+      ? "That edit couldn't be settled — it kept looking at the footage instead of answering. Try again, or ask for something narrower."
+      : "That edit couldn't be worked out. Try describing it a different way.",
+    detail: `rescript plan gave up after ${MAX_TURNS} turns (${looks} looks, ${wasted} wasted, tools ${toolsClosed ? "closed" : "open"}): ${problem}`,
   });
 }
