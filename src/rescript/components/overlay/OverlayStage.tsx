@@ -15,6 +15,7 @@ import { paintFrame } from "@/rescript/lib/overlay/frame";
 import { loadImage } from "@/rescript/lib/overlay/render";
 import { transitionAt } from "@/rescript/lib/overlay/timeline";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
+import { useFreezeFrames } from "@/rescript/hooks/useFreezeFrames";
 import type { OverlayElement, Rect } from "@/rescript/lib/overlay/types";
 
 /**
@@ -93,21 +94,17 @@ export default function OverlayStage({
     y: [],
   });
 
-  const freezeCache = useRef(new Map<number, HTMLCanvasElement>());
-
   // Live values for the animation frame, which must not re-subscribe per frame.
   const live = useRef({ elements, subtitles, transitions, frame, timeline, words, duration, manualCuts });
   useEffect(() => {
     live.current = { elements, subtitles, transitions, frame, timeline, words, duration, manualCuts };
   }, [elements, subtitles, transitions, frame, timeline, words, duration, manualCuts]);
 
-  // Held frames are the outgoing clip's last picture, at the previous project's
-  // size and from the previous project's footage. Keeping them across a media
-  // change paints one video's frame into another's transition.
+  // The held frames the push transitions draw. Captured up front by seeking a
+  // hidden decoder, and re-captured whenever the cut moves an out point — see
+  // the hook for why an opportunistic snapshot is not enough.
   const mediaUrl = useEditorStore((s) => s.mediaUrl);
-  useEffect(() => {
-    freezeCache.current.clear();
-  }, [mediaUrl]);
+  const freezeFrames = useFreezeFrames(mediaUrl, timeline, transitions);
 
   /* ------------------------------ geometry ------------------------------- */
 
@@ -195,34 +192,13 @@ export default function OverlayStage({
       );
 
       const active = transitionAt(t, state.timeline, state.transitions);
-      let freeze: HTMLCanvasElement | null = null;
-      
-      if (video && video.videoWidth && video.videoHeight) {
-        // Buffer freeze frames for upcoming push transitions without stalling playback.
-        for (const spec of state.transitions) {
-          const boundary = state.timeline.boundaries.find((b) => b.index === spec.index);
-          if (!boundary) continue;
-
-          // Capture the frame when we are playing through the last 0.15s of the outgoing clip
-          if (t >= boundary.outTime - 0.15 && t < boundary.outTime) {
-            let canvas = freezeCache.current.get(boundary.index);
-            if (!canvas) {
-              canvas = document.createElement("canvas");
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              freezeCache.current.set(boundary.index, canvas);
-            }
-            const ctxCanvas = canvas.getContext("2d", { alpha: false });
-            if (ctxCanvas) {
-              ctxCanvas.drawImage(video, 0, 0, canvas.width, canvas.height);
-            }
-          }
-        }
-
-        if (active && active.family === "push") {
-          freeze = freezeCache.current.get(active.boundary.index) ?? null;
-        }
-      }
+      // Held frames are captured up front by useFreezeFrames, by seeking a
+      // hidden decoder to each out point. Reading them here keeps the frame
+      // callback free of any seek or capture work.
+      const freeze =
+        active && active.family === "push"
+          ? freezeFrames.current.get(active.boundary.index)?.canvas ?? null
+          : null;
 
       // A throw here used to end the preview: the exception escaped the frame
       // callback, no further frame was ever scheduled, and the canvas simply
@@ -254,7 +230,10 @@ export default function OverlayStage({
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [box]);
+    // `freezeFrames` is a ref: stable for the component's life, and read
+    // through `.current` inside the frame callback so a newly captured frame is
+    // picked up without restarting the loop.
+  }, [box, freezeFrames]);
 
   /* ------------------------------ interaction ----------------------------- */
 

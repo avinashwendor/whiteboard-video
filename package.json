@@ -18,7 +18,8 @@
     "test:frame": "tsx tests/overlay-frame-test.ts",
     "probe:agent": "tsx scripts/agent-probe.mts",
     "test:casting": "tsx tests/casting-test.ts",
-    "test:agent": "tsx tests/agent-loop-test.mts"
+    "test:agent": "tsx tests/agent-loop-test.mts",
+    "test:transition": "tsx tests/overlay-transition-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",
