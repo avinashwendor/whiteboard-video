@@ -23,7 +23,7 @@ import { subtitleBand, typeScale } from "../src/rescript/lib/overlay/layout";
 import { fittedCharsPerLine } from "../src/rescript/lib/overlay/subtitles";
 import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
 import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import { repairJson } from "../src/lib/ai/rescript-agent";
+import { jsonObjects, repairJson } from "../src/lib/ai/rescript-agent";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -407,11 +407,95 @@ function complainsAbout(raw: unknown[], needle: string, w: PlanWorld = world) {
     );
   }
 
-  // The repair must not touch anything that already parses.
-  const good = '{"summary":"1.5\" of rain","ops":[],"n":2.5}';
+  // The second slip: real newlines inside the reasoning string rather than \n.
+  // Seen four turns running in one session, each one losing a whole plan.
+  const nl = String.fromCharCode(10);
+  const rawNewline = `{"thinking":"line one${nl}line two","summary":"x","ops":[{"op":"removeFillers"}]}`;
   assert(
-    repairJson(good) === good,
-    `a valid document must come back untouched, got ${repairJson(good)}`
+    (() => {
+      try {
+        JSON.parse(rawNewline);
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+    "a raw newline inside a string should not be valid JSON to begin with"
+  );
+  const mended = JSON.parse(repairJson(rawNewline)) as {
+    thinking: string;
+    ops: unknown[];
+  };
+  assert(
+    mended.thinking === `line one${nl}line two`,
+    `the newline should survive as a newline, got ${JSON.stringify(mended.thinking)}`
+  );
+  assert(
+    siftOps(mended.ops).ops.length === 1,
+    "the operation should survive the repair"
+  );
+
+  // Both slips in one reply, which is how they actually turn up.
+  const both = `{"thinking":"a${nl}b","ops":[{"op":"setFrame","aspect":"9:16","zoom":1"}]}`;
+  assert(
+    siftOps((JSON.parse(repairJson(both)) as { ops: unknown[] }).ops).ops
+      .length === 1,
+    "a reply carrying both slips should still yield its operation"
+  );
+
+  // The repair must not touch anything that already parses — in particular a
+  // colon inside a string value, which is what a ratio like "9:16" is, and
+  // escape sequences that are already correct.
+  for (const good of [
+    '{"summary":"1.5\\" of rain","ops":[],"n":2.5}',
+    '{"aspect":"9:16","zoom":1,"note":"ends at 2:09"}',
+    '{"ops":[{"op":"setFrame","aspect":"2.39:1"}]}',
+    '{"thinking":"already escaped\\nand tabbed\\there","ops":[]}',
+  ]) {
+    assert(
+      repairJson(good) === good,
+      `a valid document must come back untouched, got ${repairJson(good)}`
+    );
+    JSON.parse(repairJson(good));
+  }
+}
+
+/* ---------------------------- framing the reply ---------------------------- */
+
+{
+  // Two objects in one reply. "First brace to last brace" spliced them into
+  // `}{` and lost a perfectly good first answer to a parse error.
+  const twice =
+    '{"thinking":"first go","ops":[{"op":"removeFillers"}]}' +
+    String.fromCharCode(10) +
+    '{"thinking":"second thoughts"}';
+  const framed = jsonObjects(twice);
+  assert(framed.length === 2, `expected two objects, got ${framed.length}`);
+  assert(
+    siftOps((JSON.parse(framed[0]) as { ops: unknown[] }).ops).ops.length === 1,
+    "the first object should still carry its operation"
+  );
+
+  // Prose around a single object, which is the case the old heuristic existed
+  // for and which must keep working.
+  const wrapped = 'Here you go:' + String.fromCharCode(10) + '{"ops":[]}  — hope that helps';
+  assert(
+    jsonObjects(wrapped).length === 1 && jsonObjects(wrapped)[0] === '{"ops":[]}',
+    `prose around one object should yield just the object, got ${JSON.stringify(jsonObjects(wrapped))}`
+  );
+
+  // Braces inside strings are not structure.
+  const braces = '{"summary":"use {curly} braces","ops":[]}';
+  assert(
+    jsonObjects(braces).length === 1 && jsonObjects(braces)[0] === braces,
+    "a brace inside a string must not frame a new object"
+  );
+
+  // Nested objects close at the right depth.
+  const nested = '{"tool":"read_transcript","args":{"from":0,"to":30}}';
+  assert(
+    jsonObjects(nested).length === 1 && jsonObjects(nested)[0] === nested,
+    "a nested object is one object, not two"
   );
 }
 

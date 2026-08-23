@@ -85,11 +85,123 @@ const SUGGESTIONS = [
  */
 const TRANSCRIPT_BUDGET = 180_000;
 
+/** How much of the live reasoning to keep on screen. */
+const THOUGHT_TAIL = 1_400;
+
+interface PlanReply {
+  success?: boolean;
+  summary?: string;
+  findings?: string[];
+  steps?: ProposedStep[];
+  ops?: AgentOp[];
+  rejected?: string[];
+  trace?: { tool: string; detail: string }[];
+  warnings?: string[];
+  error?: { message?: string };
+}
+
+type AgentEvent =
+  | { type: "turn"; index: number }
+  | { type: "thinking"; text: string }
+  | { type: "look"; tool: string; detail: string }
+  | { type: "verify"; problems: number }
+  | { type: "repair"; problems: string[] }
+  | { type: "retry"; reason: string }
+  | ({ type: "plan" } & PlanReply)
+  | ({ type: "error" } & PlanReply);
+
+/**
+ * Read the agent's newline-delimited event stream, reporting as it arrives.
+ *
+ * Returns the final plan (or error), having handed everything before it to the
+ * callbacks. A body that is not a stream at all — an error page, a proxy that
+ * decided to buffer — still parses, because a single JSON object is also a
+ * valid one-line NDJSON document.
+ */
+async function consumeStream(
+  res: Response,
+  handlers: {
+    onStatus: (status: string | null) => void;
+    onThinking: (text: string) => void;
+    onLook: (detail: string) => void;
+  }
+): Promise<PlanReply | null> {
+  const body = res.body;
+  if (!body) return null;
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: PlanReply | null = null;
+
+  const handle = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let event: AgentEvent;
+    try {
+      event = JSON.parse(trimmed) as AgentEvent;
+    } catch {
+      // A half-written line is impossible here — lines are only handled once
+      // the newline that terminates them has arrived — so this is genuinely
+      // unparseable and skipping it is right.
+      return;
+    }
+
+    switch (event.type) {
+      case "turn":
+        handlers.onStatus(event.index === 0 ? "Thinking…" : "Thinking again…");
+        break;
+      case "thinking":
+        handlers.onThinking(event.text);
+        break;
+      case "look":
+        handlers.onLook(event.detail);
+        handlers.onStatus("Thinking…");
+        break;
+      case "verify":
+        handlers.onStatus(
+          event.problems
+            ? `Checking the plan — ${event.problems} to fix…`
+            : "Checking the plan…"
+        );
+        break;
+      case "repair":
+        handlers.onStatus("Fixing the plan…");
+        break;
+      case "retry":
+        handlers.onStatus("That reply couldn't be used — asking again…");
+        break;
+      default:
+        final = event;
+        break;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      handle(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+    }
+  }
+  handle(buffer);
+
+  handlers.onStatus(null);
+  return final;
+}
+
 let logSequence = 0;
 
 export default function AiPanel() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  /** What the agent is doing right now, and the reasoning behind it. */
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [thought, setThought] = useState("");
   const [log, setLog] = useState<LogEntry[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -167,7 +279,9 @@ export default function AiPanel() {
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [log]);
+    // The live reasoning grows inside the same scroller, so it has to keep the
+    // view pinned to the bottom as it arrives, not only when a line is logged.
+  }, [log, thought, agentStatus]);
 
   // The conversation is about a particular video. Carrying it into the next one
   // is the same mistake as carrying the captions: "make that bigger" would
@@ -186,6 +300,8 @@ export default function AiPanel() {
         setLog([]);
         setProposal(null);
         setBusy(false);
+        setThought("");
+        setAgentStatus(null);
       }),
     []
   );
@@ -275,6 +391,11 @@ export default function AiPanel() {
       setProposal(null);
     }
     if (!options?.silent) append("you", instruction);
+    setThought("");
+    setAgentStatus(null);
+
+    /** Look details already put in the log by the stream, so they are not repeated. */
+    const reported = new Set<string>();
 
     try {
       const overlay = useOverlayStore.getState();
@@ -339,28 +460,36 @@ export default function AiPanel() {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      const json = (await res.json()) as {
-        success?: boolean;
-        summary?: string;
-        findings?: string[];
-        steps?: ProposedStep[];
-        ops?: AgentOp[];
-        rejected?: string[];
-        trace?: { tool: string; detail: string }[];
-        warnings?: string[];
-        error?: { message?: string };
-      };
 
-      if (!res.ok || !json.success) {
-        append("fail", json.error?.message ?? "That request didn't get through.");
+      // The route answers as a stream of events and ends with the plan. The
+      // events are the point: the agent takes several turns to get there, and
+      // watching it read the transcript and check a phrase is the difference
+      // between a wait that makes sense and a spinner.
+      const json = await consumeStream(res, {
+        onStatus: setAgentStatus,
+        onThinking: (text) =>
+          setThought((prev) => (prev + text).slice(-THOUGHT_TAIL)),
+        onLook: (detail) => {
+          setThought("");
+          reported.add(detail);
+          append("look", detail);
+        },
+      });
+
+      if (!res.ok || !json || !json.success) {
+        append(
+          "fail",
+          json?.error?.message ?? "That request didn't get through."
+        );
         return;
       }
 
-      // What it looked at on the way to the answer, in the order it looked.
-      // Worth showing: it is the difference between an edit that was reasoned
-      // about and one that was guessed, and it is the first thing to read when
-      // an answer is wrong.
-      for (const entry of json.trace ?? []) append("look", entry.detail);
+      // Anything the stream did not already report — a reconnect, or a
+      // provider that would not stream — still lands here, so the log is the
+      // same either way.
+      for (const entry of json.trace ?? []) {
+        if (!reported.has(entry.detail)) append("look", entry.detail);
+      }
       if (json.summary) append("summary", json.summary);
       for (const finding of json.findings ?? []) append("finding", finding);
       for (const warning of json.warnings ?? []) append("warn", warning);
@@ -468,6 +597,8 @@ export default function AiPanel() {
         abortRef.current = null;
         setBusy(false);
       }
+      setThought("");
+      setAgentStatus(null);
     }
   }, [
     prompt,
@@ -580,6 +711,26 @@ export default function AiPanel() {
           </div>
         ) : (
           log.map((entry) => <LogLine key={entry.id} entry={entry} />)
+        )}
+
+        {(agentStatus || thought) && (
+          <div className="pt-1">
+            {agentStatus && (
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                <Loader2 size={10} className="shrink-0 animate-spin" />
+                {agentStatus}
+              </p>
+            )}
+            {thought && (
+              // The model's own reasoning, as it writes it. Dimmed and small
+              // because it is working-out, not an answer — but it is the thing
+              // that makes a ninety-second wait legible, and it is often where
+              // you first see the edit going somewhere you did not want.
+              <p className="mt-1 max-h-40 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-500">
+                {thought}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -704,7 +855,8 @@ export default function AiPanel() {
         <p className="mt-1.5 px-1 text-[10px] text-zinc-400 dark:text-zinc-600">
           {busy ? (
             <span className="flex items-center gap-1.5">
-              <Loader2 size={10} className="animate-spin" /> Working…
+              <Loader2 size={10} className="animate-spin" />
+              {agentStatus ?? "Working…"}
             </span>
           ) : (
             <span className="flex items-center gap-1.5">

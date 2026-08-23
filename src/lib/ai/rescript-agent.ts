@@ -1,5 +1,5 @@
 import { omega } from "./omega";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, TextGenerationInput } from "./types";
 import { AppError } from "@/lib/utils/errors";
 import {
   agentPlanSchema,
@@ -290,14 +290,113 @@ export function repairJson(value: string): string {
   // The colon must be the one that closes a key — hence the leading quote.
   // Without it, `"aspect":"9:16",` matches on the colon *inside* the string and
   // the repair strips a quote that was doing its job.
-  return value.replace(/("\s*:\s*-?\d+(?:\.\d+)?)"(\s*[,}\]])/g, "$1$2");
+  const quotes = value.replace(/("\s*:\s*-?\d+(?:\.\d+)?)"(\s*[,}\]])/g, "$1$2");
+  return escapeControlCharacters(quotes);
 }
 
-function firstJsonObject(value: string): string | null {
-  const start = value.indexOf("{");
-  const end = value.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
-  return value.slice(start, end + 1);
+/**
+ * Escape raw control characters that ended up inside a string.
+ *
+ * The second slip these models make, seen four turns running in one session:
+ * the reasoning is written with real newlines in it rather than `\n`, and
+ * `JSON.parse` answers "Invalid control character". The whole plan goes with it.
+ *
+ * A raw control character is never legal inside a JSON string, so escaping one
+ * cannot change the meaning of a document that would otherwise have parsed —
+ * which is the same bar the quote repair above has to clear. Characters outside
+ * a string are left exactly as they are, since that is where the real
+ * whitespace lives.
+ */
+function escapeControlCharacters(value: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const ch of value) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = inString;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString && ch < " ") {
+      out +=
+        ch === "\n" ? "\\n" : ch === "\t" ? "\\t" : ch === "\r" ? "\\r" : "";
+      continue;
+    }
+    out += ch;
+  }
+
+  return out;
+}
+
+/**
+ * Every balanced top-level object in a reply, in order.
+ *
+ * This used to be "from the first brace to the last one", which is right for a
+ * single object wrapped in prose and wrong the moment there are two — and there
+ * are two more often than you would think, because a model that has second
+ * thoughts writes another object rather than editing the first. Slicing across
+ * both produced `}{` in the middle and "Unexpected non-whitespace character
+ * after JSON", so a reply whose *first* object was perfectly good was thrown
+ * away and retried.
+ *
+ * Braces inside strings do not count, which is the whole reason this needs a
+ * scanner rather than a counter.
+ */
+export function jsonObjects(value: string): string[] {
+  const found: string[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        found.push(value.slice(start, i + 1));
+        start = -1;
+      }
+      // A stray closing brace outside any object: ignore rather than going
+      // negative and mis-framing everything after it.
+      if (depth < 0) depth = 0;
+    }
+  }
+
+  // An object that never closed — the reply was cut off mid-write. Worth
+  // returning: the repair pass below may still be able to use it, and if not
+  // the caller reports a parse failure exactly as before.
+  if (depth > 0 && start >= 0) found.push(value.slice(start));
+
+  return found;
 }
 
 export interface RescriptAgentContext {
@@ -364,6 +463,11 @@ export interface RescriptAgentInput {
   history?: RescriptExchange[];
   model?: string;
   signal?: AbortSignal;
+  /**
+   * Called as the agent works. Supplying it also turns on token streaming, so
+   * the reasoning arrives while it is being written rather than afterwards.
+   */
+  onEvent?: (event: AgentEvent) => void;
 }
 
 export interface RescriptStep {
@@ -704,6 +808,136 @@ function summarise(ops: AgentOp[]): string {
   return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 
+/* --------------------------------- progress -------------------------------- */
+
+/**
+ * What the agent is doing, as it does it.
+ *
+ * The loop can run for a minute and a half — several model turns, a few reads,
+ * a verification pass and a repair — and until these existed all of it happened
+ * behind one spinner that said "Working…". The person could not tell a slow
+ * answer from a hung one, and none of the reasoning that makes the answer good
+ * was visible.
+ */
+export type AgentEvent =
+  | { type: "turn"; index: number }
+  /** A slice of the model's own reasoning, as it is generated. */
+  | { type: "thinking"; text: string }
+  | { type: "look"; tool: string; detail: string }
+  | { type: "verify"; problems: number }
+  | { type: "repair"; problems: string[] }
+  | { type: "retry"; reason: string };
+
+/**
+ * Pulls the `thinking` field out of a JSON object that is still arriving.
+ *
+ * The reply is one JSON object, so nothing can be parsed until the last brace
+ * lands — but `thinking` is the first field in it and is by far the longest, so
+ * by the time the object closes the interesting part has been sitting in the
+ * buffer, unread, for most of a minute. This walks the raw string as it streams
+ * and decodes just that one value: enough to show the reasoning live without
+ * pretending the document is parseable yet.
+ *
+ * It only ever reads. A malformed or missing field yields nothing and the
+ * normal parse still decides what the reply actually was.
+ */
+class ThinkingTap {
+  private buffer = "";
+  /** Index into `buffer` of the next raw character to decode. */
+  private cursor = -1;
+  private escaped = false;
+  private finished = false;
+
+  /** New plain text revealed by this chunk. Empty when there is none. */
+  push(delta: string): string {
+    if (this.finished) return "";
+    this.buffer += delta;
+
+    if (this.cursor < 0) {
+      // Find the opening quote of the value, tolerating whitespace anywhere a
+      // JSON writer is allowed to put it.
+      const opening = /"thinking"\s*:\s*"/.exec(this.buffer);
+      if (!opening) return "";
+      this.cursor = opening.index + opening[0].length;
+    }
+
+    let out = "";
+    while (this.cursor < this.buffer.length) {
+      const ch = this.buffer[this.cursor];
+      this.cursor += 1;
+
+      if (this.escaped) {
+        this.escaped = false;
+        // \uXXXX needs four more characters; wait for them rather than
+        // emitting a half-decoded escape.
+        if (ch === "u") {
+          if (this.cursor + 4 > this.buffer.length) {
+            this.cursor -= 2;
+            this.escaped = false;
+            return out;
+          }
+          const hex = this.buffer.slice(this.cursor, this.cursor + 4);
+          this.cursor += 4;
+          const code = Number.parseInt(hex, 16);
+          out += Number.isFinite(code) ? String.fromCharCode(code) : "";
+          continue;
+        }
+        out +=
+          ch === "n" ? "\n" : ch === "t" ? "\t" : ch === "r" ? "" : ch;
+        continue;
+      }
+
+      if (ch === "\\") {
+        if (this.cursor >= this.buffer.length) {
+          // The escape's partner has not arrived; resume from the backslash.
+          this.cursor -= 1;
+          return out;
+        }
+        this.escaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        this.finished = true;
+        return out;
+      }
+
+      out += ch;
+    }
+
+    return out;
+  }
+}
+
+/**
+ * One model turn, streamed where possible.
+ *
+ * Falls back to the non-streaming call if the deployment behind the id will not
+ * stream — the answer is identical either way, only the reasoning goes unseen.
+ */
+async function runTurn(
+  input: TextGenerationInput,
+  onEvent: ((event: AgentEvent) => void) | undefined
+): Promise<string> {
+  if (!onEvent) return (await omega.generateText(input)).text;
+
+  const tap = new ThinkingTap();
+  let text = "";
+  try {
+    for await (const delta of omega.streamText(input)) {
+      text += delta;
+      const thought = tap.push(delta);
+      if (thought) onEvent({ type: "thinking", text: thought });
+    }
+  } catch (err) {
+    if (text) throw err;
+    // Nothing arrived at all: this is a provider that will not stream, not a
+    // failed generation. Ask for it the old way rather than failing the turn.
+    return (await omega.generateText(input)).text;
+  }
+  return text;
+}
+
 /* ---------------------------------- parsing -------------------------------- */
 
 interface ParsedReply {
@@ -712,25 +946,51 @@ interface ParsedReply {
   problem: string | null;
 }
 
+/** Keys that mean "this object is the reply", not a fragment beside it. */
+const REPLY_KEYS = ["tool", "ops", "steps", "summary", "findings"];
+
 function parseReply(text: string): ParsedReply {
-  const candidate = firstJsonObject(stripFence(text));
-  if (!candidate) {
+  const candidates = jsonObjects(stripFence(text));
+  if (!candidates.length) {
     return { call: null, plan: null, problem: "no JSON object in the reply" };
   }
 
-  let value: unknown;
-  try {
-    value = JSON.parse(candidate);
-  } catch (err) {
+  const read = (candidate: string): unknown | undefined => {
     try {
-      value = JSON.parse(repairJson(candidate));
+      return JSON.parse(candidate);
     } catch {
-      return {
-        call: null,
-        plan: null,
-        problem: `invalid JSON (${err instanceof Error ? err.message : "parse error"})`,
-      };
+      try {
+        return JSON.parse(repairJson(candidate));
+      } catch {
+        return undefined;
+      }
     }
+  };
+
+  // Take the first object that parses *and* looks like an answer. A model with
+  // second thoughts leaves the discarded one behind, and it is usually the
+  // shorter of the two — so "first that parses" alone would take the fragment.
+  let value: unknown;
+  for (const candidate of candidates) {
+    const parsed = read(candidate);
+    if (parsed === undefined) continue;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      REPLY_KEYS.some((key) => key in (parsed as Record<string, unknown>))
+    ) {
+      value = parsed;
+      break;
+    }
+    if (value === undefined) value = parsed;
+  }
+
+  if (value === undefined) {
+    return {
+      call: null,
+      plan: null,
+      problem: `invalid JSON — ${candidates.length} object(s) in the reply, none usable`,
+    };
   }
 
   if (value && typeof value === "object" && typeof (value as { tool?: unknown }).tool === "string") {
@@ -833,17 +1093,25 @@ export async function planRescriptEdit(
   let problem = "no output";
   let repaired = false;
 
+  const emit = input.onEvent;
+
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-    const result = await omega.generateText({
-      messages,
-      model: input.model,
-      // Cooler on a retry: the first attempt is allowed some judgement, a
-      // second one is being asked to comply with something specific.
-      temperature: turn === 0 ? 0.35 : 0.15,
-      maxTokens: 4_000,
-      json: true,
-      signal: input.signal,
-    });
+    emit?.({ type: "turn", index: turn });
+
+    const text = await runTurn(
+      {
+        messages,
+        model: input.model,
+        // Cooler on a retry: the first attempt is allowed some judgement, a
+        // second one is being asked to comply with something specific.
+        temperature: turn === 0 ? 0.35 : 0.15,
+        maxTokens: 4_000,
+        json: true,
+        signal: input.signal,
+      },
+      emit
+    );
+    const result = { text };
 
     const reply = parseReply(result.text);
     // Set RESCRIPT_AGENT_DEBUG to a path to see what the model actually said.
@@ -886,6 +1154,7 @@ export async function planRescriptEdit(
       const result2 = runTool(reply.call, input.context, lines);
       answered.set(key, result2.result);
       trace.push({ tool: reply.call.tool, detail: result2.detail });
+      emit?.({ type: "look", tool: reply.call.tool, detail: result2.detail });
       messages.push({
         role: "user",
         content: `${result2.result}\n\n(${MAX_TOOL_CALLS - looks} look${MAX_TOOL_CALLS - looks === 1 ? "" : "s"} left. Use another, or reply with the plan.)`,
@@ -895,6 +1164,10 @@ export async function planRescriptEdit(
 
     /* ---------------------------- a bad reply --------------------------- */
     if (!reply.plan || !reply.plan.success) {
+      emit?.({
+        type: "retry",
+        reason: reply.problem ?? "the reply could not be used",
+      });
       problem =
         reply.problem ??
         (reply.plan && !reply.plan.success
@@ -962,9 +1235,11 @@ export async function planRescriptEdit(
       can: input.context.can,
     };
     const problems = proposed ? verifyPlan(everyOp, world) : [];
+    if (proposed) emit?.({ type: "verify", problems: problems.length });
 
     if (problems.length && !repaired) {
       repaired = true;
+      emit?.({ type: "repair", problems });
       trace.push({
         tool: "verify",
         detail: `Checked the plan — ${problems.length} problem${problems.length === 1 ? "" : "s"} to fix`,
