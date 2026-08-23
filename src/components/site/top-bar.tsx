@@ -61,7 +61,7 @@ export function TopBar() {
             toggle. Plain <a> for the same reason.
           */}
           <a
-            href="/motionscript"
+            href="/video-editor"
             className="border-b border-transparent pb-1 pt-0.5 text-muted transition-colors hover:text-ink"
           >
             Edit video

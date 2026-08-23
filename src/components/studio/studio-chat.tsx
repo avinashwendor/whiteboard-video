@@ -20,6 +20,7 @@ import { AdvancedSettings } from "./advanced-settings";
 import { configFor, MODE_CONFIG } from "./mode-config";
 import { ModeTabs } from "./mode-tabs";
 import { StillResult, VoiceoverResult } from "./results";
+import { MicButton } from "@/components/ui/mic-button";
 
 /**
  * The studio, as a conversation.
@@ -224,6 +225,9 @@ export function StudioChat() {
                 >
                   {prompt.length}/{MAX_PROMPT_CHARS}
                 </span>
+                <MicButton
+                  onTranscription={(text) => setPrompt(prompt ? prompt + " " + text : text)}
+                />
                 {running ? (
                   <button
                     type="button"

@@ -130,6 +130,7 @@ interface ListenResponse {
   results?: {
     channels?: Array<{
       alternatives?: Array<{
+        transcript?: string;
         words?: Array<{ word?: string; punctuated_word?: string; start?: number; end?: number }>;
       }>;
     }>;
@@ -170,6 +171,30 @@ async function alignWords(
   }
 
   return { words, duration: json.metadata?.duration };
+}
+
+/** Transcribes raw audio bytes and returns the full text. Used for voice dictation. */
+export async function transcribeAudio(
+  audio: ArrayBuffer | Blob,
+  contentType: string,
+): Promise<string> {
+  const params = new URLSearchParams({
+    model: ALIGN_MODEL,
+    punctuate: "true",
+    smart_format: "true",
+  });
+
+  const res = await fetchWithTimeout(`${BASE}/listen?${params}`, {
+    method: "POST",
+    headers: headers(contentType),
+    body: audio,
+    timeoutMs: ALIGN_TIMEOUT_MS,
+    label: "deepgram transcribe",
+  });
+  if (!res.ok) await raiseForStatus(res, "deepgram transcribe");
+
+  const json = await readJson<ListenResponse>(res, "deepgram transcribe");
+  return json.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
 }
 
 /**

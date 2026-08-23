@@ -23,6 +23,7 @@ import { analyseFootage } from "@/rescript/lib/overlay/analysis";
 import { buildTimeline } from "@/rescript/lib/overlay/timeline";
 import type { AgentOp } from "@/rescript/lib/overlay/ops-schema";
 import { Button, Empty, formatSeconds } from "./ui";
+import { MicButton } from "@/components/ui/mic-button";
 
 /**
  * The prompt surface.
@@ -829,9 +830,12 @@ export default function AiPanel() {
                 ? "Add a caption, cut the fillers, put a dissolve on every cut…"
                 : "Waiting for the transcript…"
             }
-            className="scrollbar-thin w-full resize-none rounded-xl border border-zinc-200 bg-white py-2 pr-9 pl-2.5 text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:border-zinc-500"
+            className="scrollbar-thin w-full resize-none rounded-xl border border-zinc-200 bg-white py-2 pr-16 pl-2.5 text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:border-zinc-500"
           />
-          <div className="absolute right-1.5 bottom-1.5">
+          <div className="absolute right-1.5 bottom-1.5 flex items-center gap-1">
+            <MicButton
+              onTranscription={(text) => setPrompt((prev) => (prev ? prev + " " + text : text))}
+            />
             {busy ? (
               <Button
                 variant="ghost"

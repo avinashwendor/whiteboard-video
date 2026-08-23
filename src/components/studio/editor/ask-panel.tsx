@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CornerDownLeft, Sparkles, Undo2 } from "lucide-react";
 import { AsciiSpinner, GrainShimmer } from "@/components/ui/ascii-loader";
 import { cn } from "@/lib/utils/cn";
+import { MicButton } from "@/components/ui/mic-button";
 
 /**
  * Editing by description.
@@ -73,15 +74,20 @@ export function AskPanel({
         />
         <div className="flex items-center justify-between pt-1.5">
           <span className="text-[10px] text-faint">⌘↵ to send</span>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy || !value.trim()}
-            className="flex items-center gap-1.5 bg-ink px-2.5 py-1 text-[11px] font-medium text-[#0a0b0d] transition-colors hover:bg-white disabled:pointer-events-none disabled:opacity-45"
-          >
-            {busy ? <AsciiSpinner variant="braille" className="text-[11px]" /> : <CornerDownLeft className="size-3" aria-hidden />}
-            Send
-          </button>
+          <div className="flex items-center gap-1.5">
+            <MicButton 
+              onTranscription={(text) => setValue((prev) => (prev ? prev + " " + text : text))} 
+            />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={busy || !value.trim()}
+              className="flex items-center gap-1.5 bg-ink px-2.5 py-1 text-[11px] font-medium text-[#0a0b0d] transition-colors hover:bg-white disabled:pointer-events-none disabled:opacity-45"
+            >
+              {busy ? <AsciiSpinner variant="braille" className="text-[11px]" /> : <CornerDownLeft className="size-3" aria-hidden />}
+              Send
+            </button>
+          </div>
         </div>
       </div>
 

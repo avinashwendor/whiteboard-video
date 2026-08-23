@@ -25,9 +25,9 @@ const marker = Permanent_Marker({
 // Analytics and Vercel Web Analytics pointed at getrescript.com's properties;
 // those are the upstream project's accounts, not ours, so they are left out.
 
-const title = "MotionScript — edit videos like you edit text";
+const title = "Video Whiteboard Generator — edit videos like you edit text";
 const description =
-  "A fully offline, open-source transcript-based video editor. Transcribe with Whisper, cut by deleting words, export with ffmpeg — on your device.";
+  "A fully offline, open-source transcript-based video editor. Generate compelling whiteboard animations in seconds.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -36,21 +36,21 @@ export const metadata: Metadata = {
   title,
   description,
   icons: {
-    icon: "/rescript-icon.png",
-    apple: "/rescript-apple-icon.png",
+    icon: "/whiteboard-icon.jpg",
+    apple: "/whiteboard-apple-icon.jpg",
   },
   openGraph: {
     type: "website",
-    siteName: "MotionScript",
-    url: "/motionscript",
+    siteName: "Video Whiteboard Generator",
+    url: "/video-editor",
     title,
     description,
     images: [
       {
-        url: "/rescript-og.png",
+        url: "/whiteboard-og.jpg",
         width: 1200,
         height: 630,
-        alt: "MotionScript — a transcript-based video editor running in the browser",
+        alt: "Video Whiteboard Generator — edit and generate videos in the browser",
       },
     ],
   },
@@ -58,7 +58,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title,
     description,
-    images: ["/rescript-og.png"],
+    images: ["/whiteboard-og.jpg"],
   },
   robots: { index: false },
 };
