@@ -14,7 +14,7 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Runtime wasm glue copied from node_modules by scripts/copy-assets.mjs.
     "public/vendor/**",
-    // Read-only upstream checkout the Rescript editor was ported from.
+    // Read-only upstream checkout the MotionScript editor was ported from.
     "reference */**",
   ]),
 ]);

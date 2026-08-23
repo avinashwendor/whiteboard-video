@@ -52,7 +52,7 @@ def main() -> None:
             slot_id=snd.slot_id, start=0, length=MEDIA_FRAMES, media_kind="Sound"
         )
 
-        comp = f.create.CompositionMob("Rescript Edit")
+        comp = f.create.CompositionMob("MotionScript Edit")
         comp["UsageCode"].value = AUID("0d010102-0101-0700-060e-2b3404010101")
         f.content.mobs.append(comp)
 
@@ -84,7 +84,7 @@ def main() -> None:
 
     with aaf2.open(str(out), "r") as f:
         tops = [m.name for m in f.content.toplevel()]
-        if tops != ["Rescript Edit"]:
+        if tops != ["MotionScript Edit"]:
             raise SystemExit(f"expected TopLevel composition, got {tops!r}")
 
     meta_path = OUT_DIR / "scaffold.meta.json"

@@ -1,4 +1,4 @@
-import { initSentry } from "@/rescript/lib/sentry";
+import { initSentry } from "@/motionscript/lib/sentry";
 
 // Runs before the app becomes interactive, so crashes during the editor's first
 // render are captured too. Guarded because instrumentation failing must never be

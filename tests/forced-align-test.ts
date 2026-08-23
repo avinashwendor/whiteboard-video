@@ -7,8 +7,8 @@ import {
   type CtcEmission,
   type CtcTokenizerLike,
   type CtcVocab,
-} from "../src/rescript/lib/forcedAlign";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/forcedAlign";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

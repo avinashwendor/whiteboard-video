@@ -2,8 +2,8 @@ import {
   findSilenceRanges,
   MIN_SILENCE_DURATION,
   SILENCE_PAD,
-} from "../src/rescript/lib/silences";
-import type { ManualCut, Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/silences";
+import type { ManualCut, Word } from "../src/motionscript/lib/types";
 
 function nearly(a: number, b: number, eps = 1e-4): boolean {
   return Math.abs(a - b) < eps;

@@ -1,4 +1,4 @@
-import { formatRelativeTime } from "../src/rescript/lib/i18n";
+import { formatRelativeTime } from "../src/motionscript/lib/i18n";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

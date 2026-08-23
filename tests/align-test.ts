@@ -11,9 +11,9 @@ import {
   speechEdgesFromFrames,
   refineOnsets,
   repairCollapsedWords,
-} from "../src/rescript/lib/align";
-import { VAD_FRAME_SIZE, VAD_SAMPLE_RATE } from "../src/rescript/lib/vad";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/align";
+import { VAD_FRAME_SIZE, VAD_SAMPLE_RATE } from "../src/motionscript/lib/vad";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

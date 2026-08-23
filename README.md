@@ -29,7 +29,7 @@ Chalkline is an AI-powered video studio that converts a single sentence into a f
 | **✍️ Write** | Idea → polished long-form copy, streamed token by token |
 | **🖼️ Image** | Prompt → a generated image, with the prompt auto-rewritten for quality |
 | **🎙️ Voice** | Text → natural narration in any language the chosen voice speaks |
-| **✂️ Edit** ([`/rescript`](#-editing-real-footage--the-transcript--composition-editor)) | Footage you already have → transcript-based cutting, on-video text/image/shape overlays, transitions, burned-in subtitles — driven by hand or by prompt |
+| **✂️ Edit** ([`/motionscript`](#-editing-real-footage--the-transcript--composition-editor)) | Footage you already have → transcript-based cutting, on-video text/image/shape overlays, transitions, burned-in subtitles — driven by hand or by prompt |
 
 ---
 
@@ -63,9 +63,9 @@ src/
       page.tsx              studio: hero, composer, results, examples
       editor/[id]/page.tsx  the editor for a finished video
       history/page.tsx      gallery of past generations
-    (rescript)/           the transcript editor, under its own root layout
-      rescript/page.tsx     mounts the editor at /rescript, client-only
-      rescript.css          Rescript's own Tailwind layer and dark variant
+    (motionscript)/           the transcript editor, under its own root layout
+      motionscript/page.tsx     mounts the editor at /motionscript, client-only
+      motionscript.css          MotionScript's own Tailwind layer and dark variant
     api/
       generate/           Omega text, streaming or whole
       create/             storyboard planning, with one JSON repair round
@@ -78,7 +78,7 @@ src/
       models/             live catalogue discovery
       capabilities/       which providers this deployment can run
       asset/[id]/         serves generated media, same-origin
-      rescript/agent/      plans an overlay/cut edit; browser executes and validates
+      motionscript/agent/      plans an overlay/cut edit; browser executes and validates
   components/
     ui/                   button, card, field, badge, skeleton
     site/                 top bar, navigation
@@ -87,14 +87,14 @@ src/
     whiteboard/           board renderer, stroke drawing, player, export
   lib/
     ai/                   omega, deepgram, cartesia, editor agent, image/*,
-                          rescript-agent (the transcript editor's AI planner)
+                          motionscript-agent (the transcript editor's AI planner)
     video/                easing, word timings and cue planning, film grade
     hyperframes/          modern engine: shots, themes, kinetic type
     studio/               state, history, IndexedDB media cache, API client,
                           edit operations and the hand-edited-JSON schema
     validation/           Zod schemas and limits
     utils/                errors, http, rate limiting, asset store, markdown
-  rescript/               the ported transcript editor, extended with a
+  motionscript/               the ported transcript editor, extended with a
                           composition layer, self-contained
     components/           Editor, TranscriptPanel, Timeline, ExportDialog, ...
     components/overlay/   Sidebar (AI/Add/Style/Subs/Cuts), OverlayStage (the
@@ -279,7 +279,7 @@ Placement lives in the layout system — seven whiteboard compositions and a pho
 
 ## 🎞️ Editing real footage — the transcript & composition editor
 
-`/rescript` is [Rescript](https://github.com/wassgha/rescript) ported into this app end to end, then
+`/motionscript` is [Rescript](https://github.com/wassgha/rescript) ported into this app end to end, then
 extended into a full composition tool: a transcript-based editor for video and audio you already have,
 as opposed to video Chalkline generated. Drop in a file, it is transcribed **on device** with per-word
 timestamps, and deleting words in the transcript cuts the matching span out of the media. Nothing is
@@ -300,7 +300,7 @@ re-encode. Both wasm runtimes need `SharedArrayBuffer`, which the browser only g
 
 ### On top of the cut: elements, transitions, subtitles
 
-A composition layer (`src/rescript/lib/overlay/`) sits over the trimmed footage, sharing one renderer
+A composition layer (`src/motionscript/lib/overlay/`) sits over the trimmed footage, sharing one renderer
 between the live preview and the export — what you see while editing is pixel-for-pixel what ships:
 
 - **Elements** — text, images, and shapes. Drag to move, 8-handle resize, rotate (Shift snaps to 15°),
@@ -342,13 +342,13 @@ canvas pass composites every element and transition frame-by-frame through WebCo
 
 Three things follow from all of this, and they are where the port and its extensions deviate from upstream:
 
-- **The isolation headers are scoped to `/rescript`, `/vendor/*`, and `/_next/*`** — not `/(.*)` as
+- **The isolation headers are scoped to `/motionscript`, `/vendor/*`, and `/_next/*`** — not `/(.*)` as
   upstream sets them. Chalkline's studio pulls images straight from Pollinations and Tavily, and a
   blanket `Cross-Origin-Embedder-Policy: require-corp` would block every one of them. The narrower scope
   still isolates the editor's own document *and* the worker scripts it spawns — a dedicated worker
   inherits its creating document's policy container, and its own response needs the same header or the
   browser silently refuses to start it. See `next.config.ts`.
-- **`/rescript` has its own root layout** (`src/app/(rescript)/layout.tsx`). The editor owns the whole
+- **`/motionscript` has its own root layout** (`src/app/(motionscript)/layout.tsx`). The editor owns the whole
   viewport and carries its own light/dark toggle, so it cannot sit inside Chalkline's dark-only chrome.
   Navigating between the two is a full page load, by design.
 - **ASR runs single-threaded** (`numThreads = 1` in `transcription.worker.ts`). The onnxruntime-web
@@ -357,8 +357,8 @@ Three things follow from all of this, and they are where the port and its extens
   Single-threaded costs some throughput; the alternative is a transcript that never arrives.
 
 Upstream's Google Analytics, Vercel Analytics, and the default telemetry collector at `getrescript.com`
-were left out — those are the upstream project's accounts. `src/rescript/lib/telemetry.ts` stays inert
-unless you point `NEXT_PUBLIC_TELEMETRY_ENDPOINT` at your own, and `src/rescript/lib/sentry.ts` never
+were left out — those are the upstream project's accounts. `src/motionscript/lib/telemetry.ts` stays inert
+unless you point `NEXT_PUBLIC_TELEMETRY_ENDPOINT` at your own, and `src/motionscript/lib/sentry.ts` never
 initialises without `NEXT_PUBLIC_SENTRY_DSN`.
 
 The wasm runtimes are not committed — they'd add ~185 MB to the repo. `npm install` runs `patch-package`
@@ -529,14 +529,14 @@ Narration is WAV (not mp3) whenever word timings are present — roughly 175 KB 
 
 Chalkline is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
-**The transcript editor under `src/rescript/` is not MIT.** It is ported from
+**The transcript editor under `src/motionscript/` is not MIT.** It is ported from
 [Rescript](https://github.com/wassgha/rescript), which is licensed under **PolyForm Noncommercial
-1.0.0** — see [src/rescript/LICENSE](src/rescript/LICENSE). That license permits use for noncommercial
+1.0.0** — see [src/motionscript/LICENSE](src/motionscript/LICENSE). That license permits use for noncommercial
 purposes only and carries a required notice:
 
 > Copyright (c) 2026 Wassim Gharbi and Rescript contributors (https://github.com/wassgha/rescript)
 
-If this app is ever used commercially, `/rescript` and `src/rescript/` have to come out, or a separate
+If this app is ever used commercially, `/motionscript` and `src/motionscript/` have to come out, or a separate
 license has to be obtained from the upstream author.
 
 ---

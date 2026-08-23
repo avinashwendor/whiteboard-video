@@ -9,8 +9,8 @@ import {
   isModelId,
   isParakeetModel,
   isWhisperModel,
-} from "../src/rescript/lib/models";
-import { isTranscriptSource } from "../src/rescript/lib/source";
+} from "../src/motionscript/lib/models";
+import { isTranscriptSource } from "../src/motionscript/lib/source";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

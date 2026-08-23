@@ -14,6 +14,9 @@
 
 const BASE = process.env.BASE ?? "http://localhost:3000";
 
+/** "Rescript", spelled out so no rename sweep can touch it. */
+const OLD_BRAND = ["Re", "script"].join("");
+
 interface Check {
   path: string;
   /** Fragments that must appear in the HTML. */
@@ -36,7 +39,9 @@ const ROUTES: Check[] = [
   // keys land. Either way it must not throw.
   { path: "/sign-in" },
   { path: "/sign-up" },
-  { path: "/motionscript", expect: ["MotionScript"], reject: ["Rescript"] },
+  // The old brand, assembled at runtime so a find-and-replace over the repo
+  // cannot quietly rewrite the very string this is meant to catch.
+  { path: "/motionscript", expect: ["MotionScript"], reject: [OLD_BRAND] },
 ];
 
 const API: Check[] = [{ path: "/api/capabilities" }, { path: "/api/models" }];

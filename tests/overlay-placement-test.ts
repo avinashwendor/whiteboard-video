@@ -8,11 +8,11 @@
  * is the kind of thing a refactor silently drops.
  */
 
-import { useOverlayStore } from "../src/rescript/lib/overlay/store";
-import { subtitleBand, overlaps } from "../src/rescript/lib/overlay/layout";
-import { SUBTITLE_PRESETS } from "../src/rescript/lib/overlay/subtitles";
-import { DEFAULT_SUBTITLE_STYLE } from "../src/rescript/lib/overlay/types";
-import { rectAt } from "../src/rescript/lib/overlay/presets";
+import { useOverlayStore } from "../src/motionscript/lib/overlay/store";
+import { subtitleBand, overlaps } from "../src/motionscript/lib/overlay/layout";
+import { SUBTITLE_PRESETS } from "../src/motionscript/lib/overlay/subtitles";
+import { DEFAULT_SUBTITLE_STYLE } from "../src/motionscript/lib/overlay/types";
+import { rectAt } from "../src/motionscript/lib/overlay/presets";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

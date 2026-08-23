@@ -3,7 +3,7 @@ import {
   isTranscriptLanguage,
   TRANSCRIPT_LANGUAGE_ORDER,
   TRANSCRIPT_LANGUAGES,
-} from "../src/rescript/lib/languages";
+} from "../src/motionscript/lib/languages";
 
 {
   if (DEFAULT_TRANSCRIPT_LANGUAGE !== "en") {

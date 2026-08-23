@@ -8,8 +8,8 @@
  * that would otherwise be applied anyway.
  */
 
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import { buildCues } from "../src/rescript/lib/overlay/subtitles";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
+import { buildCues } from "../src/motionscript/lib/overlay/subtitles";
 import {
   buildTimeline,
   clampTransitionDuration,
@@ -19,9 +19,9 @@ import {
   outputToOriginal,
   pruneTransitions,
   transitionAt,
-} from "../src/rescript/lib/overlay/timeline";
-import { drawStateAt } from "../src/rescript/lib/overlay/animation";
-import { rectAt, startAtPlayhead } from "../src/rescript/lib/overlay/presets";
+} from "../src/motionscript/lib/overlay/timeline";
+import { drawStateAt } from "../src/motionscript/lib/overlay/animation";
+import { rectAt, startAtPlayhead } from "../src/motionscript/lib/overlay/presets";
 import {
   blockedFor,
   clampToFrame,
@@ -29,14 +29,14 @@ import {
   overlaps,
   subtitleBand,
   TITLE_SAFE,
-} from "../src/rescript/lib/overlay/layout";
+} from "../src/motionscript/lib/overlay/layout";
 import {
   DEFAULT_SUBTITLE_STYLE,
   isEmptyComposition,
   emptyComposition,
   type OverlayElement,
-} from "../src/rescript/lib/overlay/types";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/overlay/types";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

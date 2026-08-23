@@ -3,8 +3,8 @@ import {
   collapseRepeatingNgrams,
   stripHallucinationPhrases,
   trimTrailingDegenerateTail,
-} from "../src/rescript/lib/hallucinations";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/hallucinations";
+import type { Word } from "../src/motionscript/lib/types";
 
 function w(text: string, i: number): Word {
   return { id: i, text, start: i * 0.3, end: i * 0.3 + 0.25, speaker: 0, deleted: false };

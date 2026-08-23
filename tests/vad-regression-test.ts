@@ -13,7 +13,7 @@ import {
   energySpeechFrames,
   speechSegmentsFromFrames,
   VAD_SAMPLE_RATE,
-} from "../src/rescript/lib/vad";
+} from "../src/motionscript/lib/vad";
 
 const wav = path.join(
   process.cwd(),
@@ -30,7 +30,7 @@ function ffmpegAvailable(): boolean {
 }
 
 const workerSrc = fs.readFileSync(
-  path.join(process.cwd(), "src/rescript/workers/transcription.worker.ts"),
+  path.join(process.cwd(), "src/motionscript/workers/transcription.worker.ts"),
   "utf8"
 );
 
@@ -78,7 +78,7 @@ if (!ffmpegAvailable()) {
 
 const pcmPath = path.join(
   os.tmpdir(),
-  `rescript-vad-regression-${process.pid}.pcm`
+  `motionscript-vad-regression-${process.pid}.pcm`
 );
 const ff = spawnSync(
   "ffmpeg",

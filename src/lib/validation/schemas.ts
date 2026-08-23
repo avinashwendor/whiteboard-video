@@ -137,7 +137,7 @@ export type EditRequest = z.infer<typeof editRequestSchema>;
  * pruned in the browser -- numbered elements, boundary times, a trimmed
  * transcript -- so nothing carries word-level timings or media across the wire.
  */
-export const rescriptAgentRequestSchema = z.object({
+export const motionscriptAgentRequestSchema = z.object({
   instruction: promptField,
   context: z.object({
     duration: z.number().min(0).max(24 * 3600),
@@ -198,7 +198,7 @@ export const rescriptAgentRequestSchema = z.object({
   mode: z.enum(["propose", "execute"]).optional(),
   model: modelId.optional(),
 });
-export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
+export type MotionScriptAgentRequest = z.infer<typeof motionscriptAgentRequestSchema>;
 
 export const createRequestSchema = z.object({
   prompt: promptField,

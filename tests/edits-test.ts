@@ -17,8 +17,8 @@ import {
   restoreRangesResult,
   trimEdgeBounds,
   trimEdgeResult,
-} from "../src/rescript/lib/edits";
-import type { ManualCut, SceneBoundary, Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/edits";
+import type { ManualCut, SceneBoundary, Word } from "../src/motionscript/lib/types";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

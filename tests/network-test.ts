@@ -1,4 +1,4 @@
-import { isNetworkError, installFetchRetry } from "../src/rescript/lib/network";
+import { isNetworkError, installFetchRetry } from "../src/motionscript/lib/network";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);

@@ -69,13 +69,13 @@ if (existsSync(parakeetOrtSrc)) {
 /**
  * parakeet.js@1.4.4 accepts `wasmPaths` in fromUrls/fromHub but initOrt never
  * applies the argument — it only sets a jsDelivr CDN default. Patch that so
- * Rescript can serve WASM same-origin (offline after first model download).
+ * MotionScript can serve WASM same-origin (offline after first model download).
  */
 function patchParakeetWasmPaths() {
   const backendPath = join(root, "node_modules/parakeet.js/src/backend.js");
   if (!existsSync(backendPath)) return;
   let src = readFileSync(backendPath, "utf8");
-  if (src.includes("/* rescript-wasmPaths-patch */")) return;
+  if (src.includes("/* motionscript-wasmPaths-patch */")) return;
 
   // Package may ship CRLF; normalize for matching then restore EOL style.
   const eol = src.includes("\r\n") ? "\r\n" : "\n";
@@ -85,7 +85,7 @@ function patchParakeetWasmPaths() {
     "  if (!ort.env.wasm.wasmPaths) {";
   const replacement =
     "  // Set up WASM paths first (needed for all backends)\n" +
-    "  /* rescript-wasmPaths-patch */\n" +
+    "  /* motionscript-wasmPaths-patch */\n" +
     "  if (wasmPaths) {\n" +
     "    ort.env.wasm.wasmPaths = wasmPaths;\n" +
     "  } else if (!ort.env.wasm.wasmPaths) {";

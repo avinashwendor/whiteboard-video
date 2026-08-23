@@ -13,8 +13,8 @@ import {
   replaceSpeaker,
   speakersFromWords,
   speakerLabel,
-} from "../src/rescript/lib/speakers";
-import type { SpeakerInfo, Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/speakers";
+import type { SpeakerInfo, Word } from "../src/motionscript/lib/types";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

@@ -1,5 +1,5 @@
-import { findFillerWordIds, isFillerWord } from "../src/rescript/lib/fillers";
-import type { Word } from "../src/rescript/lib/types";
+import { findFillerWordIds, isFillerWord } from "../src/motionscript/lib/fillers";
+import type { Word } from "../src/motionscript/lib/types";
 
 function w(text: string, id: number, deleted = false): Word {
   return { id, text, start: id, end: id + 0.2, speaker: 0, deleted };

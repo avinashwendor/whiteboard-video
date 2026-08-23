@@ -9,9 +9,9 @@ import {
   runtimeEnglishMessages,
   runtimeMessageKeys,
   translate,
-} from "../src/rescript/lib/i18n";
-import { catalogs } from "../src/rescript/lib/i18n/catalogs";
-import { en, type MessageKey } from "../src/rescript/lib/i18n/messages/en";
+} from "../src/motionscript/lib/i18n";
+import { catalogs } from "../src/motionscript/lib/i18n/catalogs";
+import { en, type MessageKey } from "../src/motionscript/lib/i18n/messages/en";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

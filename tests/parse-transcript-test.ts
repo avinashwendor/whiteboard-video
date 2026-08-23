@@ -2,7 +2,7 @@
  * Unit tests for SRT / VTT / JSON transcript import.
  * Run: npx tsx tests/parse-transcript-test.ts
  */
-import { parseTranscript } from "../src/rescript/lib/parseTranscript";
+import { parseTranscript } from "../src/motionscript/lib/parseTranscript";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

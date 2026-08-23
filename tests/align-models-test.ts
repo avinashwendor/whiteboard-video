@@ -2,7 +2,7 @@ import {
   ALIGN_MODELS,
   alignModelFor,
   uniqueAlignModelIds,
-} from "../src/rescript/lib/alignModels";
+} from "../src/motionscript/lib/alignModels";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

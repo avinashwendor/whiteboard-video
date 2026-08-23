@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 
-// Rescript's telemetry/crash reporting stamps the build version, so the client
+// MotionScript's telemetry/crash reporting stamps the build version, so the client
 // needs it at build time. Read from package.json rather than duplicating it in
 // a constant that `npm version` would silently leave stale.
 const { version } = JSON.parse(
