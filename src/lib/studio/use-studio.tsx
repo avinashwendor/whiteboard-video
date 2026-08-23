@@ -12,6 +12,7 @@ import {
 } from "react";
 import { generateImage } from "@/lib/ai/image/client";
 import { castVoice } from "./casting";
+import { playReadyChime } from "@/lib/video/chime";
 import { renderThumbnail } from "@/components/whiteboard/thumbnail";
 import type { SceneSpec } from "@/lib/whiteboard/scene";
 import type { ImageStyle, ModelInfo, VoiceInfo } from "@/lib/ai/types";
@@ -115,6 +116,67 @@ function measureDuration(url: string): Promise<number | undefined> {
     audio.preload = "metadata";
     audio.src = url;
   });
+}
+
+/**
+ * How many narration clips may be in flight at once.
+ *
+ * Three keeps a six-scene video's speech overlapping without handing the
+ * provider a burst it will answer with 429s.
+ */
+const VOICE_CONCURRENCY = 3;
+
+/**
+ * Starts every task now, but lets only `limit` of them run at a time.
+ *
+ * Returns one promise per task, in the order given, so a caller can await them
+ * individually and still process results in sequence. Rejections are the
+ * caller's to handle — nothing here swallows them.
+ */
+function startPool<T>(tasks: Array<() => Promise<T>>, limit: number): Array<Promise<T>> {
+  let running = 0;
+  let next = 0;
+  const resolvers: Array<{
+    resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
+  }> = [];
+
+  const results = tasks.map(
+    (_, index) =>
+      new Promise<T>((resolve, reject) => {
+        resolvers[index] = { resolve, reject };
+      }),
+  );
+
+  const pump = () => {
+    while (running < limit && next < tasks.length) {
+      const index = next;
+      next += 1;
+      running += 1;
+      tasks[index]().then(
+        (value) => {
+          running -= 1;
+          resolvers[index].resolve(value);
+          pump();
+        },
+        (reason) => {
+          running -= 1;
+          resolvers[index].reject(reason);
+          pump();
+        },
+      );
+    }
+  };
+
+  pump();
+
+  // Handlers are attached later, one at a time, as the caller works through
+  // the list — so a task that fails early would be an unhandled rejection
+  // until the caller got to it. Marking them handled here changes nothing for
+  // whoever awaits them and keeps the console honest.
+  for (const result of results) result.catch(() => {});
+
+  return results;
 }
 
 function messageFor(err: unknown): { code: string; message: string } {
@@ -417,106 +479,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               meta: {
                 provider: image.provider,
                 imageModel: image.model,
-                durationMs: Date.now() - started,
-              },
-            });
-            break;
-          }
-
-          /**
-           * A storyboard is the plan without the film.
-           *
-           * It reuses the director that plans a video — same beats, same one
-           * art direction across every frame — and then stops at the pictures.
-           * No boards are drawn and nothing is narrated, so you get the shape
-           * of a piece in a fraction of the time and cost, and can take it
-           * into a production later if it holds up.
-           */
-          case "storyboard": {
-            patch({ stage: "Breaking it into frames", progress: 0.06 });
-
-            const plan = await createStoryboard(
-              {
-                prompt: activePrompt,
-                model: settings.textModel || undefined,
-                sceneCount: settings.sceneCount,
-                language: settings.language || undefined,
-                tone: settings.tone,
-              },
-              signal,
-            );
-
-            const artDirection = plan.storyboard.visual_style?.trim();
-            const frames: SceneAsset[] = plan.storyboard.scenes.map((scene) => ({
-              heading: scene.heading,
-              bullets: scene.bullets,
-              narration: scene.narration,
-              imagePrompt: artDirection
-                ? `${artDirection} ${scene.image_prompt}`
-                : scene.image_prompt,
-              status: "pending",
-            }));
-
-            const board: ProjectAsset = {
-              ...plan.storyboard,
-              scenes: frames,
-            };
-
-            patch({
-              stage: `Drawing frame 01 of ${String(frames.length).padStart(2, "0")}`,
-              progress: 0.12,
-              project: { ...board, scenes: [...frames] },
-              meta: { model: plan.model, provider: plan.provider, usage: plan.usage },
-            });
-
-            // Drawn one at a time on purpose: the frames appear as they land,
-            // which is the whole point of a storyboard — you start reacting to
-            // the first shot while the last one is still being made.
-            for (const [index, frame] of frames.entries()) {
-              if (signal.aborted) break;
-
-              frames[index] = { ...frame, status: "running" };
-              patch({ project: { ...board, scenes: [...frames] } });
-
-              try {
-                const image = await generateImage({
-                  prompt: frame.imagePrompt,
-                  provider: settings.imageProvider,
-                  model: settings.imageModel || undefined,
-                  width,
-                  height,
-                  style,
-                  signal,
-                });
-                frames[index] = { ...frames[index], image, status: "done" };
-              } catch (err) {
-                // One frame failing is not the storyboard failing. Mark it and
-                // keep drawing the rest.
-                frames[index] = {
-                  ...frames[index],
-                  status: "error",
-                  error: messageFor(err).message,
-                };
-              }
-
-              patch({
-                project: { ...board, scenes: [...frames] },
-                stage:
-                  index + 1 < frames.length
-                    ? `Drawing frame ${String(index + 2).padStart(2, "0")} of ${String(frames.length).padStart(2, "0")}`
-                    : "Finishing the board",
-                progress: 0.12 + 0.88 * ((index + 1) / frames.length),
-              });
-            }
-
-            patch({
-              status: "done",
-              stage: undefined,
-              progress: 1,
-              project: { ...board, scenes: [...frames] },
-              meta: {
-                ...generation.meta,
-                imageModel: settings.imageModel || undefined,
                 durationMs: Date.now() - started,
               },
             });
@@ -871,8 +833,24 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
             const project = generation.project!;
 
-            // Boards are laid out one after another so each one can be told
-            // which layout the previous scene used and pick a different one.
+            /**
+             * Narration for every scene, started at once.
+             *
+             * Boards have to be laid out in order — each one is told which
+             * layout the last scene used so it picks a different one — but
+             * nothing about a voice clip depends on the scene before it. They
+             * were serialised anyway, which on a six-scene video meant half a
+             * minute of waiting for requests that could all have been in the
+             * air together.
+             *
+             * Bounded rather than unbounded: firing every request at once is
+             * how the storyboard mode ended up rate-limited on every frame.
+             */
+            const voices = startPool(
+              scenes.map((scene) => () => speak(scene.narration)),
+              VOICE_CONCURRENCY,
+            );
+
             for (const [index, scene] of scenes.entries()) {
               if (signal.aborted) break;
               project.scenes[index].status = "running";
@@ -880,7 +858,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
               const [art, audio] = await Promise.allSettled([
                 buildScene(scene),
-                speak(scene.narration),
+                voices[index],
               ]);
 
               const target = project.scenes[index];
@@ -963,6 +941,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         }
 
         await commit({ ...generation });
+
+        // A video takes minutes, so people go and do something else. The chime
+        // only fires when the tab is actually hidden -- if you were watching,
+        // you already saw it land and a sound you did not need is just noise.
+        if (document.visibilityState === "hidden") playReadyChime();
       } catch (err) {
         if (signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
           setCurrent(null);

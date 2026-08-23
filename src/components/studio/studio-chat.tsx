@@ -12,13 +12,14 @@ import {
 import { WhiteboardPlayer } from "@/components/whiteboard/whiteboard-player";
 import { Markdown } from "@/lib/utils/markdown";
 import { cn } from "@/lib/utils/cn";
+import { enhancePrompt } from "@/lib/studio/api";
 import { useStudio } from "@/lib/studio/use-studio";
 import { MAX_PROMPT_CHARS } from "@/lib/validation/schemas";
 import type { Generation, Mode } from "@/lib/studio/types";
 import { AdvancedSettings } from "./advanced-settings";
-import { MODE_CONFIG } from "./mode-config";
+import { configFor, MODE_CONFIG } from "./mode-config";
 import { ModeTabs } from "./mode-tabs";
-import { StillResult, StoryboardResult, VoiceoverResult } from "./results";
+import { StillResult, VoiceoverResult } from "./results";
 
 /**
  * The studio, as a conversation.
@@ -48,16 +49,32 @@ export function StudioChat() {
    */
   const [since, setSince] = useState(() => Date.now());
 
+  /**
+   * The generation "New thread" cleared.
+   *
+   * `current` has to be in the thread whatever its age — a run in flight is
+   * only on `current` until it commits, and opening an old one from History
+   * has to show it. So clearing by timestamp alone could never hide the thing
+   * on screen, which is exactly why the button looked broken. Naming the
+   * dismissed id instead hides that one result and nothing else: the next run
+   * has a different id, and so does anything reopened from History.
+   */
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  const startNewThread = () => {
+    setSince(Date.now());
+    setDismissed(current?.id ?? null);
+  };
+
   const thread = useMemo(() => {
     const past = history.filter((entry) => entry.createdAt >= since);
-    // A run in flight lives on `current` before it is committed to history,
-    // and opening an old one from History puts it back in the thread — so it
-    // is included whatever its age.
     const merged = current
       ? [current, ...past.filter((entry) => entry.id !== current.id)]
       : past;
-    return merged.sort((a, b) => a.createdAt - b.createdAt);
-  }, [history, current, since]);
+    return merged
+      .filter((entry) => entry.id !== dismissed)
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }, [history, current, since, dismissed]);
 
   const docked = thread.length > 0;
   const config = MODE_CONFIG[mode];
@@ -152,7 +169,7 @@ export function StudioChat() {
               {docked ? (
                 <button
                   type="button"
-                  onClick={() => setSince(Date.now())}
+                  onClick={startNewThread}
                   className="shrink-0 font-mono text-[10px] uppercase tracking-[0.16em] text-dim transition-colors hover:text-ink"
                 >
                   New thread
@@ -189,6 +206,8 @@ export function StudioChat() {
                 )}
               />
             </div>
+
+            <Sharpen mode={mode} disabled={running} />
 
             <ModeOptions mode={mode} disabled={running} />
 
@@ -237,6 +256,95 @@ export function StudioChat() {
       {/* The lower half of the empty state. Two equal spacers put the composer
           on the centre line; removing this one drops it to the bottom. */}
       {docked ? null : <div className="min-h-0 flex-1" />}
+    </div>
+  );
+}
+
+/* --------------------------------- sharpen -------------------------------- */
+
+/**
+ * The middle ground between a lazy prompt and an interrogation.
+ *
+ * Six words is a perfectly good way to start, and being asked four questions
+ * before anything happens is how people close a tab. But "a video about UPI"
+ * really does make a worse video than a brief that says who it is for and what
+ * it should land. So: type whatever you like and send it, or spend one click
+ * having the prompt written out properly and see what changed before you
+ * commit to it.
+ *
+ * Only offered on short prompts. Past a sentence or two you have already told
+ * it what you want.
+ */
+function Sharpen({ mode, disabled }: { mode: Mode; disabled: boolean }) {
+  const { prompt, setPrompt, settings } = useStudio();
+  const [busy, setBusy] = useState(false);
+  const [previous, setPrevious] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const words = prompt.trim().split(/\s+/).filter(Boolean).length;
+  const worthOffering = words >= 3 && words <= 14 && mode !== "voice";
+
+  if (previous === null && !worthOffering) return null;
+
+  const sharpen = async () => {
+    const original = prompt.trim();
+    if (!original) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      const result = await enhancePrompt({
+        prompt: original,
+        style: mode === "image" ? (settings.imageStyle as string) : undefined,
+      });
+      if (result.used && result.used !== original) {
+        setPrevious(original);
+        setPrompt(result.used);
+      }
+    } catch {
+      // A brief that will not rewrite is not a reason to block sending the
+      // one you already have.
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pt-2.5">
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#4e4e4a]">
+        Brief
+      </span>
+
+      {previous === null ? (
+        <button
+          type="button"
+          onClick={() => void sharpen()}
+          disabled={disabled || busy}
+          className="flex items-center gap-2 border-b border-transparent pb-0.5 text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+        >
+          {busy ? <AsciiSpinner variant="braille" className="text-create" /> : null}
+          {busy ? "Writing it out" : "Sharpen this for me"}
+        </button>
+      ) : (
+        <>
+          <span className="text-[12.5px] text-create">Sharpened</span>
+          <button
+            type="button"
+            onClick={() => {
+              setPrompt(previous);
+              setPrevious(null);
+            }}
+            disabled={disabled}
+            className="border-b border-transparent pb-0.5 text-[12.5px] text-muted transition-colors hover:border-line-strong hover:text-ink"
+          >
+            Use what I wrote
+          </button>
+        </>
+      )}
+
+      {failed ? (
+        <span className="text-[12px] text-faint">Couldn&rsquo;t rewrite it — send yours.</span>
+      ) : null}
     </div>
   );
 }
@@ -348,7 +456,6 @@ function Opening({ mode }: { mode: Mode }) {
     create: "What should we make?",
     write: "What should it say?",
     image: "What should it look like?",
-    storyboard: "How should it be shot?",
     voice: "What should it sound like?",
   };
 
@@ -373,7 +480,7 @@ function Opening({ mode }: { mode: Mode }) {
 /* ---------------------------------- turn ---------------------------------- */
 
 function Turn({ generation }: { generation: Generation }) {
-  const config = MODE_CONFIG[generation.mode];
+  const config = configFor(generation.mode);
 
   return (
     <div className="animate-rise pb-12">
@@ -396,13 +503,62 @@ function Turn({ generation }: { generation: Generation }) {
 
         <div className="min-w-0 flex-1">
           {generation.status === "error" ? (
-            <p className="text-[14px] leading-relaxed text-danger">
-              {generation.error?.message ?? "That didn't run."}
-            </p>
+            <Failed generation={generation} />
           ) : (
             <Answer generation={generation} />
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A failed turn.
+ *
+ * What went wrong decides what to offer. Being offline is the person's problem
+ * and retrying now is pointless; a 502 from a provider is nobody's fault and
+ * retrying usually works; a rejected prompt needs editing, not repeating. One
+ * generic red sentence made all three look the same.
+ */
+function Failed({ generation }: { generation: Generation }) {
+  const { run, running } = useStudio();
+  const code = generation.error?.code ?? "unknown";
+
+  const advice =
+    code === "offline"
+      ? "Nothing left this machine — check the connection."
+      : code === "network"
+        ? "The request never reached the server."
+        : code === "server_error"
+          ? "The server answered, but with an error of its own."
+          : code === "invalid_request" || code === "unsupported"
+            ? "Change the prompt and send it again."
+            : "The provider is having a moment.";
+
+  const worthRetrying = code !== "invalid_request" && code !== "unsupported";
+
+  return (
+    <div className="border border-danger/30 bg-danger/[0.06] px-4 py-3.5">
+      <p className="text-[14px] leading-relaxed text-danger">
+        {generation.error?.message ?? "That didn't run."}
+      </p>
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted">{advice}</p>
+
+      <div className="mt-3 flex items-center gap-4">
+        {worthRetrying ? (
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void run({ prompt: generation.prompt, mode: generation.mode })}
+            className="border border-line-strong px-3 py-1.5 text-[12.5px] text-ink transition-colors hover:bg-surface-hover disabled:opacity-40"
+          >
+            Try again
+          </button>
+        ) : null}
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#4e4e4a]">
+          {code}
+        </span>
       </div>
     </div>
   );
@@ -422,7 +578,7 @@ function Waiting({
   generation: Generation;
   children: React.ReactNode;
 }) {
-  const config = MODE_CONFIG[generation.mode];
+  const config = configFor(generation.mode);
   return (
     <div className="space-y-2.5">
       <p className="flex items-center gap-2 pb-0.5 text-[12.5px] text-muted">
@@ -449,25 +605,6 @@ function Answer({ generation }: { generation: Generation }) {
       ) : (
         <Waiting generation={generation}>
           <GrainShimmer className="aspect-video w-full border border-line" sweep={2.8} />
-        </Waiting>
-      );
-
-    case "storyboard":
-      return generation.project ? (
-        <div className="border border-line bg-surface">
-          <StoryboardResult generation={generation} />
-        </div>
-      ) : (
-        <Waiting generation={generation}>
-          <div className="grid grid-cols-2 gap-2">
-            {[0, 1, 2, 3].map((index) => (
-              <GrainShimmer
-                key={index}
-                className="aspect-video w-full border border-line"
-                sweep={2.5 + index * 0.25}
-              />
-            ))}
-          </div>
         </Waiting>
       );
 
@@ -610,7 +747,7 @@ function blockingReason(
   capabilities: ReturnType<typeof useStudio>["capabilities"],
 ): string | null {
   if (!capabilities) return null;
-  const needsText = mode === "write" || mode === "create" || mode === "storyboard";
+  const needsText = mode === "write" || mode === "create";
 
   if (needsText && !capabilities.text.configured) {
     return "Text generation needs OMEGA_API_KEY in .env.local. Restart the dev server after adding it.";

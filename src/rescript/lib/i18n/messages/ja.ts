@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** Japanese UI catalog. Every key in {@link en} must be present. */
 export const ja: Record<MessageKey, string> = {
-  "app.title": "Rescript — テキストを編集するように動画を編集",
+  "app.title": "MotionScript — テキストを編集するように動画を編集",
   "common.cancel": "キャンセル",
   "common.close": "閉じる",
   "common.delete": "削除",
@@ -23,11 +23,6 @@ export const ja: Record<MessageKey, string> = {
   "settings.privacy": "プライバシー",
   "settings.helpImprove": "アプリの改善に協力",
   "settings.telemetryHelp": "匿名の機能利用統計とクラッシュレポートを送信します。",
-  "settings.support": "サポート / フィードバック",
-  "settings.reportIssue": "問題を報告",
-  "settings.homepage": "ホームページ",
-  "settings.github": "GitHub",
-  "settings.followX": "X でフォロー",
   "model.transcriptSource": "文字起こしソース",
   "model.language": "言語",
   "model.transcriptLanguage": "文字起こし言語",
@@ -165,14 +160,7 @@ export const ja: Record<MessageKey, string> = {
   "import.chooseFileShort": "ファイルを選択…",
   "import.chooseFile": "SRT、VTT、JSON の文字起こしを選択",
   "import.selected": "{name} を選択しました",
-  "banner.faster": "文字起こしと書き出しをもっと速くしますか？",
-  "banner.getDesktop": "Rescript デスクトップアプリを入手",
-  "banner.downloadFor": "{platform} 版をダウンロード",
-  "banner.dismiss": "閉じる",
-  "social.githubRepo": "GitHub リポジトリ",
-  "social.discordServer": "Discord サーバー",
-  "social.xProfile": "X プロフィール",
-  "globalError.title": "Rescript — 問題が発生しました",
+  "globalError.title": "MotionScript — 問題が発生しました",
   "globalError.heading": "問題が発生しました",
   "globalError.body":
     "エディターで予期しないエラーが発生しました。保存済みプロジェクトはこのデバイスに残っています。再読み込みすれば復元されるはずです。",

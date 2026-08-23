@@ -13,7 +13,7 @@ export type MenuCommand =
   | { type: "close-project" };
 
 /** Desktop bridge exposed by electron/preload.ts when running inside Electron. */
-export interface RescriptDesktop {
+export interface MotionScriptDesktop {
   platform: NodeJS.Platform;
   versions: {
     electron: string;
@@ -37,7 +37,7 @@ export interface RescriptDesktop {
 
 declare global {
   interface Window {
-    rescriptDesktop?: RescriptDesktop;
+    rescriptDesktop?: MotionScriptDesktop;
     /** Opens the media picker. Set by the renderer, called by the main process
      *  through executeJavaScript so the dialog gets a user activation. */
     rescriptOpenFilePicker?: () => void;

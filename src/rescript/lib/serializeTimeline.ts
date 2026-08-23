@@ -157,7 +157,7 @@ export function buildNleTimeline(options: TimelineExportOptions): Timeline {
   }
 
   return {
-    name: projectName || mediaFileName.replace(/\.[^.]+$/, "") || "Rescript Edit",
+    name: projectName || mediaFileName.replace(/\.[^.]+$/, "") || "MotionScript Edit",
     format: {
       width,
       height,

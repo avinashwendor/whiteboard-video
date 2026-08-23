@@ -3,9 +3,9 @@ import type { ImageProviderId, ImageStyle } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
 
-export type Mode = "write" | "image" | "storyboard" | "voice" | "create";
+export type Mode = "write" | "image" | "voice" | "create";
 
-export const MODES: Mode[] = ["write", "image", "storyboard", "voice", "create"];
+export const MODES: Mode[] = ["write", "image", "voice", "create"];
 
 export interface ImageAsset {
   url: string;

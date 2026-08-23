@@ -1,20 +1,9 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Bug, ExternalLink, HomeIcon, Moon, Settings, Sun } from "lucide-react";
-import {
-  DiscordIcon,
-  DISCORD_INVITE_URL,
-  GitHubIcon,
-  GITHUB_REPO_URL,
-  WEBSITE_URL,
-  XIcon,
-  X_PROFILE_URL,
-} from "./SocialLinks";
-import { useAppearance } from "@/rescript/hooks/useAppearance";
+import { Settings } from "lucide-react";
 import { useTelemetryPref } from "@/rescript/hooks/useTelemetryPref";
 import Popover, { PopoverContent, PopoverTrigger } from "./Popover";
-import type { Appearance } from "@/rescript/lib/theme";
 import { useI18n } from "./I18nProvider";
 import {
   UI_LOCALES,
@@ -22,26 +11,16 @@ import {
   isUiLocalePreference,
 } from "@/rescript/lib/i18n";
 
-const MENU_LINKS = [
-  { labelKey: "settings.support", href: DISCORD_INVITE_URL, Icon: DiscordIcon },
-  {
-    labelKey: "settings.reportIssue",
-    href: `${GITHUB_REPO_URL}/issues`,
-    Icon: Bug,
-  },
-  { labelKey: "settings.homepage", href: WEBSITE_URL, Icon: HomeIcon },
-  { labelKey: "settings.github", href: GITHUB_REPO_URL, Icon: GitHubIcon },
-  { labelKey: "settings.followX", href: X_PROFILE_URL, Icon: XIcon },
-] as const;
 
 /**
- * Top-bar settings popover. Houses appearance, transcript source, and social
- * links for now — structure is section-based so more prefs can land here later.
+ * Top-bar settings popover. Transcript source, language and telemetry.
+ *
+ * The appearance switch is gone: there is one skin now, and it is the same
+ * one the rest of the site wears.
  */
 export default function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const { appearance, setAppearance } = useAppearance();
   const { enabled: telemetry, setEnabled: setTelemetry } = useTelemetryPref();
   const { t, preference, setPreference } = useI18n();
 
@@ -74,31 +53,6 @@ export default function SettingsMenu() {
           aria-label={t("common.settings")}
           className="z-40 w-[15rem] overflow-hidden"
         >
-          <section className="border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
-            <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
-              {t("settings.appearance")}
-            </p>
-            <div
-              className="grid grid-cols-2 gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800"
-              role="radiogroup"
-              aria-label={t("settings.appearance")}
-            >
-              <AppearanceOption
-                value="light"
-                label={t("settings.light")}
-                icon={Sun}
-                selected={appearance === "light"}
-                onSelect={setAppearance}
-              />
-              <AppearanceOption
-                value="dark"
-                label={t("settings.dark")}
-                icon={Moon}
-                selected={appearance === "dark"}
-                onSelect={setAppearance}
-              />
-            </div>
-          </section>
 
           <section className="border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
             <label className="block text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
@@ -121,30 +75,6 @@ export default function SettingsMenu() {
             </label>
           </section>
 
-          <section className="border-b border-zinc-100 px-1.5 py-1.5 dark:border-zinc-800">
-            {MENU_LINKS.map(({ labelKey, href, Icon }) => (
-              <a
-                key={labelKey}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                // Keep the click on the anchor — popover dismiss listeners must
-                // not treat this as an outside press or swallow navigation.
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-2.5 px-3 py-2 text-[13px] text-zinc-700 transition hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/80"
-              >
-                <span className="shrink-0 text-zinc-400 dark:text-zinc-500">
-                  <Icon size={14} />
-                </span>
-                <span className="flex-1">{t(labelKey)}</span>
-                <ExternalLink
-                  size={12}
-                  className="shrink-0 text-zinc-300 dark:text-zinc-600"
-                />
-              </a>
-            ))}
-          </section>
 
           <section className="px-2 py-2.5">
             <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
@@ -171,36 +101,5 @@ export default function SettingsMenu() {
         </PopoverContent>
       </div>
     </Popover>
-  );
-}
-
-function AppearanceOption({
-  value,
-  label,
-  icon: Icon,
-  selected,
-  onSelect,
-}: {
-  value: Appearance;
-  label: string;
-  icon: typeof Sun;
-  selected: boolean;
-  onSelect: (value: Appearance) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={() => onSelect(value)}
-      className={`flex cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium transition ${
-        selected
-          ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-50"
-          : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-      }`}
-    >
-      <Icon size={14} />
-      {label}
-    </button>
   );
 }

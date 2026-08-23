@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** Simplified Chinese UI catalog. Every key in {@link en} must be present. */
 export const zhCN: Record<MessageKey, string> = {
-  "app.title": "Rescript — 像编辑文字一样编辑视频",
+  "app.title": "MotionScript — 像编辑文字一样编辑视频",
   "common.cancel": "取消",
   "common.close": "关闭",
   "common.delete": "删除",
@@ -23,11 +23,6 @@ export const zhCN: Record<MessageKey, string> = {
   "settings.privacy": "隐私",
   "settings.helpImprove": "帮助改进应用",
   "settings.telemetryHelp": "发送匿名功能使用统计和崩溃报告。",
-  "settings.support": "支持与反馈",
-  "settings.reportIssue": "报告问题",
-  "settings.homepage": "主页",
-  "settings.github": "GitHub",
-  "settings.followX": "在 X 上关注",
   "model.transcriptSource": "转录来源",
   "model.language": "语言",
   "model.transcriptLanguage": "转录语言",
@@ -164,14 +159,7 @@ export const zhCN: Record<MessageKey, string> = {
   "import.chooseFileShort": "请选择文件…",
   "import.chooseFile": "选择 SRT、VTT 或 JSON 转录文本",
   "import.selected": "已选择 {name}",
-  "banner.faster": "想要更快地转录和导出？",
-  "banner.getDesktop": "获取 Rescript 桌面客户端",
-  "banner.downloadFor": "下载 {platform} 版",
-  "banner.dismiss": "关闭",
-  "social.githubRepo": "GitHub 仓库",
-  "social.discordServer": "Discord 服务器",
-  "social.xProfile": "X 个人主页",
-  "globalError.title": "Rescript — 出现错误",
+  "globalError.title": "MotionScript — 出现错误",
   "globalError.heading": "出现错误",
   "globalError.body":
     "编辑器遇到了意外错误。已保存的项目仍在此设备上，重新加载后即可恢复。",

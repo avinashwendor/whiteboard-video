@@ -21,7 +21,7 @@ import { isElectron } from "./platform";
  * Opt-out lives in Settings and is honoured before any of this runs.
  */
 
-// Ported into Chalkline: the upstream default pointed at Rescript's own
+// Ported into Chalkline: the upstream default pointed at MotionScript's own
 // collector (www.getrescript.com/api/telemetry), which is not ours to send to.
 // Unset means "no collector", and trackEvent below short-circuits — set
 // NEXT_PUBLIC_TELEMETRY_ENDPOINT to your own endpoint to turn this on.

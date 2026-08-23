@@ -2,7 +2,7 @@ import type { MessageKey } from "./en";
 
 /** Traditional Chinese UI catalog. Every key in {@link en} must be present. */
 export const zhTW: Record<MessageKey, string> = {
-  "app.title": "Rescript — 像編輯文字一樣編輯影片",
+  "app.title": "MotionScript — 像編輯文字一樣編輯影片",
   "common.cancel": "取消",
   "common.close": "關閉",
   "common.delete": "刪除",
@@ -23,11 +23,6 @@ export const zhTW: Record<MessageKey, string> = {
   "settings.privacy": "隱私",
   "settings.helpImprove": "協助改善應用程式",
   "settings.telemetryHelp": "傳送匿名功能使用統計與當機報告。",
-  "settings.support": "支援 / 意見回饋",
-  "settings.reportIssue": "回報問題",
-  "settings.homepage": "首頁",
-  "settings.github": "GitHub",
-  "settings.followX": "在 X 上追蹤",
   "model.transcriptSource": "逐字稿來源",
   "model.language": "語言",
   "model.transcriptLanguage": "逐字稿語言",
@@ -164,14 +159,7 @@ export const zhTW: Record<MessageKey, string> = {
   "import.chooseFileShort": "選擇檔案…",
   "import.chooseFile": "選擇 SRT、VTT 或 JSON 逐字稿",
   "import.selected": "已選擇 {name}",
-  "banner.faster": "想要更快轉錄和匯出？",
-  "banner.getDesktop": "取得 Rescript 桌面應用程式",
-  "banner.downloadFor": "下載 {platform} 版",
-  "banner.dismiss": "關閉",
-  "social.githubRepo": "GitHub 儲存庫",
-  "social.discordServer": "Discord 伺服器",
-  "social.xProfile": "X 個人檔案",
-  "globalError.title": "Rescript — 發生錯誤",
+  "globalError.title": "MotionScript — 發生錯誤",
   "globalError.heading": "發生錯誤",
   "globalError.body":
     "編輯器遇到未預期的錯誤。你已儲存的專案仍在此裝置上，重新載入後應該會恢復。",

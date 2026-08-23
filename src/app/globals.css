@@ -24,7 +24,6 @@
   --accent-write: #5b7fbf;
   --accent-image: #c89b5a;
   --accent-voice: #9a8ac0;
-  --accent-story: #6aa9a0;
   --danger: #c4574e;
 
   --board: #f4f1ea;
@@ -49,7 +48,6 @@
   --color-write: var(--accent-write);
   --color-image: var(--accent-image);
   --color-voice: var(--accent-voice);
-  --color-story: var(--accent-story);
   --color-create: var(--accent-create);
   --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
@@ -202,24 +200,6 @@ body {
   width: 100%;
 }
 
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--surface-raised);
-}
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(242, 242, 240, 0.04),
-    transparent
-  );
-  animation: mhSheen 2.5s infinite;
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -229,7 +209,8 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  .skeleton::after {
+  .grain-shimmer__noise,
+  .grain-shimmer__sweep {
     animation: none;
   }
 }

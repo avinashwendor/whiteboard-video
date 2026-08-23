@@ -14,7 +14,6 @@ import {
   Type,
 } from "lucide-react";
 import logo from "@/rescript/assets/logo.png";
-import SocialLinks, { WEBSITE_URL } from "./SocialLinks";
 import SettingsMenu from "./SettingsMenu";
 import ModelSelector, {
   LanguageSection,
@@ -31,6 +30,7 @@ import {
   type ProjectMeta,
 } from "@/rescript/lib/projects";
 import { isElectron } from "@/rescript/lib/platform";
+import { PixelBlast } from "@/components/ui/pixel-blast";
 import { useEditorStore } from "@/rescript/lib/store";
 import type { SpeakerInfo, Word } from "@/rescript/lib/types";
 import { useI18n } from "./I18nProvider";
@@ -263,28 +263,44 @@ export default function UploadScreen({
   );
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-zinc-50 to-neutral-50/50 dark:from-zinc-950 dark:to-zinc-900/50">
+    <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain bg-zinc-950">
+      {/*
+        Texture, not decoration: the empty state is mostly ground. A dithered
+        pixel field is the same visual family as the studio hero, so crossing
+        between the two apps reads as one product.
+      */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.10]" aria-hidden>
+        <PixelBlast
+          variant="square"
+          color="#5fd08a"
+          pixelSize={5}
+          patternScale={2.6}
+          patternDensity={0.8}
+          pixelSizeJitter={0.5}
+          speed={0.35}
+          edgeFade={0.55}
+        />
+      </div>
+
       {/* min-h-full + items-center centers when content fits; the outer
           overflow-y-auto still lets short viewports (mobile) scroll the top. */}
-      <div className="flex min-h-full items-center justify-center p-6">
+      <div className="relative flex min-h-full items-center justify-center p-6">
         <div className="w-full max-w-xl">
           {!isElectron && (
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <a href={WEBSITE_URL} className="hover:opacity-80 transition-opacity">
-                <div className="flex min-w-0 items-center">
+              <div className="flex min-w-0 items-center">
                   <Image
                     src={logo}
-                    alt="Rescript"
+                    alt="MotionScript"
                     width={24}
                     height={24}
                     priority
                     className="rounded-sm border border-zinc-200 dark:border-zinc-700"
                   />
                   <p className="ml-2 text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
-                    Rescript
+                    MotionScript
                   </p>
-                </div>
-              </a>
+              </div>
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <SettingsMenu />
                 <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 mr-1" />
@@ -424,9 +440,6 @@ export default function UploadScreen({
             ))}
           </div>}
 
-          {!isElectron && <div className="mt-6 flex flex-col items-center gap-2">
-            <SocialLinks variant="text" />
-          </div>}
         </div>
       </div>
     </div>
