@@ -13,7 +13,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import logo from "@/rescript/assets/logo.png";
+import logo from "@/rescript/assets/logo.jpg";
 import SettingsMenu from "./SettingsMenu";
 import ModelSelector, {
   LanguageSection,
@@ -291,14 +291,14 @@ export default function UploadScreen({
               <div className="flex min-w-0 items-center">
                   <Image
                     src={logo}
-                    alt="MotionScript"
+                    alt="Video Whiteboard Generator"
                     width={24}
                     height={24}
                     priority
                     className="rounded-sm border border-zinc-200 dark:border-zinc-700"
                   />
                   <p className="ml-2 text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
-                    MotionScript
+                    Video Whiteboard Generator
                   </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
