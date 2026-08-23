@@ -2,7 +2,7 @@
 
 import { useEditorStore } from "@/rescript/lib/store";
 import Image from "next/image";
-import logo from "@/rescript/assets/logo.png";
+import logo from "@/rescript/assets/logo.jpg";
 import { useWindowChrome } from "@/rescript/hooks/useWindowChrome";
 import { useI18n } from "./I18nProvider";
 
@@ -34,7 +34,7 @@ export default function TopBar({ children }: { children?: React.ReactNode }) {
       >
         <Image
           src={logo}
-          alt="MotionScript"
+          alt="Video Whiteboard Generator"
           width={18}
           height={18}
           priority
@@ -42,7 +42,7 @@ export default function TopBar({ children }: { children?: React.ReactNode }) {
         />
       </button>
       <span className="text-sm font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">
-        MotionScript
+        Video Whiteboard Generator
       </span>
 
       {videoFile && (
