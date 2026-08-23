@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import Image from "next/image";
 import {
   AudioLines,
   Clapperboard,
@@ -13,7 +12,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import logo from "@/motionscript/assets/logo.png";
+import Mark from "./Mark";
 import SettingsMenu from "./SettingsMenu";
 import ModelSelector, {
   LanguageSection,
@@ -289,14 +288,7 @@ export default function UploadScreen({
           {!isElectron && (
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center">
-                  <Image
-                    src={logo}
-                    alt="MotionScript"
-                    width={24}
-                    height={24}
-                    priority
-                    className="rounded-sm border border-zinc-200 dark:border-zinc-700"
-                  />
+                  <Mark size={24} />
                   <p className="ml-2 text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
                     MotionScript
                   </p>

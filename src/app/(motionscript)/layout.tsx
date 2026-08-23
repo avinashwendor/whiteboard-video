@@ -35,30 +35,19 @@ export const metadata: Metadata = {
   ),
   title,
   description,
-  icons: {
-    icon: "/motionscript-icon.png",
-    apple: "/motionscript-apple-icon.png",
-  },
+  // icons and the social card are generated from icon.tsx, apple-icon.tsx and
+  // opengraph-image.tsx in this folder, so nothing has to be declared here.
   openGraph: {
     type: "website",
     siteName: "MotionScript",
     url: "/motionscript",
     title,
     description,
-    images: [
-      {
-        url: "/motionscript-og.png",
-        width: 1200,
-        height: 630,
-        alt: "MotionScript — a transcript-based video editor running in the browser",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
-    images: ["/motionscript-og.png"],
   },
   robots: { index: false },
 };
