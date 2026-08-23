@@ -53,12 +53,33 @@ export function castVoice(options: {
   let best = current;
   let bestScore = -1;
 
-  for (const voice of pool) {
+  const score = (voice: VoiceInfo): number => {
     const haystack = `${voice.description ?? ""} ${voice.accent ?? ""}`.toLowerCase();
     let points = wanted.reduce((sum, quality) => sum + (haystack.includes(quality) ? 2 : 0), 0);
     if (brief.gender && brief.gender !== "any") {
       points += voice.gender === brief.gender ? 3 : -4;
     }
+    return points;
+  };
+
+  /**
+   * The voice already chosen starts as the incumbent, with its own score.
+   *
+   * It used to begin on -1 — not scored at all — so *any* voice that matched a
+   * single quality replaced it, including one that scored no better than it
+   * would have. That is why a deliberately chosen default never survived a
+   * generation: it was never a candidate, only a starting value. Now it is
+   * beaten or it stays, and a tie keeps it, which is what "default" has to mean
+   * for it to be worth setting one.
+   */
+  const incumbent = pool.find((voice) => voice.id === current);
+  if (incumbent) {
+    best = incumbent.id;
+    bestScore = score(incumbent);
+  }
+
+  for (const voice of pool) {
+    const points = score(voice);
     if (points > bestScore) {
       bestScore = points;
       best = voice.id;

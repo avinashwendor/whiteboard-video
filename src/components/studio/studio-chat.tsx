@@ -368,13 +368,22 @@ function ModeOptions({ mode, disabled }: { mode: Mode; disabled: boolean }) {
       <OptionRow label="Style">
         {(
           [
-            { value: "whiteboard", label: "Drawn whiteboard" },
-            { value: "hyperframes", label: "Modern frames" },
+            {
+              value: "whiteboard",
+              label: "Drawn whiteboard",
+              detail: "A hand draws it as the narrator speaks",
+            },
+            {
+              value: "hyperframes",
+              label: "Modern frames",
+              detail: "Designed slides with photos and motion",
+            },
           ] as const
         ).map((option) => (
-          <Option
+          <Choice
             key={option.value}
             label={option.label}
+            detail={option.detail}
             active={settings.videoStyle === option.value}
             disabled={disabled}
             onSelect={() => updateSettings({ videoStyle: option.value })}
@@ -389,13 +398,22 @@ function ModeOptions({ mode, disabled }: { mode: Mode; disabled: boolean }) {
       <OptionRow label="Source">
         {(
           [
-            { value: "verbatim", label: "Read my text" },
-            { value: "script", label: "Write it first" },
+            {
+              value: "verbatim",
+              label: "Read my text",
+              detail: "Spoken exactly as written",
+            },
+            {
+              value: "script",
+              label: "Write it first",
+              detail: "Turned into a script, then spoken",
+            },
           ] as const
         ).map((option) => (
-          <Option
+          <Choice
             key={option.value}
             label={option.label}
+            detail={option.detail}
             active={settings.voiceSource === option.value}
             disabled={disabled}
             onSelect={() => updateSettings({ voiceSource: option.value })}
@@ -410,8 +428,8 @@ function ModeOptions({ mode, disabled }: { mode: Mode; disabled: boolean }) {
 
 function OptionRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 pt-2.5">
-      <span className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#4e4e4a]">
+    <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-4 pt-2.5">
+      <span className="mt-2 font-mono text-[9.5px] uppercase tracking-[0.16em] text-[#4e4e4a]">
         {label}
       </span>
       {children}
@@ -419,13 +437,25 @@ function OptionRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function Option({
+/**
+ * One of the choices that changes what you get back.
+ *
+ * It used to be a text label with a bottom border, and which one was selected
+ * was the difference between one underline and another — invisible at this
+ * size, so people sent a prompt without knowing which style they had asked for
+ * and only found out two minutes later. It is a real control now: a filled
+ * state you cannot miss, a dot that marks the live one, and a line saying what
+ * the option actually produces, because "Modern frames" does not tell you.
+ */
+function Choice({
   label,
+  detail,
   active,
   disabled,
   onSelect,
 }: {
   label: string;
+  detail: string;
   active: boolean;
   disabled: boolean;
   onSelect: () => void;
@@ -435,15 +465,37 @@ function Option({
       type="button"
       onClick={onSelect}
       disabled={disabled}
-      aria-pressed={active}
+      role="radio"
+      aria-checked={active}
       className={cn(
-        "border-b pb-0.5 text-[12.5px] transition-colors disabled:opacity-50",
+        "group flex min-w-[168px] flex-1 items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors disabled:opacity-50",
         active
-          ? "border-ink font-medium text-ink"
-          : "border-transparent text-muted hover:border-line-strong hover:text-ink",
+          ? "border-line-strong bg-surface-raised"
+          : "border-line bg-transparent hover:border-line-strong hover:bg-surface-hover",
       )}
     >
-      {label}
+      <span
+        aria-hidden
+        className={cn(
+          "mt-[5px] size-[7px] shrink-0 rounded-full border transition-colors",
+          active
+            ? "border-ink bg-ink"
+            : "border-line-strong bg-transparent group-hover:border-muted",
+        )}
+      />
+      <span className="min-w-0">
+        <span
+          className={cn(
+            "block text-[12.5px] leading-tight transition-colors",
+            active ? "font-medium text-ink" : "text-muted group-hover:text-ink",
+          )}
+        >
+          {label}
+        </span>
+        <span className="mt-0.5 block text-[10.5px] leading-tight text-faint">
+          {detail}
+        </span>
+      </span>
     </button>
   );
 }
