@@ -46,8 +46,8 @@ const nextConfig: NextConfig = {
       { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
     ];
     return [
-      { source: "/motionscript", headers: isolation },
-      { source: "/motionscript/:path*", headers: isolation },
+      { source: "/video-editor", headers: isolation },
+      { source: "/video-editor/:path*", headers: isolation },
       // ffmpeg.wasm's core, its pthread worker, and the onnxruntime binaries.
       { source: "/vendor/:path*", headers: workerScripts },
       // The bundled transcription worker, emitted here by the compiler.
