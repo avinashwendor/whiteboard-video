@@ -340,6 +340,102 @@ export const setFrameOp = z.object({
   background: z.enum(["black", "blur", "white"]).optional(),
 });
 
+/* ---------------------------------- shots ---------------------------------- */
+
+/**
+ * How the frame is filled over a stretch of the finished video.
+ *
+ * A camera move is expressed as a preset rather than as two framings, because
+ * "punch in on that line" is the instruction anyone actually gives, and a model
+ * asked for `from`/`to` pairs invents zoom levels that read as a mistake. The
+ * preset is turned into the framing pair by `cameraFor`, in one place, against
+ * numbers that were chosen once.
+ */
+export const cameraKinds = [
+  "hold",
+  "punchIn",
+  "punchOut",
+  "push",
+  "driftLeft",
+  "driftRight",
+  "kenBurns",
+  "snap",
+] as const;
+
+export const shotLayouts = [
+  "full",
+  "splitLeft",
+  "splitRight",
+  "splitTop",
+  "splitBottom",
+  "stack",
+  "pip",
+  "card",
+  "grid",
+] as const;
+
+/** What goes in one region. Kept flat: a nested union is where plans go wrong. */
+const plateSpec = z.object({
+  /** Region index. 0 is the primary — the largest, or the one behind a bubble. */
+  slot: z.number().int().min(0).max(3),
+  /**
+   * `primary` is the footage. `selfCrop` is the footage again, framed
+   * differently — the cutaway a real editor reaches for most, and the only one
+   * that needs no provider and no upload.
+   */
+  source: z.enum(["primary", "selfCrop", "solid"]).optional(),
+  color: colour.optional(),
+  fit: z.enum(["cover", "contain"]).optional(),
+  camera: z.enum(cameraKinds).optional(),
+  /** How far the move travels. 1 is the preset's own amount. */
+  amount: z.number().min(0).max(2).optional(),
+  /** What the move centres on, 0..1 of the source. */
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+  radius: z.number().min(0).max(0.5).optional(),
+});
+
+export const addShotOp = z.object({
+  op: z.literal("addShot"),
+  /** Seconds on the finished video's own clock. */
+  start: seconds,
+  end: seconds,
+  layout: z.enum(shotLayouts),
+  plates: z.array(plateSpec).min(1).max(4).optional(),
+});
+
+export const setCameraOp = z.object({
+  op: z.literal("setCamera"),
+  start: seconds,
+  end: seconds,
+  camera: z.enum(cameraKinds),
+  amount: z.number().min(0).max(2).optional(),
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+});
+
+export const removeShotOp = z.object({
+  op: z.literal("removeShot"),
+  /** Any second inside the shot to remove. */
+  at: seconds,
+});
+
+/**
+ * Place punch-ins automatically, on the beats the footage actually has.
+ *
+ * One operation rather than twenty `addShot`s: a model asked to place its own
+ * zooms spends its whole output budget on them and spaces them by eye, and the
+ * spacing is the part that decides whether an edit reads as produced or as
+ * restless. The rules live in `emphasis.ts` and are the same ones the manual
+ * button uses.
+ */
+export const autoPunchInsOp = z.object({
+  op: z.literal("autoPunchIns"),
+  /** Roughly how many per minute. The placer still enforces its own spacing. */
+  perMinute: z.number().min(0.5).max(8).optional(),
+  amount: z.number().min(0).max(2).optional(),
+});
+
 export const agentOpSchema = z.discriminatedUnion("op", [
   addTextOp,
   addImageOp,
@@ -361,6 +457,10 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   splitAtOp,
   captionPhraseOp,
   setFrameOp,
+  addShotOp,
+  setCameraOp,
+  removeShotOp,
+  autoPunchInsOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

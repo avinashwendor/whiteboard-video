@@ -42,6 +42,11 @@ import {
   type ShotLayout,
 } from "../src/rescript/lib/overlay/types";
 import { paintFrame } from "../src/rescript/lib/overlay/frame";
+import { cameraFor, fitCamera } from "../src/rescript/lib/overlay/camera";
+import { findBeats, placePunchIns, type Beat } from "../src/rescript/lib/overlay/emphasis";
+import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
+import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+import type { Word } from "../src/rescript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -477,6 +482,228 @@ for (const layout of LAYOUTS) {
   assert(normaliseShots([shot({ start: 5, end: 5 })]).length === 0, "zero-length is dropped");
   assert(normaliseShots([shot({ start: 9, end: 3 })]).length === 0, "backwards is dropped");
   assert(normaliseShots([]).length === 0, "nothing in, nothing out");
+}
+
+/* --------------------------- camera presets -------------------------------- */
+
+{
+  // The presets exist so the model chooses between names instead of inventing
+  // zoom levels. The numbers are the house numbers, and the thing worth pinning
+  // down is that they stay restrained: past about 1.35 on a face you are
+  // cropping foreheads.
+  for (const kind of ["punchIn", "punchOut", "push", "driftLeft", "kenBurns", "snap"] as const) {
+    const move = cameraFor({ kind });
+    const tightest = Math.max(move.from.zoom, move.to.zoom);
+    assert(tightest > 1, `${kind} must actually move`);
+    assert(tightest <= 1.35, `${kind} is too tight at ${tightest} — that crops faces`);
+    assert(move.from.zoom >= 1 && move.to.zoom >= 1, `${kind} must never zoom out past the fit`);
+    for (const f of [move.from, move.to]) {
+      assert(f.focusX >= 0 && f.focusX <= 1, `${kind} focusX in range`);
+      assert(f.focusY >= 0 && f.focusY <= 1, `${kind} focusY in range`);
+    }
+  }
+
+  // punchOut is punchIn backwards, not a different move.
+  const inward = cameraFor({ kind: "punchIn" });
+  const outward = cameraFor({ kind: "punchOut" });
+  assert(inward.to.zoom > inward.from.zoom, "punchIn ends tighter");
+  assert(outward.to.zoom < outward.from.zoom, "punchOut ends wider");
+
+  // `snap` has no travel: a hard cut to the tighter framing.
+  assert(cameraFor({ kind: "snap" }).duration === 0, "snap does not travel");
+
+  // `amount` scales about 1, so zero means "no move" — not "zoom to nothing",
+  // which would divide the picture out of existence.
+  const none = cameraFor({ kind: "punchIn", amount: 0 });
+  assert(none.to.zoom === 1, `amount 0 must be a zoom of 1, got ${none.to.zoom}`);
+  const more = cameraFor({ kind: "punchIn", amount: 2 });
+  assert(more.to.zoom > inward.to.zoom, "amount 2 travels further");
+
+  // Out-of-range asks are clamped rather than refused.
+  assert(cameraFor({ kind: "punchIn", focusX: 9 }).to.focusX <= 1, "focus is clamped");
+  assert(cameraFor({ kind: "punchIn", amount: -4 }).to.zoom === 1, "a negative amount is no move");
+
+  // A hold is a hold whatever else is asked for.
+  const held = cameraFor({ kind: "hold", amount: 2 });
+  assert(held.from.zoom === 1 && held.to.zoom === 1, "a hold does not move");
+}
+
+{
+  // A six-second push on a two-second shot never arrives: it plays as a creep
+  // that stops mid-travel at the cut, which reads as a dropped frame.
+  const slow = cameraFor({ kind: "push" });
+  assert(slow.duration > 2, "the push is long by design");
+  const fitted = fitCamera(slow, 2);
+  assert(fitted.duration === 2, `it must be shortened to the shot, got ${fitted.duration}`);
+  assert(fitted.to.zoom === slow.to.zoom, "shortening must not change where it goes");
+
+  // A move that already fits is returned untouched.
+  assert(fitCamera(slow, 30) === slow, "a move that fits is not rewritten");
+}
+
+/* -------------------------------- emphasis --------------------------------- */
+
+function words(spec: { text: string; start: number; end: number; speaker?: number }[]): Word[] {
+  return spec.map((w, i) => ({
+    id: i + 1,
+    text: w.text,
+    start: w.start,
+    end: w.end,
+    speaker: w.speaker ?? 0,
+    deleted: false,
+  }));
+}
+
+{
+  // The beats come out of the delivery, not off a timer. A pause then a word is
+  // the speaker doing the emphasis themselves; the camera only agrees.
+  const spoken = words([
+    { text: "So", start: 0, end: 0.3 },
+    { text: "we", start: 0.3, end: 0.5 },
+    { text: "tried", start: 0.5, end: 0.9 },
+    { text: "it.", start: 0.9, end: 1.3 },
+    // A clear pause, then a figure — the strongest beat available.
+    { text: "Revenue", start: 2.1, end: 2.7 },
+    { text: "tripled", start: 2.7, end: 3.2 },
+    { text: "300%", start: 3.2, end: 3.9 },
+  ]);
+
+  const beats = findBeats(spoken, 4, []);
+  assert(beats.length > 0, "there are beats in that");
+  // Sorted best-first, and the best one is the pause-then-figure.
+  assert(beats[0].score >= beats[beats.length - 1].score, "sorted best first");
+  assert(
+    beats[0].word === "Revenue" || beats[0].word === "300%",
+    `the strongest beat should be the pause or the figure, got ${beats[0].word}`
+  );
+
+  // "So" opens the sentence and carries nothing; it must not outrank a figure.
+  const weak = beats.find((b) => b.word === "So");
+  if (weak) assert(weak.score < beats[0].score, "a weak opener is not a beat worth taking");
+
+  assert(findBeats([], 10, []).length === 0, "no words, no beats");
+}
+
+{
+  // Spacing is the part that decides whether an edit reads as directed. Below
+  // about five seconds a zoom stops being emphasis and becomes a fault.
+  const dense: Beat[] = [];
+  for (let i = 0; i < 200; i += 1) {
+    dense.push({ at: i * 0.5, score: 100 - i, word: `w${i}` });
+  }
+  const placed = placePunchIns(dense, { duration: 120, perMinute: 2.5 });
+
+  assert(placed.length > 0, "something got placed");
+  assert(placed.length <= 6, `two and a half a minute over two minutes, got ${placed.length}`);
+
+  for (let i = 1; i < placed.length; i += 1) {
+    const gap = placed[i].start - placed[i - 1].start;
+    assert(gap >= 6 - 1e-9, `punches ${gap.toFixed(2)}s apart — too close to read as emphasis`);
+  }
+
+  // In order, and inside the video.
+  for (const p of placed) {
+    assert(p.end > p.start, "a punch must have length");
+    assert(p.end <= 120 + 1e-9, "and must end inside the video");
+  }
+
+  // Best-first, not chronological: taking the strongest beat and clearing its
+  // neighbourhood is what stops a merely-good moment displacing the best one.
+  assert(placed[0].beat.score >= 90, "the strongest beat survives the spacing");
+
+  // Degenerate asks produce nothing rather than throwing.
+  assert(placePunchIns([], { duration: 60 }).length === 0, "no beats, no punches");
+  assert(placePunchIns(dense, { duration: 0 }).length === 0, "no video, no punches");
+}
+
+/* ------------------------------ verification -------------------------------- */
+
+const world: PlanWorld = {
+  duration: 60,
+  boundaryCount: 2,
+  elementCount: 0,
+  subtitlesOn: false,
+  subtitlePosition: "bottom",
+  transcript: "[00:00] this is what was said in the video",
+  can: { generateImage: true, photoSearch: true },
+};
+
+{
+  // A shot past the end of the cut never plays, and a plan that claims to have
+  // reframed something while the video is unchanged is worse than a refusal.
+  const late = verifyPlan([{ op: "addShot", start: 90, end: 95, layout: "full" }], world);
+  assert(late.length > 0, "a shot past the end must be caught");
+
+  // Too short to read as anything but a glitch.
+  const blink = verifyPlan([{ op: "addShot", start: 5, end: 5.1, layout: "full" }], world);
+  assert(blink.length > 0, "a tenth of a second must be caught");
+
+  // A split screen with one plate would draw the footage into both halves,
+  // which is not what anyone asking for a split screen means.
+  const halfSplit = verifyPlan(
+    [{ op: "addShot", start: 5, end: 12, layout: "splitLeft", plates: [{ slot: 0 }] }],
+    world
+  );
+  assert(halfSplit.length > 0, "a two-region layout needs two plates");
+
+  // The same thing, said properly, passes.
+  const proper = verifyPlan(
+    [
+      {
+        op: "addShot",
+        start: 5,
+        end: 12,
+        layout: "splitLeft",
+        plates: [{ slot: 0 }, { slot: 1, source: "selfCrop" }],
+      },
+    ],
+    world
+  );
+  assert(proper.length === 0, `a well-formed split should pass, got ${JSON.stringify(proper)}`);
+
+  // Two shots over the same seconds: the store clips the earlier one, so the
+  // plan will do a step and a half of what it said it would.
+  const clash = verifyPlan(
+    [
+      { op: "addShot", start: 5, end: 15, layout: "full" },
+      { op: "addShot", start: 10, end: 20, layout: "full" },
+    ],
+    world
+  );
+  assert(clash.length > 0, "overlapping shots must be reported");
+
+  // Adjacent, not overlapping, is the normal way to cut and must pass.
+  const adjacent = verifyPlan(
+    [
+      { op: "addShot", start: 5, end: 10, layout: "full" },
+      { op: "addShot", start: 10, end: 15, layout: "full" },
+    ],
+    world
+  );
+  assert(adjacent.length === 0, `adjacent shots are fine, got ${JSON.stringify(adjacent)}`);
+
+  // Asking twice would land the second pass on top of the first.
+  const twice = verifyPlan([{ op: "autoPunchIns" }, { op: "autoPunchIns" }], world);
+  assert(twice.length > 0, "autoPunchIns twice must be caught");
+  assert(verifyPlan([{ op: "autoPunchIns" }], world).length === 0, "once is fine");
+}
+
+{
+  // The schema is the other half of the guard: a layout or camera kind that
+  // does not exist must not reach the executor.
+  const good = siftOps([
+    { op: "addShot", start: 1, end: 4, layout: "stack", plates: [{ slot: 0 }, { slot: 1 }] },
+    { op: "setCamera", start: 5, end: 8, camera: "punchIn" },
+  ]);
+  assert(good.ops.length === 2, `both should survive, got ${good.rejected.join("; ")}`);
+
+  const bad = siftOps([
+    { op: "addShot", start: 1, end: 4, layout: "hexagon" },
+    { op: "setCamera", start: 1, end: 4, camera: "barrel-roll" },
+    { op: "setCamera", start: 1, end: 4, camera: "punchIn", amount: 99 },
+  ]);
+  assert(bad.ops.length === 0, "none of those are real");
+  assert(bad.rejected.length === 3, `all three should be reported, got ${bad.rejected.length}`);
 }
 
 console.log("ALL SHOT TESTS PASSED");

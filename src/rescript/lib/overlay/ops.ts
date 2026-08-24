@@ -14,7 +14,10 @@ import { useEditorStore } from "../store";
 import { findFillerWordIds } from "../fillers";
 import { findSilenceRanges, MIN_SILENCE_DURATION } from "../silences";
 import { getCutRanges, originalToEdited } from "../edits";
-import { useOverlayStore } from "./store";
+import { currentComposition, useOverlayStore } from "./store";
+import { cameraFor, fitCamera } from "./camera";
+import { findBeats, placePunchIns } from "./emphasis";
+import { shotAt } from "./shots";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -29,14 +32,18 @@ import {
 } from "./presets";
 import { loadImage } from "./render";
 import type { AgentOp, PositionName, SizeName } from "./ops-schema";
-import type {
-  AnimationKind,
-  OverlayElement,
-  Rect,
-  SubtitleStyle,
-  TextElement,
-  Transition,
-  TransitionKind,
+import {
+  primaryPlate,
+  regionCount,
+  SHOT_LAYOUT_LABELS,
+  type AnimationKind,
+  type OverlayElement,
+  type Plate,
+  type Rect,
+  type SubtitleStyle,
+  type TextElement,
+  type Transition,
+  type TransitionKind,
 } from "./types";
 import {
   buildTimeline,
@@ -687,6 +694,140 @@ async function runOne(
           op.aspect === "source"
             ? "Frame back to the shape it was shot in"
             : `Frame is now ${op.aspect}`,
+      };
+    }
+
+    /* ---------------------------------- shots ---------------------------------- */
+
+    case "addShot": {
+      const start = Math.max(0, Math.min(op.start, ctx.duration));
+      const end = Math.max(start, Math.min(op.end, ctx.duration));
+      if (end - start < 0.2) {
+        return { ok: false, message: "That shot is too short to see." };
+      }
+
+      const specs = op.plates?.length ? op.plates : [{ slot: 0 }];
+      const want = regionCount(op.layout, specs.length);
+      const plates: Plate[] = [];
+
+      for (let slot = 0; slot < want; slot += 1) {
+        const spec = specs.find((p) => p.slot === slot) ?? specs[slot] ?? { slot };
+        const base = primaryPlate();
+        // `selfCrop` is the footage again, framed tighter — the cutaway that
+        // needs no provider and no upload, and the one an editor reaches for
+        // most. It is a camera choice, not a different source.
+        const isCrop = spec.source === "selfCrop";
+        const camera = fitCamera(
+          cameraFor({
+            kind: spec.camera ?? (isCrop ? "snap" : "hold"),
+            amount: spec.amount,
+            focusX: spec.focusX,
+            focusY: spec.focusY,
+          }),
+          end - start
+        );
+
+        plates.push({
+          ...base,
+          slot,
+          source:
+            spec.source === "solid"
+              ? { kind: "solid", color: spec.color ?? "#0a0a0a" }
+              : { kind: "primary" },
+          fit: spec.fit ?? base.fit,
+          camera,
+          radius: spec.radius ?? base.radius,
+        });
+      }
+
+      overlay.addShot({ start, end, layout: op.layout, plates });
+      return {
+        ok: true,
+        message: `${SHOT_LAYOUT_LABELS[op.layout]} from ${start.toFixed(1)}s to ${end.toFixed(1)}s`,
+      };
+    }
+
+    case "setCamera": {
+      const start = Math.max(0, Math.min(op.start, ctx.duration));
+      const end = Math.max(start, Math.min(op.end, ctx.duration));
+      if (end - start < 0.2) {
+        return { ok: false, message: "That is too short a stretch to move over." };
+      }
+
+      const camera = fitCamera(
+        cameraFor({
+          kind: op.camera,
+          amount: op.amount,
+          focusX: op.focusX,
+          focusY: op.focusY,
+        }),
+        end - start
+      );
+
+      // A camera note about a stretch with no shot on it is a request for one:
+      // refusing would be technically right and useless, since "push in here"
+      // means "make this a shot that pushes in".
+      const existing = shotAt({ ...currentComposition(), shots: overlay.shots }, start);
+      if (existing) {
+        overlay.setCamera(existing.id, 0, camera);
+      } else {
+        overlay.addShot({
+          start,
+          end,
+          layout: "full",
+          plates: [{ ...primaryPlate(), camera }],
+        });
+      }
+
+      return {
+        ok: true,
+        message:
+          op.camera === "hold"
+            ? `Camera holds from ${start.toFixed(1)}s`
+            : `${op.camera} at ${start.toFixed(1)}s`,
+      };
+    }
+
+    case "removeShot": {
+      const shot = shotAt({ ...currentComposition(), shots: overlay.shots }, op.at);
+      if (!shot) {
+        return { ok: false, message: `Nothing framed at ${op.at.toFixed(1)}s.` };
+      }
+      overlay.removeShot(shot.id);
+      return { ok: true, message: `Dropped the shot at ${op.at.toFixed(1)}s` };
+    }
+
+    case "autoPunchIns": {
+      const editor = useEditorStore.getState();
+      const beats = findBeats(editor.words, editor.duration, editor.manualCuts);
+      const placed = placePunchIns(beats, {
+        perMinute: op.perMinute,
+        duration: ctx.duration,
+      });
+
+      if (placed.length === 0) {
+        return {
+          ok: false,
+          message: "Nothing in the delivery asked to be punched in on.",
+        };
+      }
+
+      for (const punch of placed) {
+        const camera = fitCamera(
+          cameraFor({ kind: "punchIn", amount: op.amount }),
+          punch.end - punch.start
+        );
+        overlay.addShot({
+          start: punch.start,
+          end: punch.end,
+          layout: "full",
+          plates: [{ ...primaryPlate(), camera }],
+        });
+      }
+
+      return {
+        ok: true,
+        message: `${placed.length} punch-in${placed.length === 1 ? "" : "s"}, on the beats in the delivery`,
       };
     }
 

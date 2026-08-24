@@ -19,7 +19,14 @@ import {
   type Rect,
   type Transition,
   type TransitionKind,
+  primaryPlate,
+  regionCount,
+  type CameraMove,
+  type Plate,
+  type Shot,
+  type ShotLayout,
 } from "./types";
+import { normaliseShots } from "./shots";
 import { forgetImage, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
 
@@ -101,6 +108,23 @@ export interface OverlayState extends Composition {
   setTransition: (index: number, kind: TransitionKind, duration?: number) => void;
   setAllTransitions: (kind: TransitionKind, duration?: number) => void;
   replaceTransitions: (transitions: Transition[]) => void;
+
+  /**
+   * Add a shot over `start`–`end`, clipping whatever it overlaps.
+   *
+   * Returns the id. A shot with no plates is given a plain full-frame one, so
+   * the caller can add a shot first and decide what goes in it second — the
+   * order the UI naturally works in.
+   */
+  addShot: (shot: Omit<Shot, "id"> & { id?: string }) => string;
+  updateShot: (id: string, patch: Partial<Omit<Shot, "id">>) => void;
+  /** Patch one plate of a shot, by slot. */
+  setPlate: (id: string, slot: number, patch: Partial<Plate>) => void;
+  /** Change the layout, adding or trimming plates so the count matches. */
+  setLayout: (id: string, layout: ShotLayout) => void;
+  setCamera: (id: string, slot: number, camera: CameraMove) => void;
+  removeShot: (id: string) => void;
+  replaceShots: (shots: Shot[]) => void;
 
   loadComposition: (composition: Composition) => void;
   undo: () => void;
@@ -475,6 +499,56 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
 
     replaceTransitions: (transitions) =>
       commit({ transitions: [...transitions].sort((a, b) => a.index - b.index) }),
+
+    /* ---------------------------------- shots ---------------------------------- */
+
+    addShot: (input) => {
+      const id = input.id ?? nextId("shot");
+      const plates = input.plates?.length ? input.plates : [primaryPlate()];
+      const shot: Shot = { ...input, id, plates };
+      // Normalised on the way in rather than at read time: `shotAt` returns the
+      // first match, so an overlap left here would be silently invisible.
+      commit({ shots: normaliseShots([...get().shots, shot]) });
+      return id;
+    },
+
+    updateShot: (id, patch) => {
+      const shots = get().shots.map((s) => (s.id === id ? { ...s, ...patch } : s));
+      commit({ shots: normaliseShots(shots) });
+    },
+
+    setPlate: (id, slot, patch) => {
+      const shots = get().shots.map((s) => {
+        if (s.id !== id) return s;
+        const plates = s.plates.map((p) => (p.slot === slot ? { ...p, ...patch } : p));
+        return { ...s, plates };
+      });
+      commit({ shots });
+    },
+
+    setLayout: (id, layout) => {
+      const shots = get().shots.map((s) => {
+        if (s.id !== id) return s;
+        const want = regionCount(layout, s.plates.length);
+        const plates = s.plates.slice(0, want);
+        // Growing into a new layout fills the extra regions with the footage
+        // rather than with nothing: an empty half-frame reads as a bug, and
+        // "the same shot twice" is at least a picture someone can then change.
+        while (plates.length < want) {
+          plates.push({ ...primaryPlate(), slot: plates.length });
+        }
+        // Slots are re-seated because a plate list that survived a trim can
+        // otherwise carry a slot the new layout has no region for.
+        return { ...s, layout, plates: plates.map((p, i) => ({ ...p, slot: i })) };
+      });
+      commit({ shots });
+    },
+
+    setCamera: (id, slot, camera) => get().setPlate(id, slot, { camera }),
+
+    removeShot: (id) => commit({ shots: get().shots.filter((s) => s.id !== id) }),
+
+    replaceShots: (shots) => commit({ shots: normaliseShots(shots) }),
 
     loadComposition: (composition) => {
       const frame = composition.frame ?? { ...DEFAULT_FRAME };
