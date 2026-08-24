@@ -15,6 +15,7 @@ import {
 import type { MediaKind } from "./media";
 import type { ManualCut, SceneBoundary, SpeakerInfo, Word } from "./types";
 import type { Composition } from "./overlay/types";
+import type { ChatThread } from "./chat/store";
 
 const DB_NAME = "rescript-projects";
 const DB_VERSION = 1;
@@ -67,6 +68,15 @@ export interface ProjectRecord extends ProjectMeta {
    * nothing here.
    */
   assets?: Record<string, Blob>;
+  /**
+   * The AI panel's conversation about this project.
+   *
+   * Optional for the same reason `composition` is: saves written before it
+   * existed do not have one, and a project that was only ever cut by hand
+   * genuinely has none. Absent means "no conversation yet", never "keep
+   * whatever the last project was talking about".
+   */
+  chat?: ChatThread;
   /** Original media bytes. */
   media: Blob;
   /** MIME type used when reconstructing a File. */
@@ -209,6 +219,7 @@ export async function putProject(input: ProjectWrite): Promise<string> {
     speakers: input.speakers ?? [],
     composition: input.composition,
     assets: input.assets,
+    chat: input.chat,
     media: input.media,
     mediaType: input.mediaType,
     createdAt: createdAt ?? now,
@@ -248,4 +259,36 @@ export function fileFromProject(project: ProjectRecord): File {
     type: project.mediaType || project.media.type || undefined,
     lastModified: project.updatedAt,
   });
+}
+
+/* --------------------------- last opened project --------------------------- */
+
+/**
+ * Which project was open when the page went away.
+ *
+ * A refresh used to land on the upload screen with the work sitting in
+ * IndexedDB one click away but unannounced — the editor knew nothing about
+ * "the one you were just in". This is deliberately a localStorage id rather
+ * than an auto-open: reopening a large project decodes its media, and doing
+ * that unasked to someone who refreshed to get *out* of it would be worse than
+ * the cold start it replaces.
+ */
+const LAST_PROJECT_KEY = "rescript.lastProject";
+
+export function loadLastProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(LAST_PROJECT_KEY);
+  } catch {
+    return null; // private mode / blocked storage
+  }
+}
+
+export function saveLastProjectId(id: string | null) {
+  try {
+    if (id) window.localStorage.setItem(LAST_PROJECT_KEY, id);
+    else window.localStorage.removeItem(LAST_PROJECT_KEY);
+  } catch {
+    /* private mode / blocked storage */
+  }
 }

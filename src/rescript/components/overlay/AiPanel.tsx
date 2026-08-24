@@ -18,6 +18,12 @@ import {
   useOutputTimeline,
 } from "@/rescript/hooks/useOverlayTimeline";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
+import {
+  useChatStore,
+  type LogEntry,
+  type Proposal,
+  type ProposedStep,
+} from "@/rescript/lib/chat/store";
 import { runPlan, type OpResult } from "@/rescript/lib/overlay/ops";
 import { analyseFootage } from "@/rescript/lib/overlay/analysis";
 import { buildTimeline } from "@/rescript/lib/overlay/timeline";
@@ -35,26 +41,6 @@ import { MicButton } from "@/components/ui/mic-button";
  * with every step reported. Nothing is applied that the schema did not accept,
  * and a step that fails says so instead of failing silently.
  */
-
-interface LogEntry {
-  id: number;
-  kind: "you" | "summary" | "ok" | "fail" | "note" | "finding" | "look" | "warn";
-  text: string;
-}
-
-interface ProposedStep {
-  title: string;
-  detail: string;
-  ops: AgentOp[];
-}
-
-/** A proposal waiting to be accepted, in whole or in part. */
-interface Proposal {
-  summary: string;
-  steps: ProposedStep[];
-  /** Titles the person has unticked. */
-  declined: Set<number>;
-}
 
 /**
  * One click that does the whole job. Phrased as a sentence rather than wired to
@@ -195,27 +181,35 @@ async function consumeStream(
   return final;
 }
 
-let logSequence = 0;
-
 export default function AiPanel() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   /** What the agent is doing right now, and the reasoning behind it. */
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [thought, setThought] = useState("");
-  const [log, setLog] = useState<LogEntry[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
+  // The conversation lives in its own store so it survives a refresh with the
+  // rest of the project. See `lib/chat/store.ts`.
+  const log = useChatStore((s) => s.log);
+  const proposal = useChatStore((s) => s.proposal);
+  const append = useChatStore((s) => s.append);
+  const setProposal = useChatStore((s) => s.setProposal);
+  /**
+   * Toggle one step of the open proposal.
+   *
+   * Reads the proposal out of the store rather than closing over the rendered
+   * one: ticking two steps quickly would otherwise have the second click work
+   * from the state the first click replaced.
+   */
+  const setProposalWith = useCallback(
+    (update: (prev: Proposal | null) => Proposal | null) => {
+      const store = useChatStore.getState();
+      store.setProposal(update(store.proposal));
+    },
+    []
+  );
   const abortRef = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
-  /**
-   * What has been asked and what came of it, oldest first.
-   *
-   * A ref rather than state: nothing renders from it, and a follow-up sent
-   * while the previous answer is still landing must see the completed turn.
-   */
-  const historyRef = useRef<
-    { instruction: string; summary: string; outcome?: string }[]
-  >([]);
+
   /**
    * The current `submitText`, so the repair round can re-enter it.
    *
@@ -284,22 +278,19 @@ export default function AiPanel() {
     // view pinned to the bottom as it arrives, not only when a line is logged.
   }, [log, thought, agentStatus]);
 
-  // The conversation is about a particular video. Carrying it into the next one
-  // is the same mistake as carrying the captions: "make that bigger" would
-  // refer to an element that no longer exists, and the agent would be handed a
-  // history of edits made to something it can no longer see.
+  // The conversation is about a particular video, and carrying it into the next
+  // one is the same mistake as carrying the captions: "make that bigger" would
+  // refer to an element that no longer exists.
   //
-  // Driven by a store subscription rather than an effect on the value, so it
-  // fires on a *change* of media and not on the first render of every project.
+  // The clearing itself now belongs to the chat store, called from `loadVideo`,
+  // `openProject` and `reset` alongside the overlay store's — doing it here
+  // instead would also wipe the conversation `openProject` has just restored,
+  // since opening a project changes the media URL too. What is left here is the
+  // transient UI of a turn in flight, which is not persisted and not restored.
   useEffect(
     () =>
       useEditorStore.subscribe((state, previous) => {
         if (state.mediaUrl === previous.mediaUrl) return;
-        abortRef.current?.abort();
-        abortRef.current = null;
-        historyRef.current = [];
-        setLog([]);
-        setProposal(null);
         setBusy(false);
         setThought("");
         setAgentStatus(null);
@@ -307,9 +298,16 @@ export default function AiPanel() {
     []
   );
 
-  const append = useCallback((kind: LogEntry["kind"], text: string) => {
-    logSequence += 1;
-    setLog((prev) => [...prev.slice(-60), { id: logSequence, kind, text }]);
+  // The store aborts in-flight work when it is reset, but the controller lives
+  // here. Handing it over is what makes `useChatStore.reset()` safe to call
+  // from the editor store.
+  useEffect(() => {
+    const { setAbort } = useChatStore.getState();
+    setAbort(() => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    });
+    return () => setAbort(null);
   }, []);
 
   const buildTranscript = useCallback(() => {
@@ -354,10 +352,7 @@ export default function AiPanel() {
   /** Keep the turn, so the next one can refer to it. */
   const remember = useCallback(
     (instruction: string, summary: string, outcome?: string) => {
-      historyRef.current = [
-        ...historyRef.current,
-        { instruction, summary, outcome },
-      ].slice(-12);
+      useChatStore.getState().pushTurn({ instruction, summary, outcome });
     },
     []
   );
@@ -452,7 +447,7 @@ export default function AiPanel() {
           can,
         },
         mode,
-        history: historyRef.current.slice(-6),
+        history: useChatStore.getState().turns.slice(-6),
       };
 
       const res = await fetch("/api/rescript/agent", {
@@ -522,7 +517,7 @@ export default function AiPanel() {
           setProposal({
             summary: json.summary ?? "",
             steps: grouped,
-            declined: new Set(),
+            declined: [],
           });
           return;
         }
@@ -605,6 +600,7 @@ export default function AiPanel() {
     prompt,
     busy,
     append,
+    setProposal,
     remember,
     timeline,
     duration,
@@ -623,7 +619,9 @@ export default function AiPanel() {
   const applyProposal = useCallback(async () => {
     const current = proposal;
     if (!current || busy) return;
-    const accepted = current.steps.filter((_, i) => !current.declined.has(i));
+    const accepted = current.steps.filter(
+      (_, i) => !current.declined.includes(i)
+    );
     if (!accepted.length) return;
 
     const controller = new AbortController();
@@ -663,7 +661,7 @@ export default function AiPanel() {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [proposal, busy, append, playhead, aspect]);
+  }, [proposal, busy, append, setProposal, playhead, aspect]);
 
   const ready = status === "ready";
 
@@ -743,17 +741,17 @@ export default function AiPanel() {
 
           <ul className="mb-2.5 space-y-1">
             {proposal.steps.map((step, i) => {
-              const on = !proposal.declined.has(i);
+              const on = !proposal.declined.includes(i);
               return (
                 <li key={`${step.title}-${i}`}>
                   <button
                     type="button"
                     onClick={() =>
-                      setProposal((prev) => {
+                      setProposalWith((prev) => {
                         if (!prev) return prev;
-                        const declined = new Set(prev.declined);
-                        if (declined.has(i)) declined.delete(i);
-                        else declined.add(i);
+                        const declined = prev.declined.includes(i)
+                          ? prev.declined.filter((n) => n !== i)
+                          : [...prev.declined, i];
                         return { ...prev, declined };
                       })
                     }
@@ -795,13 +793,13 @@ export default function AiPanel() {
             <Button
               variant="solid"
               className="flex-1"
-              disabled={busy || proposal.declined.size === proposal.steps.length}
+              disabled={busy || proposal.declined.length === proposal.steps.length}
               onClick={() => void applyProposal()}
             >
               <Check size={12} />
               Apply{" "}
-              {proposal.declined.size
-                ? `${proposal.steps.length - proposal.declined.size} of ${proposal.steps.length}`
+              {proposal.declined.length
+                ? `${proposal.steps.length - proposal.declined.length} of ${proposal.steps.length}`
                 : "all"}
             </Button>
             <Button onClick={() => setProposal(null)} disabled={busy}>

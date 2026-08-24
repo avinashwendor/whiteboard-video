@@ -922,6 +922,22 @@ class ThinkingTap {
 }
 
 /**
+ * Is a zero-token stream failure worth one non-streaming retry?
+ *
+ * Only when the provider has not already made up its mind about the request. A
+ * 4xx is a verdict — malformed body, no credit, over the rate limit, context
+ * too long — and it will be the same verdict a second time. Anything else
+ * (a transport error, a 5xx, a deployment that simply does not stream) can
+ * legitimately succeed on the unstreamed path.
+ */
+function worthRetryingUnstreamed(err: unknown): boolean {
+  if (err instanceof AppError) {
+    return err.status < 400 || err.status >= 500;
+  }
+  return true;
+}
+
+/**
  * One model turn, streamed where possible.
  *
  * Falls back to the non-streaming call if the deployment behind the id will not
@@ -945,8 +961,13 @@ async function runTurn(
     }
   } catch (err) {
     if (text) throw err;
-    // Nothing arrived at all: this is a provider that will not stream, not a
-    // failed generation. Ask for it the old way rather than failing the turn.
+    // Nothing arrived at all. That is *usually* a provider which will not
+    // stream, in which case asking again the old way is right — but it is also
+    // what a rejected request looks like, and those are rejected identically
+    // the second time. Retrying a 400 or a 429 bought nothing and cost a second
+    // billed call, so the retry is limited to failures that are plausibly about
+    // streaming rather than about the request.
+    if (!worthRetryingUnstreamed(err)) throw err;
     return (await omega.generateText(input)).text;
   }
   return text;

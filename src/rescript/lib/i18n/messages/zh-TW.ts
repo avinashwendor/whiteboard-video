@@ -27,6 +27,7 @@ export const zhTW: Record<MessageKey, string> = {
   "model.language": "語言",
   "model.transcriptLanguage": "逐字稿語言",
   "model.importTranscript": "匯入逐字稿",
+  "upload.continueProject": "繼續上次的專案",
   "upload.recentProjects": "最近專案",
   "upload.removeRecent": "從最近專案移除",
   "upload.dropPrefix": "將影片或音訊檔拖到這裡，或",

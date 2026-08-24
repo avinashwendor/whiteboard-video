@@ -377,12 +377,57 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  /**
+   * Write every pending edit straight to localStorage, without waiting.
+   *
+   * The debounce above holds an edit for 400 ms, and the cleanup below only
+   * cleared its timer — so refreshing within 400 ms of the last keystroke
+   * dropped that edit silently. This is the synchronous half of the same
+   * write: it skips `cacheGeneration`, because copying asset bytes into
+   * IndexedDB is asynchronous and a page being torn down will not wait for it.
+   * The text edit is what was being lost, and the text edit survives; a picture
+   * generated in the same 400 ms may still need its next save to be cached,
+   * exactly as it did before the debounce elapsed.
+   */
+  const flushPendingEdits = useCallback(() => {
+    const timers = editTimers.current;
+    const drafts = editDrafts.current;
+    if (drafts.size === 0) return;
+
+    const stored = loadHistory();
+    for (const [generationId, draft] of drafts) {
+      const timer = timers.get(generationId);
+      if (timer) {
+        clearTimeout(timer);
+        timers.delete(generationId);
+      }
+      const entry = stored.find((row) => row.id === generationId);
+      if (!entry) continue;
+      saveGeneration({ ...entry, project: draft });
+    }
+    drafts.clear();
+  }, []);
+
   useEffect(() => {
     const timers = editTimers.current;
+    // `pagehide` rather than `beforeunload`: it is the one that fires when a
+    // mobile browser backgrounds the tab, which is the common way work is lost.
+    // `visibilitychange` covers the tab being hidden without being unloaded.
+    const onHide = () => flushPendingEdits();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushPendingEdits();
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      // Unmounting is also a loss of the pending write, not just a cancelled
+      // timer — flush before dropping the timers on the floor.
+      flushPendingEdits();
       for (const timer of timers.values()) clearTimeout(timer);
     };
-  }, []);
+  }, [flushPendingEdits]);
 
   /* --------------------------------- runners -------------------------------- */
 

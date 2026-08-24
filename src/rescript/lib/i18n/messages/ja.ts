@@ -27,6 +27,7 @@ export const ja: Record<MessageKey, string> = {
   "model.language": "言語",
   "model.transcriptLanguage": "文字起こし言語",
   "model.importTranscript": "文字起こしをインポート",
+  "upload.continueProject": "続きから再開",
   "upload.recentProjects": "最近のプロジェクト",
   "upload.removeRecent": "最近の項目から削除",
   "upload.dropPrefix": "動画または音声ファイルをここにドロップ、または",

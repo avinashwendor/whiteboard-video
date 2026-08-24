@@ -43,10 +43,13 @@ import {
   deleteProject,
   fileFromProject,
   getProject,
+  loadLastProjectId,
+  saveLastProjectId,
   type ProjectRecord,
 } from "./projects";
 import type { Composition } from "./overlay/types";
 import { useOverlayStore } from "./overlay/store";
+import { useChatStore } from "./chat/store";
 import {
   addSpeaker as addSpeakerEntry,
   findSpeakerByName,
@@ -426,8 +429,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (prev) URL.revokeObjectURL(prev);
     // Captions, overlays, transitions and the frame belong to the project that
     // was open, not to the editor. Loading different media without this is what
-    // put the last video's subtitles over the new one.
+    // put the last video's subtitles over the new one. The conversation goes
+    // the same way: "make that bigger" cannot follow you to a different video.
     useOverlayStore.getState().reset();
+    useChatStore.getState().reset();
     const current = get().source;
     const speakers = imported
       ? speakersFromWords(imported, options?.speakers ?? [])
@@ -491,6 +496,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (record.composition) {
       overlay.loadComposition(rehydrateComposition(record));
     }
+    // Clear-then-restore, for the same reason: a project saved before the chat
+    // was persisted has none, and "none" must mean an empty conversation.
+    const chat = useChatStore.getState();
+    chat.reset();
+    if (record.chat) chat.hydrate(record.chat);
+    saveLastProjectId(record.id);
     const manualCuts = record.manualCuts ?? [];
     const sceneBoundaries = record.sceneBoundaries ?? [];
     const speakers = speakersFromWords(record.words, record.speakers ?? []);
@@ -533,6 +544,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   removeProject: async (id) => {
     await deleteProject(id);
+    if (loadLastProjectId() === id) saveLastProjectId(null);
     if (get().projectId === id) {
       get().reset();
     }
@@ -1037,6 +1049,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   reset: () => {
     useOverlayStore.getState().reset();
+    useChatStore.getState().reset();
+    saveLastProjectId(null);
     const { mediaUrl, exportUrl } = get();
     if (mediaUrl) URL.revokeObjectURL(mediaUrl);
     if (exportUrl) URL.revokeObjectURL(exportUrl);

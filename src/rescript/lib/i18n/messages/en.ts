@@ -26,6 +26,7 @@ export const en = {
   "model.language": "Language",
   "model.transcriptLanguage": "Transcript language",
   "model.importTranscript": "Import transcript",
+  "upload.continueProject": "Continue where you left off",
   "upload.recentProjects": "Recent projects",
   "upload.removeRecent": "Remove from recent",
   "upload.dropPrefix": "Drop a video or audio file here, or",
