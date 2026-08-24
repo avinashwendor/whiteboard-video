@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Camera,
   Captions,
   Crop,
   Layers,
@@ -16,6 +17,7 @@ import AiPanel from "./AiPanel";
 import ElementsPanel from "./ElementsPanel";
 import FramePanel from "./FramePanel";
 import InspectorPanel from "./InspectorPanel";
+import ShotsPanel from "./ShotsPanel";
 import SubtitlesPanel from "./SubtitlesPanel";
 import TransitionsPanel from "./TransitionsPanel";
 
@@ -29,12 +31,23 @@ import TransitionsPanel from "./TransitionsPanel";
  * it.
  */
 
-type Tab = "ai" | "elements" | "style" | "subtitles" | "transitions" | "frame";
+type Tab =
+  | "ai"
+  | "elements"
+  | "style"
+  | "shots"
+  | "subtitles"
+  | "transitions"
+  | "frame";
 
 const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   { id: "ai", label: "AI", icon: Sparkles },
   { id: "elements", label: "Add", icon: Layers },
   { id: "style", label: "Style", icon: SlidersHorizontal },
+  // Beside Style rather than beside Frame: a shot is a decision about a moment,
+  // which is the half of the editor Style lives in. Frame is the shape of the
+  // whole file, and is set once.
+  { id: "shots", label: "Shots", icon: Camera },
   { id: "subtitles", label: "Subs", icon: Captions },
   { id: "transitions", label: "Cuts", icon: Shuffle },
   { id: "frame", label: "Frame", icon: Crop },
@@ -105,6 +118,7 @@ export default function Sidebar() {
       {tab === "ai" && <AiPanel />}
       {tab === "elements" && <ElementsPanel />}
       {tab === "style" && <InspectorPanel />}
+      {tab === "shots" && <ShotsPanel />}
       {tab === "subtitles" && <SubtitlesPanel />}
       {tab === "transitions" && <TransitionsPanel />}
       {tab === "frame" && <FramePanel />}
