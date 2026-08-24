@@ -29,6 +29,16 @@ export interface TextGenerationInput {
   /** Ask the provider for a JSON object response where supported. */
   json?: boolean;
   signal?: AbortSignal;
+  /**
+   * Told what the provider reported about the call itself.
+   *
+   * `streamText` yields text and only text, so a caller that streams had no way
+   * to learn why generation stopped — and `finish_reason: "length"` is the
+   * difference between a reply that is malformed and one that was cut off,
+   * which are worth handling differently and were previously guessed at.
+   * Called at most once, after the last token.
+   */
+  onMeta?: (meta: { finishReason?: string; usage?: TokenUsage }) => void;
 }
 
 export interface TokenUsage {

@@ -30,6 +30,7 @@ import { buildTimeline } from "@/rescript/lib/overlay/timeline";
 import type { AgentOp } from "@/rescript/lib/overlay/ops-schema";
 import { Button, Empty, formatSeconds } from "./ui";
 import { MicButton } from "@/components/ui/mic-button";
+import { loadAgentModel, saveAgentModel } from "@/rescript/lib/agent-model";
 
 /**
  * The prompt surface.
@@ -94,6 +95,7 @@ type AgentEvent =
   | { type: "verify"; problems: number }
   | { type: "repair"; problems: string[] }
   | { type: "retry"; reason: string }
+  | { type: "trim"; dropped: number; digested: number; tokens: number }
   | ({ type: "plan" } & PlanReply)
   | ({ type: "error" } & PlanReply);
 
@@ -111,6 +113,8 @@ async function consumeStream(
     onStatus: (status: string | null) => void;
     onThinking: (text: string) => void;
     onLook: (detail: string) => void;
+    /** Something the person should know, but that is not a result. */
+    onNote: (text: string) => void;
   }
 ): Promise<PlanReply | null> {
   const body = res.body;
@@ -156,9 +160,29 @@ async function consumeStream(
         handlers.onStatus("Fixing the plan…");
         break;
       case "retry":
-        handlers.onStatus("That reply couldn't be used — asking again…");
+        // The reason is written server-side and is the only thing that
+        // distinguishes an unusable reply from a conversation too long to read.
+        handlers.onStatus(
+          event.reason
+            ? `${event.reason} — asking again…`
+            : "That reply couldn't be used — asking again…"
+        );
+        break;
+      case "trim":
+        // Worth saying out loud. The alternative is an agent that quietly
+        // answers from less than it was given, which reads as forgetfulness.
+        handlers.onNote(
+          event.dropped
+            ? `The conversation got long — dropped ${event.dropped} older ${
+                event.dropped === 1 ? "message" : "messages"
+              } to fit.`
+            : "The conversation got long — shortened some older messages to fit."
+        );
         break;
       default:
+        // Anything unrecognised is the final reply. A new event type that is
+        // not handled above therefore ends the stream holding a plan-shaped
+        // object that is not a plan, which is why every case is explicit.
         final = event;
         break;
     }
@@ -245,6 +269,9 @@ export default function AiPanel() {
   );
 
   const [can, setCan] = useState({ generateImage: true, photoSearch: false });
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  /** "" means the server picks, which is what this panel always did before. */
+  const [model, setModel] = useState<string>(() => loadAgentModel());
 
   // What this deployment can actually do decides what the model is allowed to
   // plan, so it is read once rather than guessed at per request.
@@ -267,6 +294,22 @@ export default function AiPanel() {
         // Leaving the defaults is right: a failed probe should not disable the
         // feature, it should let the actual request report the actual problem.
       });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The catalogue is what the account actually exposes, so it is asked for
+  // rather than hardcoded. A failure leaves the picker empty and the panel on
+  // the server's default — which is exactly the old behaviour.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/models?provider=omega")
+      .then((r) => r.json())
+      .then((json: { models?: { id: string; label: string }[] }) => {
+        if (alive) setModels(json.models ?? []);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -448,6 +491,9 @@ export default function AiPanel() {
         },
         mode,
         history: useChatStore.getState().turns.slice(-6),
+        // Omitted rather than empty: the schema treats absent as "the server
+        // picks", which is what this panel did before there was a picker.
+        model: model || undefined,
       };
 
       const res = await fetch("/api/rescript/agent", {
@@ -470,6 +516,7 @@ export default function AiPanel() {
           reported.add(detail);
           append("look", detail);
         },
+        onNote: (text) => append("note", text),
       });
 
       if (!res.ok || !json || !json.success) {
@@ -599,6 +646,7 @@ export default function AiPanel() {
   }, [
     prompt,
     busy,
+    model,
     append,
     setProposal,
     remember,
@@ -854,18 +902,40 @@ export default function AiPanel() {
             )}
           </div>
         </div>
-        <p className="mt-1.5 px-1 text-[10px] text-zinc-400 dark:text-zinc-600">
-          {busy ? (
-            <span className="flex items-center gap-1.5">
-              <Loader2 size={10} className="animate-spin" />
-              {agentStatus ?? "Working…"}
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5">
-              <Sparkles size={10} /> Enter to send · Shift+Enter for a new line
-            </span>
+        <div className="mt-1.5 flex items-center justify-between gap-2 px-1">
+          <p className="min-w-0 flex-1 truncate text-[10px] text-zinc-400 dark:text-zinc-600">
+            {busy ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={10} className="animate-spin" />
+                {agentStatus ?? "Working…"}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Sparkles size={10} /> Enter to send · Shift+Enter for a new line
+              </span>
+            )}
+          </p>
+          {models.length > 0 && (
+            <select
+              value={model}
+              aria-label="Model"
+              title="Which model plans the edit"
+              disabled={busy}
+              onChange={(e) => {
+                setModel(e.target.value);
+                saveAgentModel(e.target.value);
+              }}
+              className="max-w-[45%] shrink-0 cursor-pointer truncate rounded-md border border-transparent bg-transparent py-0.5 text-[10px] text-zinc-400 outline-none transition hover:border-zinc-200 hover:text-zinc-600 focus:border-zinc-300 disabled:opacity-50 dark:text-zinc-600 dark:hover:border-zinc-700 dark:hover:text-zinc-300 dark:focus:border-zinc-600"
+            >
+              <option value="">Default model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );

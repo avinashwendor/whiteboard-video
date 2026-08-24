@@ -11,6 +11,7 @@ export type AppErrorCode =
   | "malformed_response"
   | "unsupported"
   | "out_of_credit"
+  | "context_overflow"
   | "busy";
 
 const USER_MESSAGE: Record<AppErrorCode, string> = {
@@ -23,6 +24,8 @@ const USER_MESSAGE: Record<AppErrorCode, string> = {
   unsupported: "That option isn't supported right now.",
   out_of_credit:
     "The provider account is out of credit, so this step can't run. Top it up or switch providers.",
+  context_overflow:
+    "This conversation has grown longer than the model can read. Start a new thread, or ask for a smaller change.",
   busy: "A generation is already running. Wait for it to finish.",
 };
 
@@ -35,6 +38,10 @@ const STATUS: Record<AppErrorCode, number> = {
   malformed_response: 502,
   unsupported: 400,
   out_of_credit: 402,
+  // Still a rejected request as far as HTTP is concerned; the separate code
+  // exists so the person is told something they can act on, rather than being
+  // asked to fix a request that was not malformed.
+  context_overflow: 400,
   busy: 409,
 };
 
@@ -67,6 +74,30 @@ export function toAppError(err: unknown, fallback: AppErrorCode = "provider_erro
   return new AppError(fallback, {
     detail: err instanceof Error ? err.message : String(err),
   });
+}
+
+/**
+ * Does this provider rejection look like "too long" rather than "malformed"?
+ *
+ * Both arrive as a 400 and the two are indistinguishable at the UI, which is
+ * why a context overflow used to read as *"That request wasn't valid. Adjust it
+ * and try again"* — advice that cannot be followed. The strings are what the
+ * OpenAI-compatible fleet actually says; a miss costs the old behaviour, not a
+ * new one.
+ */
+export function looksLikeContextOverflow(detail: string | undefined): boolean {
+  if (!detail) return false;
+  const text = detail.toLowerCase();
+  return (
+    text.includes("context_length_exceeded") ||
+    text.includes("context length") ||
+    text.includes("context window") ||
+    text.includes("maximum context") ||
+    text.includes("too many tokens") ||
+    text.includes("prompt is too long") ||
+    (text.includes("max_tokens") && text.includes("exceed")) ||
+    (text.includes("tokens") && text.includes("exceeds"))
+  );
 }
 
 /** Maps a provider HTTP status onto our code space. */

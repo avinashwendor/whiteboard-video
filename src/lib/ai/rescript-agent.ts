@@ -1,6 +1,7 @@
 import { omega } from "./omega";
 import type { ChatMessage, TextGenerationInput } from "./types";
 import { AppError } from "@/lib/utils/errors";
+import { inputBudget, packMessages } from "./budget";
 import {
   agentPlanSchema,
   siftOps,
@@ -838,7 +839,9 @@ export type AgentEvent =
   | { type: "look"; tool: string; detail: string }
   | { type: "verify"; problems: number }
   | { type: "repair"; problems: string[] }
-  | { type: "retry"; reason: string };
+  | { type: "retry"; reason: string }
+  /** The conversation was shortened to fit the model's context window. */
+  | { type: "trim"; dropped: number; digested: number; tokens: number };
 
 /**
  * Pulls the `thinking` field out of a JSON object that is still arriving.
@@ -1203,24 +1206,95 @@ ${
 
   const emit = input.onEvent;
 
-  for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-    emit?.({ type: "turn", index: turn });
+  /**
+   * The first two messages are never trimmed.
+   *
+   * The system prompt is the operation vocabulary and the house style; the
+   * brief is the project itself. Shortening either does not shorten the
+   * conversation, it lobotomises it — the model would still answer, in a
+   * vocabulary it no longer has.
+   */
+  const PINNED = 2;
 
+  /**
+   * Ask the model, having first made the conversation fit.
+   *
+   * `squeeze` shrinks the budget below what the model claims to take. It is
+   * only ever above zero on the one retry after a rejection for length: the
+   * table in `budget.ts` holds floors rather than the vendors' advertised
+   * maxima, and a model whose real window is smaller than its entry is exactly
+   * the case that estimate cannot catch.
+   */
+  const ask = async (
+    turn: number,
+    squeeze = 1
+  ): Promise<{ text: string; finishReason?: string }> => {
+    const maxTokens = 12_000;
+    const budget = Math.floor(inputBudget(input.model, maxTokens) * squeeze);
+    const packed = packMessages({
+      pinned: messages.slice(0, PINNED),
+      body: messages.slice(PINNED),
+      budget,
+      keepRecent: 4,
+    });
+
+    if (packed.dropped || packed.digested) {
+      emit?.({
+        type: "trim",
+        dropped: packed.dropped,
+        digested: packed.digested,
+        tokens: packed.tokens,
+      });
+    }
+
+    let finishReason: string | undefined;
     const text = await runTurn(
       {
-        messages,
+        messages: packed.messages,
         model: input.model,
         // Cooler on a retry: the first attempt is allowed some judgement, a
         // second one is being asked to comply with something specific.
         temperature: turn === 0 ? 0.35 : 0.15,
-        maxTokens: 12_000,
+        maxTokens,
         json: true,
         signal: input.signal,
+        onMeta: (meta) => {
+          finishReason = meta.finishReason;
+        },
       },
       emit,
       input.generate
     );
-    const result = { text };
+    return { text, finishReason };
+  };
+
+  for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+    emit?.({ type: "turn", index: turn });
+
+    let result: { text: string; finishReason?: string };
+    try {
+      result = await ask(turn);
+    } catch (err) {
+      // A rejection for length is the one provider error worth answering
+      // rather than surrendering to: the estimate was wrong, so make the same
+      // request from less. Everything else is a verdict — no credit, no key,
+      // over the rate limit — and asking again would only spend another call
+      // on the same answer.
+      if (!(err instanceof AppError) || err.code !== "context_overflow") throw err;
+      emit?.({ type: "retry", reason: "the conversation was too long to read" });
+      result = await ask(turn, 0.6);
+    }
+
+    /**
+     * The provider says the reply hit the output ceiling.
+     *
+     * Previously this was only ever inferred — from a reply that was all
+     * reasoning, or from a parse that failed on an unterminated object. Both
+     * heuristics still stand, because a stub model and some deployments report
+     * nothing; this just makes the common case certain instead of guessed, and
+     * changes what the model is told to do about it.
+     */
+    const truncated = result.finishReason === "length";
 
     const reply = parseReply(result.text);
     // Set RESCRIPT_AGENT_DEBUG to a path to see what the model actually said.
@@ -1320,7 +1394,9 @@ ${
     if (!reply.plan || !reply.plan.success) {
       emit?.({
         type: "retry",
-        reason: reply.problem ?? "the reply could not be used",
+        reason: truncated
+          ? "the reply ran out of room before it finished"
+          : (reply.problem ?? "the reply could not be used"),
       });
       problem =
         reply.problem ??
@@ -1330,7 +1406,9 @@ ${
       messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
       messages.push({
         role: "user",
-        content: `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
+        content: truncated
+          ? `That reply was cut off before it finished — it ran past the output budget, so what arrived was incomplete (${problem}). Send the same plan again, shorter: one sentence of "thinking", and fewer, larger steps.`
+          : `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
       });
       continue;
     }
