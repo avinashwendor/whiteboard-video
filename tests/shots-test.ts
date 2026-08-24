@@ -164,6 +164,7 @@ function composition(shots: Shot[]): Composition {
     transitions: [],
     frame: { ...DEFAULT_FRAME },
     shots,
+    grade: null,
   };
 }
 

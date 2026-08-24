@@ -135,6 +135,8 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   /** Shot windows the plan lays down, so overlaps between them can be caught. */
   const shotWindows: { op: string; start: number; end: number }[] = [];
   let autoPunches = 0;
+  /** Whole-video grades. A second one silently replaces the first. */
+  let gradeCount = 0;
 
   /**
    * How long the video is by this point in the plan — as an upper bound.
@@ -343,6 +345,23 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
         break;
 
       case "setFrame":
+        break;
+
+      case "setGrade":
+        // A look on a stretch with no shot on it would silently do nothing, and
+        // "I graded that cutaway" with an ungraded cutaway on screen is a plan
+        // that lied about what it did.
+        if (op.at !== undefined && op.at >= remaining) {
+          problems.push(
+            `setGrade at ${op.at.toFixed(1)}s is past the end of the finished video.`
+          );
+        }
+        if (gradeCount > 0 && op.at === undefined) {
+          problems.push(
+            "The whole video is graded more than once; only the last one would survive."
+          );
+        }
+        if (op.at === undefined) gradeCount += 1;
         break;
 
       case "addShot":

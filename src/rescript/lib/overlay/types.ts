@@ -15,6 +15,8 @@
  * definition of what a composition looks like.
  */
 
+import { isNeutralGrade, type GradeSpec } from "./grade";
+
 /** Normalised rectangle: 0..1 of the frame, origin top-left. */
 export interface Rect {
   x: number;
@@ -399,6 +401,14 @@ export interface Shot {
   end: number;
   layout: ShotLayout;
   plates: Plate[];
+  /**
+   * A look for this stretch only. Absent means the project's.
+   *
+   * Per-shot rather than only per-project because a cutaway to different
+   * footage is the one place a single look genuinely does not fit — the two
+   * cameras were never going to match out of the box.
+   */
+  grade?: GradeSpec | null;
 }
 
 /** A full-frame plate of the footage, framed as shot. The default everything. */
@@ -429,6 +439,13 @@ export interface Composition {
    * does not have one and must keep rendering identically.
    */
   shots: Shot[];
+  /**
+   * The look, applied to the footage and never to the overlays.
+   *
+   * Optional for the same reason as `shots`: absent means neutral, which is
+   * what every project made before this rendered as.
+   */
+  grade?: GradeSpec | null;
 }
 
 export function emptyComposition(): Composition {
@@ -443,6 +460,7 @@ export function emptyComposition(): Composition {
     transitions: [],
     frame: { ...DEFAULT_FRAME },
     shots: [],
+    grade: null,
   };
 }
 
@@ -493,6 +511,7 @@ export function isEmptyComposition(
     (!c.subtitles.enabled || c.subtitles.cues.length === 0) &&
     c.transitions.every((t) => t.kind === "none" || t.duration <= 0) &&
     shotsAreIdle(c.shots) &&
+    isNeutralGrade(c.grade) &&
     !frameReframes(c.frame ?? DEFAULT_FRAME, sourceAspect)
   );
 }

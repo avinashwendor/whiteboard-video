@@ -18,6 +18,7 @@ import { currentComposition, useOverlayStore } from "./store";
 import { cameraFor, fitCamera } from "./camera";
 import { findBeats, placePunchIns } from "./emphasis";
 import { shotAt } from "./shots";
+import { gradePreset, NEUTRAL_GRADE } from "./grade";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -828,6 +829,43 @@ async function runOne(
       return {
         ok: true,
         message: `${placed.length} punch-in${placed.length === 1 ? "" : "s"}, on the beats in the delivery`,
+      };
+    }
+
+    case "setGrade": {
+      const base = gradePreset(op.preset) ?? NEUTRAL_GRADE;
+      const patch = {
+        ...base,
+        ...(op.exposure !== undefined ? { exposure: op.exposure } : {}),
+        ...(op.contrast !== undefined ? { contrast: op.contrast } : {}),
+        ...(op.saturation !== undefined ? { saturation: op.saturation } : {}),
+        ...(op.temperature !== undefined ? { temperature: op.temperature } : {}),
+        ...(op.vignette !== undefined ? { vignette: op.vignette } : {}),
+        ...(op.grain !== undefined ? { grain: op.grain } : {}),
+      };
+
+      if (op.at === undefined) {
+        overlay.setGrade(op.preset === "none" ? null : patch);
+        return {
+          ok: true,
+          message:
+            op.preset === "none"
+              ? "Look back to neutral"
+              : `“${op.preset}” over the whole video`,
+        };
+      }
+
+      const shot = shotAt({ ...currentComposition(), shots: overlay.shots }, op.at);
+      if (!shot) {
+        return {
+          ok: false,
+          message: `Nothing framed at ${op.at.toFixed(1)}s to grade on its own.`,
+        };
+      }
+      overlay.setGrade(op.preset === "none" ? null : patch, shot.id);
+      return {
+        ok: true,
+        message: `“${op.preset}” on the shot at ${op.at.toFixed(1)}s`,
       };
     }
 

@@ -11,6 +11,7 @@
 import { paintComposition, type FrameSize } from "./render";
 import type { ActiveTransition } from "./timeline";
 import { frameForPlate, plateRect, regionsFor, shotAt } from "./shots";
+import { paintGrade, withGrade, type GradeSpec } from "./grade";
 import {
   DEFAULT_FRAME,
   type Composition,
@@ -149,12 +150,18 @@ function drawSource(
   frame: FrameSpec,
   scale = 1,
   dx = 0,
-  dy = 0
+  dy = 0,
+  grade?: GradeSpec | null
 ) {
   const intrinsic = sourceSize(src);
   if (!intrinsic) return;
   const spot = placement(intrinsic, size, frame, frame.fit, scale);
-  ctx.drawImage(src, spot.x + dx, spot.y + dy, spot.w, spot.h);
+  // Composed with whatever filter is already set rather than replacing it: a
+  // dip transition has a blur on the context at this point, and a grade that
+  // silently cancelled it would turn a blur-through into a hard cut.
+  withGrade(ctx, grade, () =>
+    ctx.drawImage(src, spot.x + dx, spot.y + dy, spot.w, spot.h)
+  );
 }
 
 /** Peaks at 1 in the middle of the window and returns to 0 at both ends. */
@@ -218,7 +225,8 @@ function paintPlate(
   size: FrameSize,
   base: FrameSpec,
   sources: FrameSources,
-  t: number
+  t: number,
+  grade: GradeSpec | null | undefined
 ) {
   const box = pixels(rect, size);
   if (box.w < 1 || box.h < 1) return;
@@ -244,7 +252,7 @@ function paintPlate(
   if (src) {
     const spec = frameForPlate(base, plate, shot, t);
     drawBackdrop(ctx, src, region, spec);
-    drawSource(ctx, src, region, spec);
+    drawSource(ctx, src, region, spec, 1, 0, 0, grade);
   }
 
   ctx.restore();
@@ -261,7 +269,8 @@ function paintVideoLayer(
   active: ActiveTransition | null,
   frame: FrameSpec,
   shot: Shot | null,
-  t: number
+  t: number,
+  grade: GradeSpec | null | undefined
 ) {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, size.width, size.height);
@@ -279,7 +288,7 @@ function paintVideoLayer(
     // arrives out of order still puts the bubble in front of the screen.
     const ordered = [...shot.plates].sort((a, b) => a.slot - b.slot);
     for (const plate of ordered) {
-      paintPlate(ctx, plate, shot, plateRect(plate, regions), size, frame, sources, t);
+      paintPlate(ctx, plate, shot, plateRect(plate, regions), size, frame, sources, t, grade);
     }
     return;
   }
@@ -292,7 +301,7 @@ function paintVideoLayer(
   if (backdropFrom) drawBackdrop(ctx, backdropFrom, size, frame);
 
   if (!active) {
-    if (live) drawSource(ctx, live, size, frame);
+    if (live) drawSource(ctx, live, size, frame, 1, 0, 0, grade);
     return;
   }
 
@@ -303,7 +312,7 @@ function paintVideoLayer(
       ctx.filter = `blur(${intensity * size.height * 0.035}px)`;
     }
     const scale = active.kind === "zoomIn" ? 1 + 0.28 * intensity : 1;
-    if (live) drawSource(ctx, live, size, frame, scale);
+    if (live) drawSource(ctx, live, size, frame, scale, 0, 0, grade);
     ctx.restore();
     ctx.filter = "none";
 
@@ -320,7 +329,7 @@ function paintVideoLayer(
   // push: the incoming clip is live underneath, the held outgoing frame moves
   // off over it. Without a freeze there is nothing to move, so it plays as a
   // straight cut — which is the honest degradation.
-  if (live) drawSource(ctx, live, size, frame);
+  if (live) drawSource(ctx, live, size, frame, 1, 0, 0, grade);
   if (!freeze) return;
 
   const p = easeOut(active.progress);
@@ -328,23 +337,23 @@ function paintVideoLayer(
   switch (active.kind) {
     case "dissolve":
       ctx.globalAlpha = 1 - p;
-      drawSource(ctx, freeze, size, frame);
+      drawSource(ctx, freeze, size, frame, 1, 0, 0, grade);
       break;
     case "zoomOut":
       ctx.globalAlpha = 1 - p;
-      drawSource(ctx, freeze, size, frame, 1 + 0.35 * p);
+      drawSource(ctx, freeze, size, frame, 1 + 0.35 * p, 0, 0, grade);
       break;
     case "slideLeft":
-      drawSource(ctx, freeze, size, frame, 1, -size.width * p, 0);
+      drawSource(ctx, freeze, size, frame, 1, -size.width * p, 0, grade);
       break;
     case "slideRight":
-      drawSource(ctx, freeze, size, frame, 1, size.width * p, 0);
+      drawSource(ctx, freeze, size, frame, 1, size.width * p, 0, grade);
       break;
     case "slideUp":
-      drawSource(ctx, freeze, size, frame, 1, 0, -size.height * p);
+      drawSource(ctx, freeze, size, frame, 1, 0, -size.height * p, grade);
       break;
     case "slideDown":
-      drawSource(ctx, freeze, size, frame, 1, 0, size.height * p);
+      drawSource(ctx, freeze, size, frame, 1, 0, size.height * p, grade);
       break;
     default:
       break;
@@ -367,14 +376,25 @@ export function paintFrame(
   // A composition restored from an older save has no frame and no shots;
   // falling back keeps it rendering exactly as it did rather than throwing on
   // the first paint.
+  const shot = shotAt(composition, t);
+  // A shot's own look wins over the project's, and `null` on a shot means
+  // "neutral here" rather than "inherit" — a cutaway that has to be left alone
+  // needs to be able to say so.
+  const grade = shot && shot.grade !== undefined ? shot.grade : composition.grade;
+
   paintVideoLayer(
     ctx,
     size,
     sources,
     active,
     composition.frame ?? DEFAULT_FRAME,
-    shotAt(composition, t),
-    t
+    shot,
+    t,
+    grade
   );
+  // Between the picture and the overlays: a grade treats the footage, and you
+  // do not grade your own captions. Text gone muddy under a look someone
+  // applied to the footage is an hour lost in the wrong panel.
+  paintGrade(ctx, size, grade, t);
   paintComposition(ctx, composition, size, t);
 }

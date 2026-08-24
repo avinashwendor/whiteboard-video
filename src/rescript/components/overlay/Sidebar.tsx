@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Camera,
   Captions,
+  Contrast,
   Crop,
   Layers,
   Redo2,
@@ -17,6 +18,7 @@ import AiPanel from "./AiPanel";
 import ElementsPanel from "./ElementsPanel";
 import FramePanel from "./FramePanel";
 import InspectorPanel from "./InspectorPanel";
+import GradePanel from "./GradePanel";
 import ShotsPanel from "./ShotsPanel";
 import SubtitlesPanel from "./SubtitlesPanel";
 import TransitionsPanel from "./TransitionsPanel";
@@ -36,6 +38,7 @@ type Tab =
   | "elements"
   | "style"
   | "shots"
+  | "look"
   | "subtitles"
   | "transitions"
   | "frame";
@@ -48,6 +51,7 @@ const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   // which is the half of the editor Style lives in. Frame is the shape of the
   // whole file, and is set once.
   { id: "shots", label: "Shots", icon: Camera },
+  { id: "look", label: "Look", icon: Contrast },
   { id: "subtitles", label: "Subs", icon: Captions },
   { id: "transitions", label: "Cuts", icon: Shuffle },
   { id: "frame", label: "Frame", icon: Crop },
@@ -119,6 +123,7 @@ export default function Sidebar() {
       {tab === "elements" && <ElementsPanel />}
       {tab === "style" && <InspectorPanel />}
       {tab === "shots" && <ShotsPanel />}
+      {tab === "look" && <GradePanel />}
       {tab === "subtitles" && <SubtitlesPanel />}
       {tab === "transitions" && <TransitionsPanel />}
       {tab === "frame" && <FramePanel />}

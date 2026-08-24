@@ -436,6 +436,39 @@ export const autoPunchInsOp = z.object({
   amount: z.number().min(0).max(2).optional(),
 });
 
+/* ---------------------------------- grade ---------------------------------- */
+
+/**
+ * The look.
+ *
+ * A preset by name, optionally nudged. Named looks rather than seven sliders
+ * for the same reason the camera takes preset names: asked for raw numbers a
+ * model reaches for the ends of every range, and what comes back is a video
+ * that has been *processed* rather than graded.
+ */
+export const setGradeOp = z.object({
+  op: z.literal("setGrade"),
+  preset: z.enum([
+    "none",
+    "clean",
+    "warmFilm",
+    "tealOrange",
+    "bleach",
+    "mono",
+    "vivid",
+    "moody",
+  ]),
+  /** Adjustments on top of the preset, each -1..1. */
+  exposure: z.number().min(-1).max(1).optional(),
+  contrast: z.number().min(-1).max(1).optional(),
+  saturation: z.number().min(-1).max(1).optional(),
+  temperature: z.number().min(-1).max(1).optional(),
+  vignette: z.number().min(0).max(1).optional(),
+  grain: z.number().min(0).max(1).optional(),
+  /** A second inside one shot, to grade only that. Omit for the whole video. */
+  at: seconds.optional(),
+});
+
 export const agentOpSchema = z.discriminatedUnion("op", [
   addTextOp,
   addImageOp,
@@ -461,6 +494,7 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   setCameraOp,
   removeShotOp,
   autoPunchInsOp,
+  setGradeOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

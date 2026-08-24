@@ -27,6 +27,7 @@ import {
   type ShotLayout,
 } from "./types";
 import { normaliseShots } from "./shots";
+import { withGradeDefaults, type GradeSpec } from "./grade";
 import { forgetImage, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
 
@@ -116,6 +117,14 @@ export interface OverlayState extends Composition {
    * the caller can add a shot first and decide what goes in it second — the
    * order the UI naturally works in.
    */
+  /**
+   * The project's look, or one shot's.
+   *
+   * A patch rather than a whole grade, so a slider does not have to know about
+   * the other six fields. `null` clears it back to neutral.
+   */
+  setGrade: (patch: Partial<GradeSpec> | null, shotId?: string) => void;
+
   addShot: (shot: Omit<Shot, "id"> & { id?: string }) => string;
   updateShot: (id: string, patch: Partial<Omit<Shot, "id">>) => void;
   /** Patch one plate of a shot, by slot. */
@@ -139,6 +148,7 @@ function snapshot(s: OverlayState): Composition {
     transitions: s.transitions,
     frame: s.frame,
     shots: s.shots,
+    grade: s.grade,
   };
 }
 
@@ -500,6 +510,27 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     replaceTransitions: (transitions) =>
       commit({ transitions: [...transitions].sort((a, b) => a.index - b.index) }),
 
+    setGrade: (patch, shotId) => {
+      if (!shotId) {
+        commit({
+          grade: patch === null ? null : withGradeDefaults({ ...get().grade, ...patch }),
+        });
+        return;
+      }
+      const shots = get().shots.map((s) =>
+        s.id === shotId
+          ? {
+              ...s,
+              grade:
+                patch === null
+                  ? null
+                  : withGradeDefaults({ ...(s.grade ?? get().grade), ...patch }),
+            }
+          : s
+      );
+      commit({ shots });
+    },
+
     /* ---------------------------------- shots ---------------------------------- */
 
     addShot: (input) => {
@@ -565,6 +596,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         // A save written before shots existed has none, and none means one
         // full-frame plate of the footage — which is what it rendered as.
         shots: composition.shots ?? [],
+        grade: composition.grade ?? null,
         aspect: frameRatio(frame, get().sourceAspect),
         selectedId: null,
         // A loaded composition is a new starting point, not a step: undoing
@@ -636,5 +668,6 @@ export function currentComposition(): Composition {
     transitions: s.transitions,
     frame: s.frame,
     shots: s.shots,
+    grade: s.grade,
   };
 }

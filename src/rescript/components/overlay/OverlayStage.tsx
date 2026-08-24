@@ -80,6 +80,7 @@ export default function OverlayStage({
   const select = useOverlayStore((s) => s.select);
   const frame = useOverlayStore((s) => s.frame);
   const shots = useOverlayStore((s) => s.shots);
+  const grade = useOverlayStore((s) => s.grade);
   const aspect = useOverlayStore((s) => s.aspect);
   const setSourceAspect = useOverlayStore((s) => s.setSourceAspect);
 
@@ -96,10 +97,10 @@ export default function OverlayStage({
   });
 
   // Live values for the animation frame, which must not re-subscribe per frame.
-  const live = useRef({ elements, subtitles, transitions, frame, shots, timeline, words, duration, manualCuts });
+  const live = useRef({ elements, subtitles, transitions, frame, shots, grade, timeline, words, duration, manualCuts });
   useEffect(() => {
-    live.current = { elements, subtitles, transitions, frame, shots, timeline, words, duration, manualCuts };
-  }, [elements, subtitles, transitions, frame, shots, timeline, words, duration, manualCuts]);
+    live.current = { elements, subtitles, transitions, frame, shots, grade, timeline, words, duration, manualCuts };
+  }, [elements, subtitles, transitions, frame, shots, grade, timeline, words, duration, manualCuts]);
 
   // The held frames the push transitions draw. Captured up front by seeking a
   // hidden decoder, and re-captured whenever the cut moves an out point — see
@@ -217,6 +218,7 @@ export default function OverlayStage({
             transitions: state.transitions,
             frame: state.frame,
             shots: state.shots,
+            grade: state.grade,
           },
           t
         );

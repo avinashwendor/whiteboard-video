@@ -120,6 +120,7 @@ export default function ExportDialog() {
   const compositionTransitions = useOverlayStore((s) => s.transitions);
   const compositionFrame = useOverlayStore((s) => s.frame);
   const compositionShots = useOverlayStore((s) => s.shots);
+  const compositionGrade = useOverlayStore((s) => s.grade);
   const sourceAspect = useOverlayStore((s) => s.sourceAspect);
   /**
    * Whether captions, overlays or transitions have to be rendered into the
@@ -135,6 +136,7 @@ export default function ExportDialog() {
           transitions: compositionTransitions,
           frame: compositionFrame,
           shots: compositionShots,
+          grade: compositionGrade,
         },
         sourceAspect
       ),
@@ -144,6 +146,7 @@ export default function ExportDialog() {
       compositionTransitions,
       compositionFrame,
       compositionShots,
+      compositionGrade,
       sourceAspect,
     ]
   );

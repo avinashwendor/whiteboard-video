@@ -153,6 +153,7 @@ function composition(transitions: Transition[]): Composition {
     transitions,
     frame: { ...DEFAULT_FRAME },
     shots: [],
+    grade: null,
   };
 }
 
