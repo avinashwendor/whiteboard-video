@@ -152,6 +152,7 @@ function composition(transitions: Transition[]): Composition {
     subtitles: { enabled: false, style: { ...DEFAULT_SUBTITLE_STYLE }, cues: [], generated: false },
     transitions,
     frame: { ...DEFAULT_FRAME },
+    shots: [],
   };
 }
 

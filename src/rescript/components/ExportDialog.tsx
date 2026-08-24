@@ -119,6 +119,7 @@ export default function ExportDialog() {
   const compositionSubtitles = useOverlayStore((s) => s.subtitles);
   const compositionTransitions = useOverlayStore((s) => s.transitions);
   const compositionFrame = useOverlayStore((s) => s.frame);
+  const compositionShots = useOverlayStore((s) => s.shots);
   const sourceAspect = useOverlayStore((s) => s.sourceAspect);
   /**
    * Whether captions, overlays or transitions have to be rendered into the
@@ -133,6 +134,7 @@ export default function ExportDialog() {
           subtitles: compositionSubtitles,
           transitions: compositionTransitions,
           frame: compositionFrame,
+          shots: compositionShots,
         },
         sourceAspect
       ),
@@ -141,6 +143,7 @@ export default function ExportDialog() {
       compositionSubtitles,
       compositionTransitions,
       compositionFrame,
+      compositionShots,
       sourceAspect,
     ]
   );

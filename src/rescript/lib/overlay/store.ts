@@ -114,6 +114,7 @@ function snapshot(s: OverlayState): Composition {
     subtitles: s.subtitles,
     transitions: s.transitions,
     frame: s.frame,
+    shots: s.shots,
   };
 }
 
@@ -487,6 +488,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         },
         transitions: composition.transitions ?? [],
         frame,
+        // A save written before shots existed has none, and none means one
+        // full-frame plate of the footage — which is what it rendered as.
+        shots: composition.shots ?? [],
         aspect: frameRatio(frame, get().sourceAspect),
         selectedId: null,
         // A loaded composition is a new starting point, not a step: undoing
@@ -557,5 +561,6 @@ export function currentComposition(): Composition {
     subtitles: s.subtitles,
     transitions: s.transitions,
     frame: s.frame,
+    shots: s.shots,
   };
 }

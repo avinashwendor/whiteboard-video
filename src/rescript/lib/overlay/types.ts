@@ -262,6 +262,156 @@ export const TRANSITION_LABELS: Record<TransitionKind, string> = {
   blur: "Blur through",
 };
 
+/* ---------------------------------- shots ---------------------------------- */
+
+/**
+ * How the frame is divided for a stretch of the video.
+ *
+ * Until this existed the frame was one region showing one source, for the whole
+ * runtime — so "camera on the left, text on the right", "screen recording with
+ * the webcam in the corner" and "cam on top, screen underneath" were not
+ * expressible, and neither was a plain cutaway. Those are not five features:
+ * they are one mechanism with different region counts, which is the only reason
+ * this is a small change to the renderer rather than a second one.
+ *
+ * A composition with no shots renders exactly as it did before.
+ */
+export type ShotLayout =
+  | "full"
+  | "splitLeft"
+  | "splitRight"
+  | "splitTop"
+  | "splitBottom"
+  | "stack"
+  | "pip"
+  | "card"
+  | "grid";
+
+export const SHOT_LAYOUT_LABELS: Record<ShotLayout, string> = {
+  full: "Full frame",
+  splitLeft: "Split — left",
+  splitRight: "Split — right",
+  splitTop: "Split — top",
+  splitBottom: "Split — bottom",
+  stack: "Stacked",
+  pip: "Picture in picture",
+  card: "Card",
+  grid: "Grid",
+};
+
+/** How many regions a layout divides the frame into. `grid` varies. */
+export function regionCount(layout: ShotLayout, plates = 2): number {
+  switch (layout) {
+    case "full":
+    case "card":
+      return 1;
+    case "grid":
+      return Math.min(4, Math.max(2, plates));
+    default:
+      return 2;
+  }
+}
+
+export type CameraKind =
+  | "hold"
+  | "punchIn"
+  | "punchOut"
+  | "push"
+  | "driftLeft"
+  | "driftRight"
+  | "kenBurns"
+  | "snap";
+
+/** One framing of a source: what `FrameSpec` already means, minus the shape. */
+export interface CameraFraming {
+  /** Extra zoom on top of the fit, 1 = none. */
+  zoom: number;
+  /** The point of the source held at the centre of its region, 0..1. */
+  focusX: number;
+  focusY: number;
+}
+
+export const NEUTRAL_FRAMING: CameraFraming = { zoom: 1, focusX: 0.5, focusY: 0.5 };
+
+/**
+ * A move from one framing to another, over part of the shot.
+ *
+ * `duration` is how long the move takes, not how long the shot is: the rest of
+ * the shot holds at `to`. A push-in that keeps creeping for ninety seconds is
+ * a different thing from one that arrives and settles, and only the second is
+ * what anyone means by a punch-in.
+ */
+export interface CameraMove {
+  kind: CameraKind;
+  from: CameraFraming;
+  to: CameraFraming;
+  easing: EasingName;
+  duration: number;
+}
+
+export const HOLD_CAMERA: CameraMove = {
+  kind: "hold",
+  from: { ...NEUTRAL_FRAMING },
+  to: { ...NEUTRAL_FRAMING },
+  easing: "easeOut",
+  duration: 0,
+};
+
+/** Where a plate's picture comes from. */
+export type PlateSource =
+  /** The transcribed footage — the one recording that owns the clock. */
+  | { kind: "primary" }
+  /** Another recording attached to the project: a screen capture, a second camera. */
+  | { kind: "media"; mediaId: string }
+  /** A cutaway from the project's b-roll library. */
+  | { kind: "broll"; brollId: string }
+  /** A flat colour. What a card sits on when no footage should show through. */
+  | { kind: "solid"; color: string };
+
+/** What fills one region of a layout. */
+export interface Plate {
+  /** Region index within the layout. 0 is the primary/largest. */
+  slot: number;
+  source: PlateSource;
+  fit: FrameFit;
+  camera: CameraMove;
+  /** Corner radius as a fraction of the region's shorter side. */
+  radius: number;
+  /**
+   * Overrides the layout's region when the person drags it.
+   *
+   * Normalised to the frame, like everything else here. A deliberate placement
+   * outranks the layout, which is the same rule `layout.ts` keeps for elements.
+   */
+  rect?: Rect;
+}
+
+/**
+ * A stretch of the edited timeline, and how the frame is filled during it.
+ *
+ * Times are edited-timeline seconds — the same clock as elements and
+ * subtitles — so a shot survives an upstream cut moving where its moment sits
+ * in the source, exactly as a caption does.
+ */
+export interface Shot {
+  id: string;
+  start: number;
+  end: number;
+  layout: ShotLayout;
+  plates: Plate[];
+}
+
+/** A full-frame plate of the footage, framed as shot. The default everything. */
+export function primaryPlate(): Plate {
+  return {
+    slot: 0,
+    source: { kind: "primary" },
+    fit: "cover",
+    camera: { ...HOLD_CAMERA, from: { ...NEUTRAL_FRAMING }, to: { ...NEUTRAL_FRAMING } },
+    radius: 0,
+  };
+}
+
 /* ------------------------------- composition ------------------------------- */
 
 /** Everything the renderer needs, and the whole of what gets persisted. */
@@ -271,6 +421,14 @@ export interface Composition {
   transitions: Transition[];
   /** The shape of the output. See the frame section below. */
   frame: FrameSpec;
+  /**
+   * How the frame is divided over time. Empty means the whole runtime is one
+   * full-frame plate of the footage — which is what it always was.
+   *
+   * Optional on the way in, because a composition saved before shots existed
+   * does not have one and must keep rendering identically.
+   */
+  shots: Shot[];
 }
 
 export function emptyComposition(): Composition {
@@ -284,7 +442,39 @@ export function emptyComposition(): Composition {
     },
     transitions: [],
     frame: { ...DEFAULT_FRAME },
+    shots: [],
   };
+}
+
+/** True when a shot changes nothing about how the frame is filled. */
+export function isPlainShot(shot: Shot): boolean {
+  if (shot.layout !== "full") return false;
+  if (shot.plates.length !== 1) return false;
+  const plate = shot.plates[0];
+  if (plate.source.kind !== "primary") return false;
+  if (plate.rect) return false;
+  if (plate.radius !== 0) return false;
+  const { from, to } = plate.camera;
+  return (
+    plate.camera.kind === "hold" &&
+    from.zoom === NEUTRAL_FRAMING.zoom &&
+    from.focusX === NEUTRAL_FRAMING.focusX &&
+    from.focusY === NEUTRAL_FRAMING.focusY &&
+    to.zoom === NEUTRAL_FRAMING.zoom &&
+    to.focusX === NEUTRAL_FRAMING.focusX &&
+    to.focusY === NEUTRAL_FRAMING.focusY
+  );
+}
+
+/**
+ * True when the shot list changes nothing, so export can take the fast path.
+ *
+ * A list of shots that are all plain full-frame holds is work someone did in
+ * the editor and no work at all for the encoder.
+ */
+export function shotsAreIdle(shots: Shot[] | undefined): boolean {
+  if (!shots || shots.length === 0) return true;
+  return shots.every(isPlainShot);
 }
 
 /**
@@ -302,6 +492,7 @@ export function isEmptyComposition(
     c.elements.every((e) => e.hidden) &&
     (!c.subtitles.enabled || c.subtitles.cues.length === 0) &&
     c.transitions.every((t) => t.kind === "none" || t.duration <= 0) &&
+    shotsAreIdle(c.shots) &&
     !frameReframes(c.frame ?? DEFAULT_FRAME, sourceAspect)
   );
 }

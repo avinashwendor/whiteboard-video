@@ -10,7 +10,15 @@
 
 import { paintComposition, type FrameSize } from "./render";
 import type { ActiveTransition } from "./timeline";
-import { DEFAULT_FRAME, type Composition, type FrameSpec } from "./types";
+import { frameForPlate, plateRect, regionsFor, shotAt } from "./shots";
+import {
+  DEFAULT_FRAME,
+  type Composition,
+  type FrameSpec,
+  type Plate,
+  type Rect,
+  type Shot,
+} from "./types";
 
 export interface FrameSources {
   /** The live source frame for this output time. */
@@ -158,6 +166,90 @@ function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
+/** A normalised rect in output pixels. */
+function pixels(rect: Rect, size: FrameSize) {
+  return {
+    x: rect.x * size.width,
+    y: rect.y * size.height,
+    w: rect.w * size.width,
+    h: rect.h * size.height,
+  };
+}
+
+/**
+ * Clip to a region, optionally with rounded corners.
+ *
+ * The caller is responsible for the surrounding save/restore: a clip cannot be
+ * undone any other way, and a plate that leaked its clip would crop everything
+ * drawn after it — including the captions, which are drawn by someone else
+ * entirely and would be very hard to trace back to here.
+ */
+function clipTo(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  size: FrameSize,
+  radius: number
+) {
+  const box = pixels(rect, size);
+  ctx.beginPath();
+  if (radius > 0) {
+    const r = Math.min(radius * Math.min(box.w, box.h), Math.min(box.w, box.h) / 2);
+    ctx.roundRect(box.x, box.y, box.w, box.h, r);
+  } else {
+    ctx.rect(box.x, box.y, box.w, box.h);
+  }
+  ctx.clip();
+}
+
+/**
+ * Draw one plate into its region.
+ *
+ * The region becomes the `FrameSize` handed to the existing drawing code, which
+ * is the whole trick: `placement()` already takes width and height as
+ * arguments, so a half-width region is just a smaller frame as far as it is
+ * concerned. Nothing about fit, focus, zoom or the blurred backdrop needed to
+ * learn what a plate is.
+ */
+function paintPlate(
+  ctx: CanvasRenderingContext2D,
+  plate: Plate,
+  shot: Shot,
+  rect: Rect,
+  size: FrameSize,
+  base: FrameSpec,
+  sources: FrameSources,
+  t: number
+) {
+  const box = pixels(rect, size);
+  if (box.w < 1 || box.h < 1) return;
+
+  ctx.save();
+  clipTo(ctx, rect, size, plate.radius);
+  ctx.translate(box.x, box.y);
+
+  const region: FrameSize = { width: box.w, height: box.h };
+
+  if (plate.source.kind === "solid") {
+    ctx.fillStyle = plate.source.color;
+    ctx.fillRect(0, 0, region.width, region.height);
+    ctx.restore();
+    return;
+  }
+
+  // Only the primary footage has a source to draw today. A `media` or `broll`
+  // plate is a promise the ingest and b-roll work has not kept yet, and the
+  // honest thing to show meanwhile is the footage — a black hole in the middle
+  // of the frame reads as a broken renderer, not as an unfinished feature.
+  const src = sources.live ?? sources.freeze;
+  if (src) {
+    const spec = frameForPlate(base, plate, shot, t);
+    drawBackdrop(ctx, src, region, spec);
+    drawSource(ctx, src, region, spec);
+  }
+
+  ctx.restore();
+}
+
 /**
  * Paint the video layer, applying `active` if one covers this frame.
  * Returns nothing; the overlay layer is drawn by the caller afterwards.
@@ -167,12 +259,30 @@ function paintVideoLayer(
   size: FrameSize,
   sources: FrameSources,
   active: ActiveTransition | null,
-  frame: FrameSpec
+  frame: FrameSpec,
+  shot: Shot | null,
+  t: number
 ) {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, size.width, size.height);
 
   const { live, freeze } = sources;
+
+  // A shot divides the frame. Transitions are deliberately not applied over the
+  // top of one: a transition treats the whole picture, and what "the picture"
+  // means during a split screen is a question the shot layer has to answer
+  // first. Until it does, a boundary that falls inside a shot plays as a cut —
+  // the same honest degradation a push transition takes when it has no freeze.
+  if (shot) {
+    const regions = regionsFor(shot.layout, size, shot.plates.length);
+    // Painted in slot order rather than array order, so a plate list that
+    // arrives out of order still puts the bubble in front of the screen.
+    const ordered = [...shot.plates].sort((a, b) => a.slot - b.slot);
+    for (const plate of ordered) {
+      paintPlate(ctx, plate, shot, plateRect(plate, regions), size, frame, sources, t);
+    }
+    return;
+  }
 
   // One backdrop for the whole frame, from whichever source is real. The freeze
   // is the fallback because a seek can leave the <video> momentarily without a
@@ -254,8 +364,17 @@ export function paintFrame(
   composition: Composition,
   t: number
 ) {
-  // A composition restored from an older save has no frame; falling back keeps
-  // it rendering exactly as it did rather than throwing on the first paint.
-  paintVideoLayer(ctx, size, sources, active, composition.frame ?? DEFAULT_FRAME);
+  // A composition restored from an older save has no frame and no shots;
+  // falling back keeps it rendering exactly as it did rather than throwing on
+  // the first paint.
+  paintVideoLayer(
+    ctx,
+    size,
+    sources,
+    active,
+    composition.frame ?? DEFAULT_FRAME,
+    shotAt(composition, t),
+    t
+  );
   paintComposition(ctx, composition, size, t);
 }

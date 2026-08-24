@@ -21,7 +21,8 @@
     "test:agent": "tsx tests/agent-loop-test.mts",
     "test:transition": "tsx tests/overlay-transition-test.ts",
     "test:chat": "tsx tests/chat-thread-test.ts",
-    "test:budget": "tsx tests/budget-test.ts"
+    "test:budget": "tsx tests/budget-test.ts",
+    "test:shots": "tsx tests/shots-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",
