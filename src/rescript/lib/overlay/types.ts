@@ -272,7 +272,23 @@ export type TransitionKind =
   | "slideDown"
   | "zoomIn"
   | "zoomOut"
-  | "blur";
+  | "blur"
+  /**
+   * Hides a jump cut.
+   *
+   * The most useful transition this editor can have, because deleting words is
+   * how it cuts — so it *manufactures* jump cuts on a talking head as its
+   * central interaction, and had nothing to offer for them. A short warp and
+   * dissolve across the boundary, scaled to meet in the middle, reads as the
+   * speaker having moved rather than the frame having jumped.
+   */
+  | "morphCut"
+  /** Directional blur and slide: the standard energetic cut. */
+  | "whipPan"
+  /** Radial push with the blur peaking mid-way. Pairs with a punch-in. */
+  | "zoomBlur"
+  /** A circular hole in the outgoing frame, opening onto the incoming one. */
+  | "iris";
 
 /**
  * A transition sits on the boundary *before* clip `index` (so `index` is always
@@ -293,6 +309,9 @@ export const DUAL_SOURCE_TRANSITIONS: ReadonlySet<TransitionKind> = new Set([
   "slideRight",
   "slideUp",
   "slideDown",
+  "morphCut",
+  "whipPan",
+  "iris",
 ]);
 
 export const TRANSITION_LABELS: Record<TransitionKind, string> = {
@@ -307,6 +326,10 @@ export const TRANSITION_LABELS: Record<TransitionKind, string> = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   blur: "Blur through",
+  morphCut: "Morph cut",
+  whipPan: "Whip pan",
+  zoomBlur: "Zoom blur",
+  iris: "Iris",
 };
 
 /* ---------------------------------- shots ---------------------------------- */

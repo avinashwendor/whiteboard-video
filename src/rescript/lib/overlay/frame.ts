@@ -310,8 +310,17 @@ function paintVideoLayer(
     ctx.save();
     if (active.kind === "blur") {
       ctx.filter = `blur(${intensity * size.height * 0.035}px)`;
+    } else if (active.kind === "zoomBlur") {
+      // Softer than the plain blur and paired with a push, so it reads as
+      // speed rather than as focus being lost.
+      ctx.filter = `blur(${intensity * size.height * 0.018}px)`;
     }
-    const scale = active.kind === "zoomIn" ? 1 + 0.28 * intensity : 1;
+    const scale =
+      active.kind === "zoomIn"
+        ? 1 + 0.28 * intensity
+        : active.kind === "zoomBlur"
+          ? 1 + 0.14 * intensity
+          : 1;
     if (live) drawSource(ctx, live, size, frame, scale, 0, 0, grade);
     ctx.restore();
     ctx.filter = "none";
@@ -355,6 +364,44 @@ function paintVideoLayer(
     case "slideDown":
       drawSource(ctx, freeze, size, frame, 1, 0, size.height * p, grade);
       break;
+
+    case "morphCut": {
+      // The two frames are pulled toward each other rather than one simply
+      // fading: on a jump cut the head has moved, and a straight dissolve shows
+      // you both positions at once. A small counter-scale plus a blur that
+      // peaks in the middle hides where the join is — which is the entire job.
+      const meet = dipIntensity(active.progress);
+      ctx.filter = `blur(${meet * size.height * 0.012}px)`;
+      ctx.globalAlpha = 1 - p;
+      drawSource(ctx, freeze, size, frame, 1 + 0.02 * p, 0, 0, grade);
+      ctx.filter = "none";
+      break;
+    }
+
+    case "whipPan": {
+      // Fast and horizontal, with the smear strongest at the start where the
+      // frame is moving quickest.
+      const smear = (1 - p) * size.height * 0.05;
+      ctx.filter = `blur(${smear}px)`;
+      drawSource(ctx, freeze, size, frame, 1, -size.width * p * 1.15, 0, grade);
+      ctx.filter = "none";
+      break;
+    }
+
+    case "iris": {
+      // A hole cut in the outgoing frame, opening onto the incoming one. The
+      // clip is inverted with `evenodd` — a rect enclosing a circle — because
+      // clipping to the *hole* would keep the wrong half of the picture.
+      const corner = Math.hypot(size.width, size.height) / 2;
+      const radius = corner * p;
+      ctx.beginPath();
+      ctx.rect(0, 0, size.width, size.height);
+      ctx.arc(size.width / 2, size.height / 2, radius, 0, Math.PI * 2);
+      ctx.clip("evenodd");
+      drawSource(ctx, freeze, size, frame, 1, 0, 0, grade);
+      break;
+    }
+
     default:
       break;
   }

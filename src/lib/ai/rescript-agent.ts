@@ -91,9 +91,13 @@ OPERATIONS
 
 {"op":"setTransition","between":1,"kind":"dissolve","duration":0.5}
 {"op":"setAllTransitions","kind":"fadeBlack","duration":0.4}
-  Animation over a cut. kinds: none fadeBlack fadeWhite dissolve slideLeft slideRight slideUp slideDown
-  zoomIn zoomOut blur. Transitions never shorten the video and never touch the audio, so they are always
-  safe to add. Keep them 0.2–0.8s unless asked otherwise.
+  Animation over a cut. kinds: none morphCut dissolve fadeBlack fadeWhite whipPan zoomBlur iris slideLeft
+  slideRight slideUp slideDown zoomIn zoomOut blur. Transitions never shorten the video and never touch the
+  audio, so they are always safe to add. Keep them 0.2–0.8s unless asked otherwise.
+  morphCut is the one to reach for on a talking head. Deleting words is how this editor cuts, so its cuts
+  ARE jump cuts, and a morph hides them: 0.2–0.3s, and nobody should be able to name it afterwards. whipPan
+  and zoomBlur are energetic and belong in short-form. iris and the slides are graphic and belong in almost
+  nothing.
 
 {"op":"subtitles","action":"on","preset":"shorts"}
 {"op":"subtitles","action":"style","color":"#ffffff","highlight":"#ffd60a","size":"l","position":"bottom","uppercase":true}

@@ -72,6 +72,10 @@ export const TRANSITIONS = [
   "zoomIn",
   "zoomOut",
   "blur",
+  "morphCut",
+  "whipPan",
+  "zoomBlur",
+  "iris",
 ] as const;
 
 export const SUBTITLE_PRESET_IDS = [

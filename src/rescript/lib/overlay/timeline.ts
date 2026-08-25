@@ -188,6 +188,13 @@ export function familyOf(kind: TransitionKind): TransitionFamily {
     // A zoom-out is the outgoing frame scaling up and away, so it needs the
     // freeze too — unlike zoom-in, which is a punch through the live frame.
     case "zoomOut":
+    // All three of these treat the outgoing frame: the morph dissolves it into
+    // the incoming one, the whip carries it off, and the iris cuts a hole in
+    // it. Without a freeze they degrade to a plain cut, which is the honest
+    // failure the push family was built around.
+    case "morphCut":
+    case "whipPan":
+    case "iris":
       return "push";
     default:
       return "dip";

@@ -16,10 +16,12 @@
  */
 
 import { paintFrame } from "../src/rescript/lib/overlay/frame";
-import { buildTimeline, transitionAt } from "../src/rescript/lib/overlay/timeline";
+import { buildTimeline, familyOf, transitionAt } from "../src/rescript/lib/overlay/timeline";
+import { TRANSITIONS } from "../src/rescript/lib/overlay/ops-schema";
 import {
   DEFAULT_FRAME,
   DEFAULT_SUBTITLE_STYLE,
+  TRANSITION_LABELS,
   type Composition,
   type Transition,
   type TransitionKind,
@@ -102,6 +104,7 @@ function stubContext() {
     roundRect() {},
     rect() {},
     ellipse() {},
+    arc() {},
     moveTo() {},
     lineTo() {},
     clip() {},
@@ -194,6 +197,12 @@ const PUSH: TransitionKind[] = [
   "slideUp",
   "slideDown",
   "zoomOut",
+  // The four added later. `morphCut` matters most: this editor cuts by deleting
+  // words, so its cuts are jump cuts, and a morph that silently played as a
+  // hard cut would leave the one transition the product actually needs broken.
+  "morphCut",
+  "whipPan",
+  "iris",
 ];
 
 for (const kind of PUSH) {
@@ -224,8 +233,8 @@ for (const kind of PUSH) {
 
 /* --------------------- a missing held frame degrades safely ---------------- */
 
-{
-  const transitions: Transition[] = [{ index: 1, kind: "dissolve", duration: 0.6 }];
+for (const kind of PUSH) {
+  const transitions: Transition[] = [{ index: 1, kind, duration: 0.6 }];
   const timeline = cutTimeline();
   const active = transitionAt(4.3, timeline, transitions);
   const { ctx, draws } = stubContext();
@@ -234,7 +243,7 @@ for (const kind of PUSH) {
 
   assert(
     draws.length >= 1 && draws.every((d) => d.source === "live"),
-    "without a held frame it falls back to a plain cut rather than throwing"
+    `${kind}: without a held frame it must fall back to a plain cut rather than throwing`
   );
 }
 
@@ -333,6 +342,41 @@ for (const kind of PUSH) {
     fills.some((f) => f.overPicture && f.style === "#fff" && f.alpha > 0.9),
     "fadeWhite goes through white"
   );
+}
+
+/* ------------------------ every kind is actually offered -------------------- */
+
+{
+  const declared = Object.keys(TRANSITION_LABELS) as TransitionKind[];
+
+  for (const kind of declared) {
+    assert(
+      (TRANSITIONS as readonly string[]).includes(kind),
+      `"${kind}" exists but the agent's schema will not accept it`
+    );
+  }
+  for (const kind of TRANSITIONS) {
+    assert(
+      declared.includes(kind as TransitionKind),
+      `the schema accepts "${kind}", which is not a transition`
+    );
+  }
+
+  // And each one composites *something* at the middle of its window. A kind
+  // that falls through the switch draws nothing and looks like a hard cut,
+  // which is the exact failure this whole file was written for.
+  for (const kind of declared) {
+    if (kind === "none") continue;
+    // A dip is centred on the boundary and a push runs entirely after it, so
+    // the middle of the window is a different second for each family.
+    const at = familyOf(kind) === "dip" ? 4.0 : 4.3;
+    const { active, draws, fills } = paintAt(at, [{ index: 1, kind, duration: 0.6 }]);
+    assert(active, `${kind}: nothing active at ${at}s, mid-window for its family`);
+    assert(
+      draws.length + fills.length > 0,
+      `${kind}: drew nothing at all mid-transition`
+    );
+  }
 }
 
 console.log("ALL TRANSITION TESTS PASSED");
