@@ -23,7 +23,8 @@
     "test:chat": "tsx tests/chat-thread-test.ts",
     "test:budget": "tsx tests/budget-test.ts",
     "test:shots": "tsx tests/shots-test.ts",
-    "test:grade": "tsx tests/grade-test.ts"
+    "test:grade": "tsx tests/grade-test.ts",
+    "test:motion": "tsx tests/motion-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

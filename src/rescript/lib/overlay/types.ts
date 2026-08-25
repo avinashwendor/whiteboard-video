@@ -44,13 +44,44 @@ export type AnimationKind =
   | "pop"
   | "blur"
   | "wipeRight"
-  | "typewriter";
+  | "typewriter"
+  /**
+   * Rises out from behind its own baseline, clipped.
+   *
+   * The clip is the whole trick. Type that fades reads as a slide; type that
+   * rises out from behind a hard edge reads as typography. Ported from the
+   * generated-video engine (`lib/hyperframes/type.ts`), where it has always
+   * been the best animation in the repo and was unreachable from here.
+   */
+  | "mask";
+
+/**
+ * What a reveal is applied to.
+ *
+ * `element` is the whole thing at once — the default, and exactly the
+ * behaviour that existed before this. The other two split text into tokens and
+ * give each its own progress, offset by `stagger`, which is the difference
+ * between a caption that appears and one that is *delivered*.
+ */
+export type AnimationUnit = "element" | "word" | "char";
 
 export interface AnimationSpec {
   kind: AnimationKind;
   /** Seconds the animation runs for. Clamped to half the element's life. */
   duration: number;
   easing: EasingName;
+  /** Defaults to "element": the whole thing at once, as it always was. */
+  unit?: AnimationUnit;
+  /**
+   * How far each token is delayed behind the one before it, as a fraction of
+   * the whole animation.
+   *
+   * A fraction rather than seconds, so a long caption and a short one read the
+   * same: the reveal always finishes when the animation does, however many
+   * words there are. In seconds, a twelve-word title would still be arriving
+   * after a three-word one had settled.
+   */
+  stagger?: number;
 }
 
 export const DEFAULT_ENTER: AnimationSpec = {

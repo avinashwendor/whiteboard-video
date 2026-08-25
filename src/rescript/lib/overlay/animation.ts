@@ -7,7 +7,13 @@
  * element the same way it always does.
  */
 
-import type { AnimationSpec, EasingName, OverlayElement } from "./types";
+import type {
+  AnimationKind,
+  AnimationSpec,
+  AnimationUnit,
+  EasingName,
+  OverlayElement,
+} from "./types";
 
 type EasingFn = (t: number) => number;
 
@@ -52,6 +58,23 @@ export interface DrawState {
   blur: number;
   reveal: number;
   charFraction: number;
+  /**
+   * Clips the draw to a fraction of its own height, rising from the baseline.
+   * 1 is unclipped. Drives the `mask` kind.
+   */
+  rise: number;
+  /**
+   * How to spread this animation across a text element's tokens.
+   *
+   * Carried on the state rather than resolved here because only the renderer
+   * knows where the words ended up — the wrap depends on the font, the box and
+   * the frame size, none of which this module has. So this says *what* to do
+   * and `render.ts` works out how many tokens there are to do it to.
+   *
+   * Absent means the whole element at once, which is what every animation did
+   * before per-token reveals existed.
+   */
+  tokens: { unit: Exclude<AnimationUnit, "element">; p: number; stagger: number } | null;
 }
 
 const IDENTITY: DrawState = {
@@ -62,7 +85,38 @@ const IDENTITY: DrawState = {
   blur: 0,
   reveal: 1,
   charFraction: 1,
+  rise: 1,
+  tokens: null,
 };
+
+/**
+ * Where one token of a staggered reveal has got to.
+ *
+ * With `n` tokens each delayed by `stagger` of the whole animation, the last
+ * one starts at `(n-1) * stagger` and every token gets the remainder as its
+ * own window. The window is floored so a very long caption still animates
+ * rather than snapping: past about twenty words the stagger is compressed
+ * instead of the reveal running past the end of the animation.
+ */
+export function tokenProgress(
+  p: number,
+  index: number,
+  count: number,
+  stagger: number
+): number {
+  // Pinned at the ends rather than left to the arithmetic. Dividing by a window
+  // computed from a compressed spread lands the last token at 0.9999999999999998
+  // for some counts, which is invisible but means "everything has settled when
+  // the animation ends" is not actually true — and that is the one property the
+  // rest of the renderer is entitled to assume.
+  if (p >= 1) return 1;
+  if (p <= 0) return 0;
+  if (count <= 1 || stagger <= 0) return clamp01(p);
+  const spread = Math.min(stagger * (count - 1), 0.8);
+  const each = Math.max(0.2, 1 - spread);
+  const begins = count > 1 ? (spread * index) / (count - 1) : 0;
+  return clamp01((p - begins) / each);
+}
 
 /**
  * `p` runs 0 → 1 across the animation. For an exit the caller passes the
@@ -102,10 +156,32 @@ function apply(spec: AnimationSpec, p: number, entering: boolean): DrawState {
       // Text only; other kinds fall back to a plain fade so the option is
       // never a no-op the user has to discover.
       return { ...IDENTITY, charFraction: e };
+    case "mask":
+      // Rises out from behind its own baseline. The opacity is deliberately
+      // not animated: the clip is doing the work, and fading as well turns a
+      // hard typographic edge back into the soft appearance it exists to avoid.
+      return { ...IDENTITY, rise: e, dy: (1 - e) * 0.9 };
     default:
       return IDENTITY;
   }
 }
+
+/**
+ * Kinds that mean nothing applied to a whole element at once.
+ *
+ * `mask` on one box is a wipe; `mask` per word is the reveal it was ported for.
+ * Rather than let it read as a dull wipe when someone picks it, it defaults to
+ * per-word and can still be overridden explicitly.
+ */
+const PER_WORD_BY_DEFAULT: ReadonlySet<AnimationKind> = new Set(["mask"]);
+
+function unitFor(spec: AnimationSpec): AnimationUnit {
+  if (spec.unit) return spec.unit;
+  return PER_WORD_BY_DEFAULT.has(spec.kind) ? "word" : "element";
+}
+
+/** How far apart tokens are, when the spec does not say. */
+const DEFAULT_STAGGER = 0.16;
 
 /** Longest an animation may run: never more than half the element's life. */
 function budget(spec: AnimationSpec, life: number): number {
@@ -132,13 +208,28 @@ export function drawStateAt(
   const exitFor = budget(element.exit, life);
 
   let state = IDENTITY;
+  let spec: AnimationSpec | null = null;
+  let p = 1;
+
   if (enterFor > 0 && into < enterFor) {
-    state = apply(element.enter, into / enterFor, true);
+    spec = element.enter;
+    p = into / enterFor;
+    state = apply(spec, p, true);
   } else if (exitFor > 0 && until < exitFor) {
-    state = apply(element.exit, until / exitFor, false);
+    spec = element.exit;
+    p = until / exitFor;
+    state = apply(spec, p, false);
   }
 
-  return { ...state, opacity: state.opacity * element.opacity };
+  // Only text has tokens to stagger, and only while something is animating —
+  // a settled element is one element, whatever revealed it.
+  const unit = spec ? unitFor(spec) : "element";
+  const tokens =
+    spec && unit !== "element" && element.kind === "text"
+      ? { unit, p, stagger: spec.stagger ?? DEFAULT_STAGGER }
+      : null;
+
+  return { ...state, tokens, opacity: state.opacity * element.opacity };
 }
 
 /** Every animation kind, in the order the picker shows them. */
@@ -154,6 +245,7 @@ export const ANIMATION_KINDS = [
   "blur",
   "wipeRight",
   "typewriter",
+  "mask",
 ] as const;
 
 export const ANIMATION_LABELS: Record<string, string> = {
@@ -168,6 +260,7 @@ export const ANIMATION_LABELS: Record<string, string> = {
   blur: "Blur in",
   wipeRight: "Wipe",
   typewriter: "Typewriter",
+  mask: "Mask reveal",
 };
 
 export const EASING_NAMES: EasingName[] = [
