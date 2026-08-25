@@ -234,8 +234,71 @@ function MarkSection({ at }: { at: number }) {
 
 /* ------------------------------- generation -------------------------------- */
 
+/**
+ * Search the openly-licensed catalogues and bring the results onto our origin.
+ *
+ * Several at once rather than one at a time: unlike a generated image, which
+ * costs a real request and real seconds, a stock search returns a page and the
+ * useful thing is to see them side by side. Only the first few are fetched
+ * through the proxy — enough to fill the tray without pulling a dozen files
+ * somebody may not want.
+ */
+async function searchStock(
+  query: string,
+  kind: "image" | "gif"
+): Promise<TrayItem[]> {
+  const res = await fetch("/api/media", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query,
+      kind,
+      limit: 6,
+      // Tenor's licence covers social use and not client work, so its results
+      // are excluded from a commercial search — which is the default. Asking
+      // for GIFs at all is asking for that catalogue.
+      ...(kind === "gif" ? { allowNonCommercial: true } : {}),
+    }),
+  });
+  const json = (await res.json()) as {
+    success?: boolean;
+    results?: { id: string; title: string; downloadUrl: string }[];
+    error?: { message?: string };
+  };
+  if (!json.success) throw new Error(json.error?.message ?? "That search didn't work.");
+
+  const found: TrayItem[] = [];
+  for (const result of (json.results ?? []).slice(0, 6)) {
+    const proxied = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "fetch",
+        url: result.downloadUrl,
+        filename: result.title.slice(0, 40),
+      }),
+    });
+    const asset = (await proxied.json()) as { success?: boolean; url?: string };
+    // One that will not fetch is skipped rather than failing the search: five
+    // results is a better answer than an error.
+    if (asset.success && asset.url) {
+      found.push({
+        id: `${result.id}`,
+        url: asset.url,
+        label: result.title,
+        origin: "search",
+      });
+    }
+  }
+  return found;
+}
+
+
+
 function GeneratorSection({ at }: { at: number }) {
-  const [mode, setMode] = useState<"generate" | "search">("generate");
+  const [mode, setMode] = useState<"generate" | "search" | "stock" | "gif">(
+    "generate"
+  );
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,6 +312,25 @@ function GeneratorSection({ at }: { at: number }) {
     setBusy(true);
     setError(null);
     try {
+      // Stock and GIF go through the media route, which searches the
+      // openly-licensed catalogues and proxies the bytes onto our origin —
+      // the same requirement every other picture here has, for the same
+      // reason: a cross-origin image taints the canvas and kills the export.
+      if (mode === "stock" || mode === "gif") {
+        const found = await searchStock(text, mode === "gif" ? "gif" : "image");
+        if (found.length === 0) {
+          setError(
+            mode === "gif"
+              ? "Nothing came back. GIFs need TENOR_API_KEY on the server."
+              : "Nothing came back. Try a broader word."
+          );
+          return;
+        }
+        setTray((prev) => [...found, ...prev].slice(0, 12));
+        for (const item of found) void loadImage(item.url).catch(() => null);
+        return;
+      }
+
       const image =
         mode === "generate"
           ? await generateImage(text)
@@ -308,7 +390,9 @@ function GeneratorSection({ at }: { at: number }) {
           onChange={setMode}
           options={[
             { value: "generate", label: "Artwork" },
-            { value: "search", label: "Real photo" },
+            { value: "search", label: "Photo" },
+            { value: "stock", label: "Stock" },
+            { value: "gif", label: "GIF" },
           ]}
         />
       </div>
