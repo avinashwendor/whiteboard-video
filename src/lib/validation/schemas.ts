@@ -203,8 +203,11 @@ export const rescriptAgentRequestSchema = z.object({
       .optional(),
     can: z.object({ generateImage: z.boolean(), photoSearch: z.boolean() }),
   }),
-  /** "propose" describes the edit and waits; "execute" performs it. */
-  mode: z.enum(["propose", "execute"]).optional(),
+  /**
+   * "propose" describes the edit and waits; "execute" performs it; "review"
+   * looks at frames of the finished edit and reports what is wrong with it.
+   */
+  mode: z.enum(["propose", "execute", "review"]).optional(),
   /**
    * Earlier turns of this conversation, oldest first. Compressed to what was
    * asked and what came of it — enough for "make that bigger" to resolve

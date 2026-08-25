@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CornerDownLeft,
+  Eye,
   ListChecks,
   Loader2,
   Sparkles,
@@ -42,7 +43,12 @@ import {
   standingPreferences,
   type Exemplar,
 } from "@/rescript/lib/feedback/retrieve";
-import { takeGlances } from "@/rescript/lib/overlay/glance";
+import {
+  reviewTimes,
+  takeGlances,
+  takeReviewGlances,
+} from "@/rescript/lib/overlay/glance";
+import { currentComposition } from "@/rescript/lib/overlay/store";
 import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
 
 /**
@@ -295,6 +301,14 @@ export default function AiPanel() {
    * judgement made before seeing anything.
    */
   const appliedRef = useRef<{ ids: string[]; at: number } | null>(null);
+  /**
+   * The operations the last applied plan carried, so a review knows where to
+   * look. A review that samples evenly reviews the parts of the video nothing
+   * happened to.
+   */
+  const reviewAtRef = useRef<{ start?: number; at?: number }[]>([]);
+  /** Whether there is applied work worth watching back. Drives the button. */
+  const [reviewable, setReviewable] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -308,7 +322,7 @@ export default function AiPanel() {
   const submitRef = useRef<
     | ((
         text?: string,
-        mode?: "propose" | "execute",
+        mode?: "propose" | "execute" | "review",
         options?: { repair?: boolean; silent?: boolean }
       ) => Promise<void>)
     | null
@@ -505,7 +519,7 @@ export default function AiPanel() {
    */
   const submitText = useCallback(async (
     text?: string,
-    mode: "propose" | "execute" = "execute",
+    mode: "propose" | "execute" | "review" = "execute",
     options?: { repair?: boolean; silent?: boolean }
   ) => {
     const repair = options?.repair ?? false;
@@ -544,7 +558,23 @@ export default function AiPanel() {
     const glances =
       repair || media.mediaKind !== "video" || !media.mediaUrl
         ? []
-        : await takeGlances(media.mediaUrl, timeline);
+        : mode === "review"
+          ? // Composited: a review of the raw footage would be a review of a
+            // video nobody is going to watch.
+            await takeReviewGlances(
+              media.mediaUrl,
+              timeline,
+              currentComposition(),
+              reviewTimes(reviewAtRef.current, timeline.duration)
+            )
+          : await takeGlances(media.mediaUrl, timeline);
+
+    // A review with nothing to look at is a review of nothing, and the model
+    // will fill the silence with plausible-sounding findings.
+    if (mode === "review" && glances.length === 0) {
+      setBusy(false);
+      return;
+    }
 
     try {
       const overlay = useOverlayStore.getState();
@@ -865,6 +895,13 @@ export default function AiPanel() {
           });
         }
       }
+      reviewAtRef.current = accepted.flatMap((step) =>
+        step.ops.map((op) => ({
+          start: (op as { start?: number }).start,
+          at: (op as { at?: number }).at,
+        }))
+      );
+      setReviewable(true);
     } catch (err) {
       if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
       else append("fail", err instanceof Error ? err.message : "Something went wrong.");
@@ -873,6 +910,22 @@ export default function AiPanel() {
       setBusy(false);
     }
   }, [proposal, busy, model, append, setProposal, playhead, aspect]);
+
+  /**
+   * Watch the cut back.
+   *
+   * Offered rather than automatic: it costs a request with three composited
+   * frames in it, and an edit somebody has just accepted step by step is
+   * usually right. Making them ask is the difference between a reviewer and a
+   * tax on every plan.
+   */
+  const review = useCallback(() => {
+    void submitRef.current?.(
+      "Watch this back and tell me what is wrong with it.",
+      "review",
+      { silent: true }
+    );
+  }, []);
 
   const ready = status === "ready";
 
@@ -1021,6 +1074,27 @@ export default function AiPanel() {
       )}
 
       <div className="border-t border-zinc-200 p-2.5 dark:border-zinc-800">
+        {reviewable && !busy && !proposal && (
+          <button
+            type="button"
+            onClick={() => {
+              setReviewable(false);
+              review();
+            }}
+            className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-left transition hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-zinc-500 dark:hover:bg-zinc-800/60"
+          >
+            <Eye size={13} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-zinc-800 dark:text-zinc-100">
+                Watch it back
+              </span>
+              <span className="block text-[10px] leading-tight text-zinc-400 dark:text-zinc-600">
+                Renders what shipped and looks at it — legibility, collisions,
+                framing
+              </span>
+            </span>
+          </button>
+        )}
         <div className="relative">
           <textarea
             value={prompt}

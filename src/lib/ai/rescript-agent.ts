@@ -343,6 +343,55 @@ apply: shape (the frame), tighten (fillers, silences), choose (what to keep), pa
 (subtitles), produce (titles, kinetic captions, b-roll). Three to six steps. Every step must carry the
 operations that do it — a step with an empty "ops" is not a step, it is a comment.`;
 
+/**
+ * Watching the cut back.
+ *
+ * The half of an editor's job the agent has never done. It plans, the browser
+ * runs the plan, and nobody looks at the result — so a caption over a busy
+ * background, a title that collides with a burned-in subtitle, or a punch-in
+ * that crops someone's forehead all survive to the export. `checkCraft` catches
+ * what is checkable from the plan alone; this catches what is only visible in
+ * the frame.
+ *
+ * The frames it is shown are rendered *with the composition burned in*, by the
+ * same renderer that will make the file. So it is looking at what ships, not at
+ * a description of it.
+ *
+ * It replies with the same plan shape as propose mode, which is the whole point
+ * of doing it this way: a fix goes back through the identical accept-or-decline
+ * surface as anything else. A review that could quietly change the video would
+ * be worse than no review.
+ */
+const REVIEW_SUFFIX = `
+
+YOU ARE REVIEWING YOUR OWN WORK
+The edit has been applied. The frames attached are what the finished video actually looks like at those
+moments — captions, framing, look and all, rendered by the same code that will encode the file.
+
+Watch it back the way you would watch someone else's cut: looking for what is wrong, not for reasons the
+plan was reasonable. Specifically, and only from what you can see —
+
+  · Type that cannot be read. Over a busy background, too small, too close to an edge, low contrast, or
+    fighting the burned-in subtitles.
+  · Two things occupying the same part of the frame at the same moment.
+  · Anything outside the safe area, which is a problem on a phone even where it looks fine here.
+  · A framing that crops the subject badly, or a punch-in on a shot that was already tight.
+  · A look that has gone too far — crushed shadows, skin that has turned.
+
+Say nothing about the writing, the pacing or what was cut. You cannot judge those from stills and a
+confident guess about them is worse than silence.
+
+Reply in this shape:
+{"thinking":"what you actually see",
+ "summary":"one sentence: is this ready, or what is wrong with it",
+ "findings":["one short sentence per problem, naming the moment it happens at"],
+ "steps":[{"title":"Short name","detail":"why","ops":[ ... ]}]}
+
+If it is fine, say so in "summary", leave "findings" empty and send NO steps. That is a real answer and the
+most common correct one — an edit that has just been accepted step by step is usually right, and inventing
+a problem to look useful is how a reviewer stops being trusted. Only propose a step for something you can
+point at in a frame.`;
+
 function stripFence(value: string): string {
   const trimmed = value.trim();
   if (!trimmed.startsWith("```")) return trimmed;
@@ -593,8 +642,12 @@ function learnedBlock(
 export interface RescriptAgentInput {
   instruction: string;
   context: RescriptAgentContext;
-  /** "propose" returns named steps to accept; "execute" returns flat ops. */
-  mode?: "propose" | "execute";
+  /**
+   * "propose" returns named steps to accept; "execute" returns flat ops;
+   * "review" looks at frames of the finished edit and reports what is wrong
+   * with it, in the same shape as "propose" so any fix is accepted the same way.
+   */
+  mode?: "propose" | "execute" | "review";
   /** Earlier turns in this conversation, oldest first. */
   history?: RescriptExchange[];
   /**
@@ -1256,7 +1309,11 @@ const MAX_TURNS = 16;
 export async function planRescriptEdit(
   input: RescriptAgentInput
 ): Promise<RescriptPlan> {
-  const propose = input.mode === "propose";
+  const reviewing = input.mode === "review";
+  // A review answers in the propose shape — named steps, accepted one at a
+  // time — so everything downstream that understands a proposal understands a
+  // review without knowing there is a difference.
+  const propose = input.mode === "propose" || reviewing;
   const lines = parseTranscript(input.context.transcript);
   const brief = describe(input.context, lines);
 
@@ -1265,7 +1322,7 @@ export async function planRescriptEdit(
   const system = [
     SYSTEM,
     PROTOCOL,
-    propose ? PROPOSE_SUFFIX : "",
+    reviewing ? REVIEW_SUFFIX : propose ? PROPOSE_SUFFIX : "",
     learned,
     brief.windowed
       ? "\nThis transcript was shown to you as an outline. Do not plan a cut or a caption on a stretch you have not read in full."
@@ -1282,7 +1339,7 @@ export async function planRescriptEdit(
    */
   const closedSystem = [
     SYSTEM,
-    propose ? PROPOSE_SUFFIX : "",
+    reviewing ? REVIEW_SUFFIX : propose ? PROPOSE_SUFFIX : "",
     learned,
     `HOW TO REPLY
 
@@ -1639,7 +1696,15 @@ still what the video is *about*.`,
        * cannot even manage a sentence is asked again.
        */
       const justified = parsed.summary.trim().length > 0;
-      if (justified && queriedEmpty) {
+      // A review is asked once and taken at its word.
+      //
+      // For a plan, an empty answer is usually the model stalling, so it is
+      // worth one challenge. For a review it is the *most common correct
+      // answer* — an edit accepted step by step is usually right — and pushing
+      // back on it asks a reviewer to justify finding nothing, which is how you
+      // get an invented fault. The prompt tells it not to invent one; querying
+      // the answer would tell it otherwise, louder.
+      if (justified && (queriedEmpty || reviewing)) {
         return {
           summary: parsed.summary,
           findings: parsed.findings,

@@ -24,6 +24,14 @@
 
 import type { OutputTimeline } from "./timeline";
 import { outputToOriginal } from "./timeline";
+import { paintFrame } from "./frame";
+import { preloadComposition } from "./render";
+import {
+  DEFAULT_FRAME,
+  frameRatio,
+  outputSize,
+  type Composition,
+} from "./types";
 
 /** One frame, as the model will receive it. */
 export interface Glance {
@@ -167,4 +175,130 @@ export async function takeGlances(
   }
 
   return glances;
+}
+
+/* --------------------------------- review ---------------------------------- */
+
+/**
+ * The same frames, with the composition burned into them.
+ *
+ * For the review pass. The agent has to be looking at **what ships** — the
+ * captions where they actually land, the framing as it is actually cropped, the
+ * look as it is actually graded — because every problem worth catching at this
+ * stage is one that only exists once those are on. A review of the raw footage
+ * would be a review of a video nobody is going to watch.
+ *
+ * `paintFrame` is the renderer the exporter uses, so this is not an
+ * approximation of the output; it is the output, smaller.
+ */
+export async function takeReviewGlances(
+  mediaUrl: string,
+  timeline: OutputTimeline,
+  composition: Composition,
+  at: number[]
+): Promise<Glance[]> {
+  if (typeof document === "undefined" || !mediaUrl) return [];
+  const times = at.filter((t) => t >= 0 && t < timeline.duration);
+  if (times.length === 0) return [];
+
+  const video = document.createElement("video");
+  video.src = mediaUrl;
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+
+  const glances: Glance[] = [];
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("metadata timeout")), 5_000);
+      video.onloadedmetadata = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("could not open the media"));
+      };
+    });
+    if (!video.videoWidth) return [];
+
+    // The output's shape, not the footage's — a vertical deliverable reviewed
+    // as widescreen would be reviewed with the crop that matters left out.
+    const sourceAspect = video.videoWidth / video.videoHeight;
+    const ratio = frameRatio(composition.frame ?? DEFAULT_FRAME, sourceAspect);
+    const size = outputSize(ratio, video.videoWidth, video.videoHeight, REVIEW_HEIGHT);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+
+    // Images have to be decoded before they can be composited, or an element
+    // that is on screen at the reviewed moment silently renders as its
+    // placeholder — and the agent reports a missing picture that is not missing.
+    await preloadComposition(composition);
+
+    for (const t of times) {
+      const source = outputToOriginal(t, timeline.keepRanges);
+      if (!Number.isFinite(source)) continue;
+      await seek(video, source);
+      ctx.clearRect(0, 0, size.width, size.height);
+      try {
+        paintFrame(ctx, size, { live: video, freeze: null }, null, composition, t);
+      } catch {
+        // Canvas2D throws on non-finite geometry. One frame that will not
+        // composite is not worth losing the whole review over.
+        continue;
+      }
+      glances.push({ at: t, dataUrl: canvas.toDataURL("image/jpeg", REVIEW_QUALITY) });
+    }
+  } catch {
+    // Fewer frames, or none — in which case the review is skipped rather than
+    // run against nothing.
+  } finally {
+    video.src = "";
+    video.removeAttribute("src");
+    video.load();
+  }
+
+  return glances;
+}
+
+/**
+ * Bigger and better than a planning glance, because this is the pass that has
+ * to judge whether type is *legible* — and legibility is exactly the thing a
+ * 384px thumbnail destroys.
+ */
+const REVIEW_HEIGHT = 540;
+const REVIEW_QUALITY = 0.72;
+
+/**
+ * When to look.
+ *
+ * At the moments the edit actually touched, not spread evenly: a review exists
+ * to check the work that was just done, and a frame from a stretch nothing
+ * happened to is a frame spent on nothing. Falls back to an even spread when
+ * the plan carried no times — a whole-video grade, for instance, changes every
+ * frame and names none of them.
+ */
+export function reviewTimes(ops: { start?: number; at?: number }[], duration: number, limit = 3): number[] {
+  const named = ops
+    .map((op) => (typeof op.start === "number" ? op.start : op.at))
+    .filter((t): t is number => typeof t === "number" && t >= 0 && t < duration)
+    // Half a second in, so a caption's own entrance has finished and it is
+    // judged settled rather than mid-animation.
+    .map((t) => Math.min(duration - 0.05, t + 0.5))
+    .sort((a, b) => a - b);
+
+  if (named.length === 0) return glanceTimes(duration, limit);
+
+  // Spread across what was touched rather than taking the first few, which
+  // would review the opening of the video three times.
+  const out: number[] = [];
+  for (let i = 0; i < Math.min(limit, named.length); i += 1) {
+    out.push(named[Math.floor((i * named.length) / Math.min(limit, named.length))]);
+  }
+  return [...new Set(out)];
 }

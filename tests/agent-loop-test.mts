@@ -341,4 +341,63 @@ function model(replies: (n: number) => string) {
   assert(plan.steps?.length === 1, "and the plan comes through");
 }
 
+/* ------------------------------- reviewing --------------------------------- */
+
+{
+  // A review answers in the propose shape, so a fix goes back through the same
+  // accept-or-decline surface as anything else. A review that could quietly
+  // change the video would be worse than no review at all.
+  const clean = JSON.stringify({
+    thinking: "the caption sits clear of the subtitles and reads fine",
+    summary: "This is ready.",
+    findings: [],
+    steps: [],
+  });
+
+  const stub = model(() => clean);
+  const plan = await planRescriptEdit({
+    instruction: "watch this back",
+    context,
+    mode: "review",
+    generate: stub.generate,
+  });
+
+  // "It is fine" has to be a real answer. A reviewer that must find something
+  // will invent something, and then stops being worth asking.
+  assert(stub.calls === 1, `a clean review is one call, took ${stub.calls}`);
+  assert(plan.summary.length > 0, "it still says something");
+  assert((plan.steps?.length ?? 0) === 0, "and proposes nothing");
+  assert(plan.warnings.length === 0, "with nothing left over");
+}
+
+{
+  // A review that finds something proposes a fix as ordinary steps — and the
+  // fix goes through `verifyPlan` like any other, so a review cannot smuggle in
+  // an operation a normal plan would have been refused.
+  const fault = JSON.stringify({
+    thinking: "the captions are unreadable over that background",
+    summary: "The subtitles are hard to read over the busy lower third.",
+    findings: ["From 4s the captions sit on a bright background with no scrim."],
+    steps: [
+      {
+        title: "Put a slab behind the captions",
+        detail: "so they read over the background",
+        ops: [{ op: "subtitles", action: "style", background: "rgba(0,0,0,0.6)" }],
+      },
+    ],
+  });
+
+  const stub = model(() => fault);
+  const plan = await planRescriptEdit({
+    instruction: "watch this back",
+    context,
+    mode: "review",
+    generate: stub.generate,
+  });
+
+  assert(plan.steps?.length === 1, "a fix comes back as a step");
+  assert(plan.findings.length === 1, "and says what it saw");
+  assert(stub.calls === 1, `no repair round needed for a clean fix, took ${stub.calls}`);
+}
+
 console.log("ALL AGENT LOOP TESTS PASSED");
