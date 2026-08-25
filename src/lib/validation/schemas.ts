@@ -221,6 +221,27 @@ export const rescriptAgentRequestSchema = z.object({
     .max(12)
     .optional(),
   model: modelId.optional(),
+  /**
+   * Examples retrieved from this person's own past decisions.
+   *
+   * They ride in the request rather than being looked up server-side because
+   * that is where they live: the feedback store is in the browser, like the
+   * media and the transcript, and shipping it to a server to be queried would
+   * undo the one property this editor has that nothing else does.
+   */
+  exemplars: z
+    .array(
+      z.object({
+        instruction: z.string().trim().max(500),
+        title: z.string().trim().max(200),
+        detail: z.string().trim().max(400),
+        good: z.boolean(),
+      }),
+    )
+    .max(8)
+    .optional(),
+  /** Standing preferences inferred from the same store. */
+  preferences: z.array(z.string().trim().max(300)).max(4).optional(),
 });
 export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
 

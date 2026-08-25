@@ -31,6 +31,18 @@ import type { AgentOp } from "@/rescript/lib/overlay/ops-schema";
 import { Button, Empty, formatSeconds } from "./ui";
 import { MicButton } from "@/components/ui/mic-button";
 import { loadAgentModel, saveAgentModel } from "@/rescript/lib/agent-model";
+import {
+  listFeedback,
+  recordAll,
+  recordFeedback,
+  reviseVerdict,
+} from "@/rescript/lib/feedback/store";
+import {
+  retrieveExemplars,
+  standingPreferences,
+  type Exemplar,
+} from "@/rescript/lib/feedback/retrieve";
+import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
 
 /**
  * The prompt surface.
@@ -75,6 +87,14 @@ const TRANSCRIPT_BUDGET = 180_000;
 
 /** How much of the live reasoning to keep on screen. */
 const THOUGHT_TAIL = 1_400;
+
+/**
+ * How long after applying a plan an undo still counts as a verdict on it.
+ *
+ * Short on purpose. Undoing immediately is "that was wrong"; undoing a minute
+ * later is ordinary editing that happens to walk back over the same ground.
+ */
+const UNDO_WINDOW_MS = 30_000;
 
 interface PlanReply {
   success?: boolean;
@@ -205,6 +225,30 @@ async function consumeStream(
   return final;
 }
 
+/**
+ * What this person's past decisions have to say about this instruction.
+ *
+ * Never throws and never blocks a plan: an empty result is the state the agent
+ * was in before any of this existed, so a failure here costs the improvement
+ * rather than the request.
+ */
+async function gatherLearned(instruction: string): Promise<{
+  exemplars: Exemplar[];
+  preferences: string[];
+}> {
+  try {
+    const events = await listFeedback();
+    if (events.length === 0) return { exemplars: [], preferences: [] };
+    const exemplars = await retrieveExemplars(instruction, { events });
+    return {
+      exemplars,
+      preferences: standingPreferences(events).map((p) => p.note),
+    };
+  } catch {
+    return { exemplars: [], preferences: [] };
+  }
+}
+
 export default function AiPanel() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -232,6 +276,24 @@ export default function AiPanel() {
     []
   );
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * What was asked for, kept for as long as its answer is on screen.
+   *
+   * A ref rather than state because nothing renders from it: the box is cleared
+   * the moment a request is sent, and a proposal is read and accepted seconds
+   * later — so by the time a verdict is recorded, the instruction that earned
+   * it is long gone from `prompt`.
+   */
+  const instructionRef = useRef("");
+  /**
+   * What was just applied, so an undo can be read as an opinion about it.
+   *
+   * Undoing within a few seconds of accepting a plan is the strongest signal
+   * this panel can collect — the person read the step, ran it, looked at the
+   * result and took it back. It is worth more than a decline, which is a
+   * judgement made before seeing anything.
+   */
+  const appliedRef = useRef<{ ids: string[]; at: number } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -341,6 +403,36 @@ export default function AiPanel() {
     []
   );
 
+  /**
+   * Watch for the plan being taken back.
+   *
+   * `past` shrinking while `future` grows is an undo, whichever way it was
+   * triggered — the button, the shortcut, or the menu. The window is short on
+   * purpose: an undo half a minute later is ordinary editing, not a verdict on
+   * anything the agent did.
+   */
+  useEffect(
+    () =>
+      useOverlayStore.subscribe((state, previous) => {
+        const undone =
+          state.past.length < previous.past.length &&
+          state.future.length > previous.future.length;
+        if (!undone) return;
+
+        const applied = appliedRef.current;
+        if (!applied) return;
+        if (Date.now() - applied.at > UNDO_WINDOW_MS) {
+          appliedRef.current = null;
+          return;
+        }
+        // Once only: a second undo is walking back further work, not a second
+        // opinion about the same steps.
+        appliedRef.current = null;
+        void reviseVerdict(applied.ids, "undone");
+      }),
+    []
+  );
+
   // The store aborts in-flight work when it is reset, but the controller lives
   // here. Handing it over is what makes `useChatStore.reset()` safe to call
   // from the editor store.
@@ -429,12 +521,20 @@ export default function AiPanel() {
       setPrompt("");
       setProposal(null);
     }
-    if (!options?.silent) append("you", instruction);
+    if (!options?.silent) {
+      append("you", instruction);
+      instructionRef.current = instruction;
+    }
     setThought("");
     setAgentStatus(null);
 
     /** Look details already put in the log by the stream, so they are not repeated. */
     const reported = new Set<string>();
+
+    // Reading the whole store costs a few milliseconds against a request that
+    // takes seconds, and it must be fresh: a verdict given thirty seconds ago
+    // should count towards the very next plan.
+    const learned = await gatherLearned(instruction);
 
     try {
       const overlay = useOverlayStore.getState();
@@ -494,6 +594,14 @@ export default function AiPanel() {
         // Omitted rather than empty: the schema treats absent as "the server
         // picks", which is what this panel did before there was a picker.
         model: model || undefined,
+        // Retrieved here rather than server-side because this is where they
+        // live: the feedback store is in the browser with the media and the
+        // transcript, and shipping it somewhere to be queried would give away
+        // the one property this editor has that nothing else does.
+        ...(learned.exemplars.length ? { exemplars: learned.exemplars } : {}),
+        ...(learned.preferences.length
+          ? { preferences: learned.preferences }
+          : {}),
       };
 
       const res = await fetch("/api/rescript/agent", {
@@ -677,6 +785,29 @@ export default function AiPanel() {
     setBusy(true);
     setProposal(null);
 
+    // The verdict is recorded here, at the moment it is actually made: the
+    // person has read every step and decided, one at a time, which of them
+    // were right. That is a labelled preference pair per step, produced by
+    // someone looking at their own footage — and until now it was discarded
+    // the instant the panel moved on.
+    void recordAll(
+      current.steps.map((step, i) => ({
+        projectId: useEditorStore.getState().projectId,
+        instruction: instructionRef.current,
+        planSummary: current.summary,
+        stepTitle: step.title,
+        stepDetail: step.detail,
+        ops: step.ops,
+        verdict: current.declined.includes(i)
+          ? ("declined" as const)
+          : ("accepted" as const),
+        model: model || undefined,
+        promptVersion: PROMPT_VERSION,
+      }))
+    ).then((ids) => {
+      appliedRef.current = { ids, at: Date.now() };
+    });
+
     try {
       for (const step of accepted) {
         if (controller.signal.aborted) break;
@@ -690,6 +821,7 @@ export default function AiPanel() {
           editor.manualCuts,
           editor.sceneBoundaries
         );
+        let failed = 0;
         await runPlan(
           step.ops,
           {
@@ -698,9 +830,29 @@ export default function AiPanel() {
             timeline: fresh,
             aspect,
           },
-          (result) => append(result.ok ? "ok" : "fail", result.message),
+          (result) => {
+            if (!result.ok) failed += 1;
+            append(result.ok ? "ok" : "fail", result.message);
+          },
           controller.signal
         );
+
+        // A step that was accepted and then would not run is a different
+        // failure from one that was declined, and the more useful of the two:
+        // the person wanted it and the plan could not deliver it.
+        if (failed > 0) {
+          void recordFeedback({
+            projectId: useEditorStore.getState().projectId,
+            instruction: instructionRef.current,
+            planSummary: current.summary,
+            stepTitle: step.title,
+            stepDetail: step.detail,
+            ops: step.ops,
+            verdict: "failed",
+            model: model || undefined,
+            promptVersion: PROMPT_VERSION,
+          });
+        }
       }
     } catch (err) {
       if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
@@ -709,7 +861,7 @@ export default function AiPanel() {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [proposal, busy, append, setProposal, playhead, aspect]);
+  }, [proposal, busy, model, append, setProposal, playhead, aspect]);
 
   const ready = status === "ready";
 

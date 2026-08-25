@@ -26,7 +26,8 @@
     "test:grade": "tsx tests/grade-test.ts",
     "test:motion": "tsx tests/motion-test.ts",
     "test:templates": "tsx tests/templates-test.ts",
-    "test:shapes": "tsx tests/shapes-test.ts"
+    "test:shapes": "tsx tests/shapes-test.ts",
+    "test:feedback": "tsx tests/feedback-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

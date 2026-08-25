@@ -528,6 +528,60 @@ export interface RescriptExchange {
   outcome?: string;
 }
 
+/** One past decision, as an example. */
+export interface RescriptExemplar {
+  instruction: string;
+  title: string;
+  detail: string;
+  /** True when the person kept it. */
+  good: boolean;
+}
+
+/**
+ * Past decisions, written as something the model can act on.
+ *
+ * Presented as *this person's* judgements rather than as rules, because that is
+ * what they are — one editor's taste on their own footage — and a model told
+ * "the rule is X" generalises it to cases where it does not hold. Told "they
+ * kept this and dropped that", it treats them as evidence, which is the correct
+ * weight for three examples.
+ */
+function learnedBlock(
+  exemplars: RescriptExemplar[] | undefined,
+  preferences: string[] | undefined
+): string {
+  const kept = (exemplars ?? []).filter((e) => e.good);
+  const dropped = (exemplars ?? []).filter((e) => !e.good);
+  const notes = preferences ?? [];
+  if (!kept.length && !dropped.length && !notes.length) return "";
+
+  const lines: string[] = [
+    "WHAT THIS PERSON HAS ACCEPTED BEFORE",
+    "",
+    "Their own past decisions on this kind of request. Evidence about their taste, not rules — where they",
+    "conflict with the brief in front of you, the brief wins.",
+  ];
+
+  if (kept.length) {
+    lines.push("", "Kept:");
+    for (const e of kept) {
+      lines.push(`  · asked "${e.instruction}" → kept "${e.title}" (${e.detail})`);
+    }
+  }
+  if (dropped.length) {
+    lines.push("", "Turned down:");
+    for (const e of dropped) {
+      lines.push(`  · asked "${e.instruction}" → rejected "${e.title}" (${e.detail})`);
+    }
+  }
+  if (notes.length) {
+    lines.push("", "Standing:");
+    for (const note of notes) lines.push(`  · ${note}`);
+  }
+
+  return lines.join("\n");
+}
+
 export interface RescriptAgentInput {
   instruction: string;
   context: RescriptAgentContext;
@@ -535,6 +589,17 @@ export interface RescriptAgentInput {
   mode?: "propose" | "execute";
   /** Earlier turns in this conversation, oldest first. */
   history?: RescriptExchange[];
+  /**
+   * Plans this person has kept or dropped, for instructions like this one.
+   *
+   * The prompt has no few-shot examples of its own — every operation is taught
+   * by one inline JSON line — so these are the only worked examples the model
+   * ever sees, and they have the advantage of being about this person's own
+   * footage and taste rather than a style guide's idea of either.
+   */
+  exemplars?: RescriptExemplar[];
+  /** Standing preferences inferred from the same history. */
+  preferences?: string[];
   model?: string;
   signal?: AbortSignal;
   /**
@@ -1180,10 +1245,13 @@ export async function planRescriptEdit(
   const lines = parseTranscript(input.context.transcript);
   const brief = describe(input.context, lines);
 
+  const learned = learnedBlock(input.exemplars, input.preferences);
+
   const system = [
     SYSTEM,
     PROTOCOL,
     propose ? PROPOSE_SUFFIX : "",
+    learned,
     brief.windowed
       ? "\nThis transcript was shown to you as an outline. Do not plan a cut or a caption on a stretch you have not read in full."
       : "",
@@ -1200,6 +1268,7 @@ export async function planRescriptEdit(
   const closedSystem = [
     SYSTEM,
     propose ? PROPOSE_SUFFIX : "",
+    learned,
     `HOW TO REPLY
 
 Reply with one JSON object and nothing else — no prose, no code fence. There are no tools; you have already

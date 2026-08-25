@@ -61,6 +61,8 @@ export async function POST(req: Request) {
           context: body.context,
           mode: body.mode,
           history: body.history,
+          exemplars: body.exemplars,
+          preferences: body.preferences,
           model: body.model,
           signal: req.signal,
           onEvent: (event: AgentEvent) => send(event),
