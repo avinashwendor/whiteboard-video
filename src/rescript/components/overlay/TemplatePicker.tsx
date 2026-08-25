@@ -84,6 +84,7 @@ function previewComposition(template: TextTemplate): Composition {
     frame: { ...DEFAULT_FRAME },
     shots: [],
     grade: null,
+    audio: [],
   };
 }
 

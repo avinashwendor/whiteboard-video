@@ -99,6 +99,7 @@ async function writeSnapshot() {
     frame: overlay.frame,
     shots: overlay.shots,
     grade: overlay.grade,
+    audio: overlay.audio,
   };
   // The composition counts as work: a project whose only edit is "make it
   // vertical and burn in captions" has an untouched transcript and still has to
@@ -178,7 +179,8 @@ if (typeof window !== "undefined") {
       state.transitions === previous.transitions &&
       state.frame === previous.frame &&
       state.shots === previous.shots &&
-      state.grade === previous.grade
+      state.grade === previous.grade &&
+      state.audio === previous.audio
     ) {
       return;
     }

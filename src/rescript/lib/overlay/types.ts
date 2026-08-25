@@ -16,6 +16,7 @@
  */
 
 import { isNeutralGrade, type GradeSpec } from "./grade";
+import { audioIsIdle, type AudioClip } from "./audio";
 
 /** Normalised rectangle: 0..1 of the frame, origin top-left. */
 export interface Rect {
@@ -514,6 +515,14 @@ export interface Composition {
    * what every project made before this rendered as.
    */
   grade?: GradeSpec | null;
+  /**
+   * Music, effects and anything else over the recording's own sound.
+   *
+   * Empty — and absent, for saves made before it existed — means the export
+   * still stream-copies the voice track exactly as it always has. Only a
+   * project that actually adds sound pays for a mix.
+   */
+  audio?: AudioClip[];
 }
 
 export function emptyComposition(): Composition {
@@ -529,6 +538,7 @@ export function emptyComposition(): Composition {
     frame: { ...DEFAULT_FRAME },
     shots: [],
     grade: null,
+    audio: [],
   };
 }
 
@@ -580,6 +590,7 @@ export function isEmptyComposition(
     c.transitions.every((t) => t.kind === "none" || t.duration <= 0) &&
     shotsAreIdle(c.shots) &&
     isNeutralGrade(c.grade) &&
+    audioIsIdle(c.audio) &&
     !frameReframes(c.frame ?? DEFAULT_FRAME, sourceAspect)
   );
 }

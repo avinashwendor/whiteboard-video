@@ -30,6 +30,7 @@
     "test:feedback": "tsx tests/feedback-test.ts",
     "test:craft": "tsx tests/craft-test.ts",
     "test:glance": "tsx tests/glance-test.ts",
+    "test:audio": "tsx tests/audio-test.ts",
     "eval": "tsx evals/run.mts"
   },
   "dependencies": {

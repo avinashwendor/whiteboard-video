@@ -28,6 +28,7 @@ import {
 } from "./types";
 import { normaliseShots } from "./shots";
 import { withGradeDefaults, type GradeSpec } from "./grade";
+import type { AudioClip } from "./audio";
 import { forgetImage, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
 
@@ -58,6 +59,16 @@ function nextId(prefix: string): string {
 }
 
 export interface OverlayState extends Composition {
+  /**
+   * Required here even though it is optional on a `Composition`.
+   *
+   * Optional on the stored shape because a save made before the audio layer
+   * existed does not have one. In the *store* it is always present — `reset`
+   * and `loadComposition` both guarantee an array — and narrowing it here means
+   * every action can push to it without a `?? []` that would silently discard a
+   * clip if the assumption ever broke.
+   */
+  audio: AudioClip[];
   selectedId: string | null;
   /** Element ids being dragged/resized, so history coalesces to one entry. */
   gestureActive: boolean;
@@ -135,6 +146,11 @@ export interface OverlayState extends Composition {
   removeShot: (id: string) => void;
   replaceShots: (shots: Shot[]) => void;
 
+  /** Add a music bed or an effect. Returns the id. */
+  addAudio: (clip: Omit<AudioClip, "id"> & { id?: string }) => string;
+  updateAudio: (id: string, patch: Partial<Omit<AudioClip, "id">>) => void;
+  removeAudio: (id: string) => void;
+
   loadComposition: (composition: Composition) => void;
   undo: () => void;
   redo: () => void;
@@ -185,6 +201,7 @@ function snapshot(s: OverlayState): Composition {
     frame: s.frame,
     shots: s.shots,
     grade: s.grade,
+    audio: s.audio,
   };
 }
 
@@ -233,6 +250,10 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
 
   return {
     ...emptyComposition(),
+    // Restated because the stored shape has it optional (older saves have
+    // none) while the store's is not. `emptyComposition` already sets it; this
+    // is what tells the type system so.
+    audio: [],
     selectedId: null,
     gestureActive: false,
     past: [],
@@ -594,6 +615,24 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       commit({ shots });
     },
 
+    /* ---------------------------------- audio ---------------------------------- */
+
+    addAudio: (input) => {
+      const id = input.id ?? nextId("audio");
+      commit({ audio: [...get().audio, { ...input, id }] });
+      return id;
+    },
+
+    updateAudio: (id, patch) =>
+      commit({
+        audio: get().audio.map((clip) =>
+          clip.id === id ? { ...clip, ...patch } : clip
+        ),
+      }),
+
+    removeAudio: (id) =>
+      commit({ audio: get().audio.filter((clip) => clip.id !== id) }),
+
     /* ---------------------------------- shots ---------------------------------- */
 
     addShot: (input) => {
@@ -660,6 +699,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         // full-frame plate of the footage — which is what it rendered as.
         shots: composition.shots ?? [],
         grade: composition.grade ?? null,
+        // Absent on a save made before there was an audio layer, and absent
+        // means silence — which is what those projects exported as.
+        audio: composition.audio ?? [],
         aspect: frameRatio(frame, get().sourceAspect),
         selectedId: null,
         // A loaded composition is a new starting point, not a step: undoing
@@ -732,5 +774,6 @@ export function currentComposition(): Composition {
     frame: s.frame,
     shots: s.shots,
     grade: s.grade,
+    audio: s.audio,
   };
 }
