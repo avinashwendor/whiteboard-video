@@ -1,4 +1,4 @@
-import { LUCIDE_NAMES, LUCIDE_PATHS } from "./icon-paths.generated";
+import { LUCIDE_NAMES, LUCIDE_PATHS } from "@/lib/icons/lucide-paths.generated";
 
 /**
  * Concept -> icon.

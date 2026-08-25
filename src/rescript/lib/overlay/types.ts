@@ -165,7 +165,13 @@ export interface ImageElement extends Common {
   shadow: boolean;
 }
 
-export type ShapeKind = "rect" | "ellipse" | "line";
+/**
+ * `path` is any named mark — an annotation or one of the 1,776 icons — drawn
+ * from the shared geometry in `lib/icons`. It exists so that an arrow, a
+ * circle-this and a "server" icon are one kind of element with one animation,
+ * rather than three features.
+ */
+export type ShapeKind = "rect" | "ellipse" | "line" | "path";
 
 export interface ShapeElement extends Common {
   kind: "shape";
@@ -175,6 +181,14 @@ export interface ShapeElement extends Common {
   /** Fraction of frame height. */
   strokeWidth: number;
   radius: number;
+  /**
+   * Which mark, when `shape` is "path". An annotation name or an icon name.
+   *
+   * A name rather than path data: it survives the catalogue being regenerated,
+   * it is what the agent can reasonably be asked for, and it is the thing worth
+   * showing in the layer list.
+   */
+  pathName?: string;
 }
 
 export type OverlayElement = TextElement | ImageElement | ShapeElement;

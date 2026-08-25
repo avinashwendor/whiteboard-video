@@ -312,13 +312,24 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     },
 
     addShape: (partial = {}) => {
+      // A mark is a drawn gesture and a rectangle is a plate to put something
+      // on, so their defaults are opposites: one wants ink and no fill, the
+      // other a fill and no ink. Getting this wrong makes every placed arrow
+      // arrive as an invisible black-on-black box.
+      const isMark = partial.shape === "path";
       const element: ShapeElement = {
         id: nextId("shape"),
         kind: "shape",
-        name: partial.name ?? "Shape",
+        name: partial.name ?? (isMark ? (partial.pathName ?? "Mark") : "Shape"),
         start: partial.start ?? 0,
         end: partial.end ?? (partial.start ?? 0) + 4,
-        rect: partial.rect ?? { x: 0.08, y: 0.62, w: 0.84, h: 0.22 },
+        rect:
+          partial.rect ??
+          (isMark
+            ? // Square, because a mark is scaled to fit and a wide box would
+              // simply centre it in empty space.
+              { x: 0.38, y: 0.34, w: 0.24, h: 0.24 }
+            : { x: 0.08, y: 0.62, w: 0.84, h: 0.22 }),
         rotation: 0,
         opacity: 1,
         z: 0,
@@ -327,9 +338,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         enter: partial.enter ?? { ...DEFAULT_ENTER },
         exit: partial.exit ?? { ...DEFAULT_EXIT },
         shape: "rect",
-        fill: "rgba(0,0,0,0.55)",
-        strokeColor: null,
-        strokeWidth: 0.004,
+        fill: isMark ? null : "rgba(0,0,0,0.55)",
+        strokeColor: isMark ? "#ffd60a" : null,
+        strokeWidth: isMark ? 0.009 : 0.004,
         radius: 0.06,
         ...partial,
       };

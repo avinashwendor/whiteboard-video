@@ -74,6 +74,12 @@ OPERATIONS
 {"op":"addShape","shape":"rect","position":"bottom","size":"l","fill":"rgba(0,0,0,0.6)"}
   A plain block — usually a scrim so text over busy footage stays readable. shape: rect ellipse line
 
+{"op":"addShape","shape":"path","mark":"circleThis","start":18,"duration":2.5,"position":"center","strokeColor":"#ffd60a"}
+  Draws a mark on the frame. Marks: arrow arrowCurved circleThis underline doubleUnderline strike box
+  bracketLeft bracketRight scribble check cross divider chevron plus star — plus any Lucide icon name
+  (rocket, server, clock, trending-up, …). It draws itself on when "enter" is "wipeRight", which is the
+  point of them. Use a mark to point at something already on screen; do not use one as decoration.
+
 {"op":"updateElement","element":2,"text":"New words","color":"#ffd60a","size":"xl","uppercase":true}
   Changes an existing element in place. Only include the fields you are changing.
 

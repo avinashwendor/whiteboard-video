@@ -18,6 +18,7 @@ import {
   tokenProgress,
   type DrawState,
 } from "./animation";
+import { drawShapePath } from "./shapes";
 import type {
   Composition,
   ImageElement,
@@ -475,8 +476,24 @@ function drawShape(
   ctx: CanvasRenderingContext2D,
   el: ShapeElement,
   size: FrameSize,
-  box: Px
+  box: Px,
+  state: DrawState
 ) {
+  // A named mark draws itself on, using the reveal the animation already
+  // computes — so `wipeRight` on an arrow becomes the arrow being drawn rather
+  // than a rectangle sliding over it.
+  if (el.shape === "path") {
+    const drawn = drawShapePath(ctx, el.pathName ?? "arrow", box, size, {
+      stroke: el.strokeColor,
+      fill: el.fill,
+      strokeWidth: el.strokeWidth,
+      progress: state.reveal,
+    });
+    // An unknown name falls through to a rectangle rather than drawing nothing:
+    // an element that is invisible is one nobody can select to fix.
+    if (drawn) return;
+  }
+
   const lineWidth = el.strokeWidth * size.height;
   ctx.save();
   if (el.shape === "ellipse") {
@@ -554,7 +571,7 @@ export function paintElement(
       drawImageElement(ctx, element, box);
       break;
     case "shape":
-      drawShape(ctx, element, size, box);
+      drawShape(ctx, element, size, box, state);
       break;
   }
 

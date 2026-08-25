@@ -29,6 +29,7 @@ import {
 } from "@/rescript/lib/overlay/presets";
 import type { TextStyleName } from "@/rescript/lib/overlay/ops-schema";
 import type { OverlayElement } from "@/rescript/lib/overlay/types";
+import ShapePicker from "./ShapePicker";
 import TemplatePicker from "./TemplatePicker";
 import { Button, Empty, Section, Segmented, TextInput, formatSeconds } from "./ui";
 
@@ -60,6 +61,7 @@ export default function ElementsPanel() {
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
       <AddSection at={at} />
       <TemplateSection at={at} />
+      <MarkSection at={at} />
       <GeneratorSection at={at} />
       <LayerSection elements={elements} selectedId={selectedId} at={at} />
     </div>
@@ -193,6 +195,38 @@ function TemplateSection({ at }: { at: number }) {
             ...fields,
           });
         }}
+      />
+    </Section>
+  );
+}
+
+/* ---------------------------------- marks ---------------------------------- */
+
+/**
+ * Arrows, circles, ticks — and 1,776 icons behind the search box.
+ *
+ * Separate from the plain Shape button above, which makes a rectangle to put
+ * something on. These are gestures you draw *at* the picture, and they arrive
+ * with ink and no fill because that is what a mark is.
+ */
+function MarkSection({ at }: { at: number }) {
+  const addShape = useOverlayStore((s) => s.addShape);
+
+  return (
+    <Section title="Marks & icons">
+      <ShapePicker
+        onPick={(name) =>
+          addShape({
+            shape: "path",
+            pathName: name,
+            name,
+            start: at,
+            end: at + DEFAULT_SECONDS,
+            // `wipeRight` on a mark is the draw-on: the renderer reveals the
+            // path along its own length rather than sliding a box over it.
+            enter: { kind: "wipeRight", duration: 0.55, easing: "easeOut" },
+          })
+        }
       />
     </Section>
   );

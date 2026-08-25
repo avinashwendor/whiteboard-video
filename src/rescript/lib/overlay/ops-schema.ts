@@ -163,7 +163,15 @@ export const addImageOp = z.object({
 
 export const addShapeOp = z.object({
   op: z.literal("addShape"),
-  shape: z.enum(["rect", "ellipse", "line"]).default("rect"),
+  shape: z.enum(["rect", "ellipse", "line", "path"]).default("rect"),
+  /**
+   * Which mark, when `shape` is "path".
+   *
+   * An annotation name (arrow, circleThis, underline, check, …) or any of the
+   * 1,776 Lucide icon names. Free text rather than an enum: an enum of 1,792
+   * values in the schema handed to the model would be most of the prompt.
+   */
+  mark: z.string().trim().max(48).optional(),
   start: seconds.optional(),
   end: seconds.optional(),
   duration: z.number().min(0.1).max(600).optional(),

@@ -19,7 +19,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const ICON_DIR = path.resolve("node_modules/lucide-react/dist/esm/icons");
-const OUT = path.resolve("src/lib/whiteboard/icon-paths.generated.ts");
+const OUT = path.resolve("src/lib/icons/lucide-paths.generated.ts");
 
 const round = (n) => Math.round(n * 100) / 100;
 

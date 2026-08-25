@@ -20,6 +20,7 @@ import { findBeats, placePunchIns } from "./emphasis";
 import { shotAt } from "./shots";
 import { gradePreset, NEUTRAL_GRADE } from "./grade";
 import { textTemplate } from "./templates";
+import { knownShape } from "./shapes";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -356,16 +357,39 @@ async function runOne(
 
     case "addShape": {
       const { start, end } = resolveWindow(op, ctx);
+      const wantsMark = op.shape === "path" || !!op.mark;
+
+      // A name nobody has is a plan that would place an invisible element and
+      // report success. Refusing it says which name was wrong, which is the
+      // only way the next attempt is better than the last.
+      if (wantsMark && !knownShape(op.mark ?? "")) {
+        return {
+          ok: false,
+          message: op.mark
+            ? `There is no mark called “${op.mark}”.`
+            : "A path shape needs a mark name.",
+        };
+      }
+
       const { w, h } = SHAPE_SIZE[op.size ?? "l"];
+      // A mark is scaled to fit and centred, so a wide box would just centre it
+      // in empty space. Square it off from the smaller side.
+      const side = wantsMark ? Math.min(w, h) : 0;
       overlay.addShape({
         start,
         end,
-        rect: resolveRect(op.position, w, h, "bottom"),
-        shape: op.shape,
+        rect: wantsMark
+          ? resolveRect(op.position, side, side, "center")
+          : resolveRect(op.position, w, h, "bottom"),
+        shape: wantsMark ? "path" : op.shape,
+        ...(wantsMark ? { pathName: op.mark, name: op.mark } : {}),
         ...(op.fill !== undefined ? { fill: op.fill } : {}),
         ...(op.strokeColor !== undefined ? { strokeColor: op.strokeColor } : {}),
       });
-      return { ok: true, message: `Added a ${op.shape}` };
+      return {
+        ok: true,
+        message: wantsMark ? `Drew a ${op.mark}` : `Added a ${op.shape}`,
+      };
     }
 
     case "updateElement": {
