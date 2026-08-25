@@ -111,13 +111,6 @@ export interface OverlayState extends Composition {
   replaceTransitions: (transitions: Transition[]) => void;
 
   /**
-   * Add a shot over `start`–`end`, clipping whatever it overlaps.
-   *
-   * Returns the id. A shot with no plates is given a plain full-frame one, so
-   * the caller can add a shot first and decide what goes in it second — the
-   * order the UI naturally works in.
-   */
-  /**
    * The project's look, or one shot's.
    *
    * A patch rather than a whole grade, so a slider does not have to know about
@@ -125,6 +118,13 @@ export interface OverlayState extends Composition {
    */
   setGrade: (patch: Partial<GradeSpec> | null, shotId?: string) => void;
 
+  /**
+   * Add a shot over `start`–`end`, clipping whatever it overlaps.
+   *
+   * Returns the id. A shot with no plates is given a plain full-frame one, so
+   * the caller can add a shot first and decide what goes in it second — the
+   * order the UI naturally works in.
+   */
   addShot: (shot: Omit<Shot, "id"> & { id?: string }) => string;
   updateShot: (id: string, patch: Partial<Omit<Shot, "id">>) => void;
   /** Patch one plate of a shot, by slot. */
@@ -139,6 +139,42 @@ export interface OverlayState extends Composition {
   undo: () => void;
   redo: () => void;
   reset: () => void;
+}
+
+/**
+ * Re-clear every element against a frame that has changed shape.
+ *
+ * Returns the same array when nothing had to move, so a reframe that breaks
+ * nothing costs no re-render and leaves the undo stack describing the frame
+ * change alone.
+ */
+function reflow(state: OverlayState, aspect: number): OverlayElement[] {
+  let moved = false;
+  const next = state.elements.map((element) => {
+    if (element.locked || element.hidden) return element;
+
+    const blocked = blockedFor(
+      element.start,
+      element.end,
+      state.elements,
+      state.subtitles,
+      element.id,
+      aspect
+    );
+    const placed = nudgeClear(element.rect, blocked);
+    if (
+      Math.abs(placed.x - element.rect.x) < 1e-6 &&
+      Math.abs(placed.y - element.rect.y) < 1e-6 &&
+      Math.abs(placed.w - element.rect.w) < 1e-6 &&
+      Math.abs(placed.h - element.rect.h) < 1e-6
+    ) {
+      return element;
+    }
+    moved = true;
+    return { ...element, rect: placed };
+  });
+
+  return moved ? next : state.elements;
 }
 
 function snapshot(s: OverlayState): Composition {
@@ -211,11 +247,27 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     },
 
     setFrame: (patch) => {
+      const previous = get().aspect;
       const frame = { ...get().frame, ...patch };
+      const aspect = frameRatio(frame, get().sourceAspect);
       // The output shape is what every rect is a fraction of, so it is kept
       // beside the frame rather than recomputed by each reader.
-      set({ aspect: frameRatio(frame, get().sourceAspect) });
-      commit({ frame });
+      set({ aspect });
+
+      // Changing the *shape* moves the ground under everything on screen.
+      //
+      // Rects are fractions of the frame, so elements survive a reframe rather
+      // than sliding off it — that much was already true. What is not true is
+      // that they still *work*: the subtitle band is a different height in 9:16
+      // than in 16:9 (type is measured against a corrected unit, rects are not),
+      // so a lower third that cleared it in widescreen sits under it in
+      // vertical, and two captions that were comfortably apart can now touch.
+      //
+      // This is the same collision pass every other placement goes through, run
+      // again against the new shape. A rect somebody dragged is still obeyed to
+      // the pixel — this only moves what the new frame has actually broken.
+      const changed = Math.abs(aspect - previous) > 0.001;
+      commit(changed ? { frame, elements: reflow(get(), aspect) } : { frame });
     },
 
     addElement: (element) => {
