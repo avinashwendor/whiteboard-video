@@ -18,6 +18,7 @@
 import {
   planModernScene,
   renderModernCover,
+  renderModernOutro,
   renderModernScene,
   type ModernRenderScene,
 } from "../src/lib/hyperframes/modern-renderer";
@@ -323,6 +324,36 @@ for (const themeName of THEME_NAMES) {
       failures += 1;
       console.error(
         `FAIL: cover/${themeName} at ${progress} — ${[...new Set(recording.problems)].slice(0, 3).join("; ")}`,
+      );
+    }
+  }
+}
+
+/* --------------------------------- the outro -------------------------------- */
+
+for (const themeName of THEME_NAMES) {
+  for (const progress of [0, 0.3, 0.7, 1]) {
+    const recording = recordingCanvas();
+    try {
+      renderModernOutro(recording.ctx, {
+        title: "Why retrieval quietly breaks",
+        description: "Retrieval fails at the chunk boundary, not at the model.",
+        fontSans: "TestSans",
+        fontDisplay: "TestDisplay",
+        fontPoster: "TestPoster",
+        progress,
+        theme: themeName,
+      });
+    } catch (error) {
+      failures += 1;
+      console.error(`FAIL: outro/${themeName} at ${progress} threw: ${error}`);
+      continue;
+    }
+    rendered += 1;
+    if (recording.problems.length) {
+      failures += 1;
+      console.error(
+        `FAIL: outro/${themeName} at ${progress} — ${[...new Set(recording.problems)].slice(0, 3).join("; ")}`,
       );
     }
   }

@@ -24,6 +24,7 @@ import { BOARD_HEIGHT, BOARD_WIDTH, renderCover, renderFrame, renderOutro } from
 import {
   planModernScene,
   renderModernCover,
+  renderModernOutro,
   renderModernScene,
   type ModernPlan,
 } from "@/lib/hyperframes/modern-renderer";
@@ -331,8 +332,13 @@ export function WhiteboardPlayer({
 
     return built;
     // `images` only swaps the bitmap a plan points at, never the plan's timing.
+    //
+    // `boardStock` is here because a layout bakes its colours in when it is
+    // composed, not when it is painted. Without it, switching to a chalkboard
+    // repaints the paper dark and leaves the drawing in the ink it was built
+    // with -- a board that is genuinely there and completely invisible.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenes, voiceDelay, isHyperframes]);
+  }, [scenes, voiceDelay, isHyperframes, project.boardStock]);
 
   useEffect(
     () => () => {
@@ -499,12 +505,28 @@ export function WhiteboardPlayer({
       }
 
       if (index >= scenes.length) {
+        const progress = clamp01(secondsIntoScene / Math.max(0.1, outroDuration));
+        // The closing card belongs to whichever engine drew the film. A modern
+        // video that hands over to a hand-drawn whiteboard for its last four
+        // seconds has not ended, it has stopped.
+        if (isHyperframes) {
+          renderModernOutro(ctx, {
+            title: project.title,
+            description: project.description,
+            fontSans: fonts.sans,
+            fontDisplay: fonts.display,
+            fontPoster: fonts.poster,
+            progress,
+            theme: scenes[scenes.length - 1]?.visualTheme ?? scenes[0]?.visualTheme,
+          });
+          return;
+        }
         renderOutro(ctx, {
           title: project.title,
           description: project.description,
           fontHand: fonts.hand,
           fontSans: fonts.sans,
-          progress: clamp01(secondsIntoScene / Math.max(0.1, outroDuration)),
+          progress,
         });
         return;
       }

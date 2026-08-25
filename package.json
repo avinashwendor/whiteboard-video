@@ -34,6 +34,7 @@
     "test:sync": "tsx tests/sync-test.ts",
     "test:frames": "tsx tests/frames-test.ts",
     "test:render": "tsx tests/render-test.ts",
+    "test:pipeline": "tsx tests/pipeline-test.ts",
     "test:media": "tsx tests/media-test.ts",
     "eval": "tsx evals/run.mts"
   },

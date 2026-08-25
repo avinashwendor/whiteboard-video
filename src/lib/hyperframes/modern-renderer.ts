@@ -2281,4 +2281,109 @@ export function renderModernCover(
   }
 }
 
+/**
+ * The closing plate.
+ *
+ * A film that spends ninety seconds building one look and then hands over to
+ * a hand-drawn whiteboard card has not ended, it has stopped -- and that is
+ * exactly what a modern film used to do, because there was only ever one
+ * closing card and it belonged to the other engine.
+ *
+ * The composition is deliberately the quietest in the set: the takeaway line,
+ * the title under it, and nothing else moving. Everything before this has been
+ * arriving; the last four seconds should be still enough to read.
+ */
+export function renderModernOutro(
+  ctx: CanvasRenderingContext2D,
+  options: {
+    title: string;
+    description: string;
+    fontSans: string;
+    fontDisplay?: string;
+    fontPoster?: string;
+    progress: number;
+    theme?: ThemeName;
+  },
+) {
+  const theme = themeOf(options.theme);
+  const p = clamp01(options.progress);
+  const time = p * 4;
+  const titleFace = options.fontDisplay ?? options.fontSans;
+  const posterFace = options.fontPoster ?? titleFace;
+
+  drawFinishGround(ctx, theme, time);
+
+  if (theme.finish === "editorial") {
+    const word = options.title.split(/\s+/).filter(Boolean)[0] ?? "";
+    if (word.length > 1) {
+      drawGhostType(ctx, word, {
+        family: posterFace,
+        colour: theme.ghost,
+        at: 0.5,
+        span: 1.02,
+        time,
+        drift: 0.3,
+        progress: smootherstep(range(p, 0, 0.4)),
+      });
+    }
+    drawFrameRule(ctx, theme, 34, range(p, 0.05, 0.5));
+  } else if (theme.finish === "glass") {
+    drawBloom(ctx, BOARD_WIDTH / 2, BOARD_HEIGHT * 0.44, BOARD_WIDTH * 0.4, theme.accentAlt, 0.2);
+  }
+
+  /* the takeaway */
+  const line = layoutDisplay(ctx, options.description, {
+    family: titleFace,
+    maxWidth: CONTENT_WIDTH * 0.86,
+    maxSize: 62,
+    minSize: 32,
+    weight: 800,
+    maxLines: 4,
+    lineRatio: 1.14,
+  });
+
+  const centreY = BOARD_HEIGHT * 0.47 - line.height / 2 + line.size;
+
+  // A rule above it, the same mark the film opened on.
+  drawRule(ctx, theme, BOARD_WIDTH / 2 - 44, centreY - line.size - 62, 88, range(p, 0.04, 0.3), 5);
+
+  drawDisplay(ctx, line, {
+    x: BOARD_WIDTH / 2,
+    y: centreY,
+    align: "center",
+    theme,
+    shadow: theme.finish !== "print",
+    reveal: (index) => range(p, 0.1 + index * 0.05, 0.42 + index * 0.05),
+  });
+
+  /* the title, small, underneath */
+  const tag = smootherstep(range(p, 0.6, 0.9));
+  if (tag > 0) {
+    ctx.save();
+    ctx.globalAlpha = tag;
+    ctx.font = `600 24px ${options.fontSans}`;
+    ctx.letterSpacing = "3px";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = theme.inkMuted;
+    ctx.fillText(
+      options.title.toUpperCase(),
+      BOARD_WIDTH / 2,
+      centreY + (line.lines.length - 1) * line.lineHeight + 86,
+    );
+    ctx.letterSpacing = "0px";
+    ctx.restore();
+  }
+
+  // Out through the ground, the way every other handover in the film goes.
+  const dip = (1 - smootherstep(range(p, 0, 0.16))) * 0.8 + smootherstep(range(p, 0.9, 1)) * 1;
+  if (dip > 0) {
+    ctx.save();
+    ctx.globalAlpha = clamp(dip, 0, 1);
+    ctx.fillStyle = theme.ground;
+    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.restore();
+  }
+}
+
 export { themeOf };

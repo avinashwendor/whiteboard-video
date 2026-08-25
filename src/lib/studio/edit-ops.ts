@@ -305,6 +305,17 @@ export async function applyOps(
           }
 
           if (!onScene) {
+            // The surface belongs to the drawn engine. Setting it on a modern
+            // film writes a field nothing reads, and the agent would report
+            // success for an edit that changed nothing on screen.
+            if (op.field === "boardStock" && isModern) {
+              note(
+                "set",
+                "This is a Modern video — it has palettes, not board surfaces. Set visualTheme instead.",
+                false,
+              );
+              break;
+            }
             (next as unknown as Record<string, unknown>)[op.field] = op.value;
             note("set", `Set the video's ${op.field}`);
             break;
@@ -328,6 +339,17 @@ export async function applyOps(
             }
             scene.scene.title = String(op.value);
             note("set", `${label(index)}: board title is now “${op.value}”`);
+            break;
+          }
+
+          // The mirror of `boardTitle` above: a composition is a Modern idea,
+          // and a whiteboard scene has a layout instead.
+          if (op.field === "shot" && !isModern) {
+            note(
+              "set",
+              "This is a whiteboard video — its scenes have board layouts, not shots. Re-lay out the board instead.",
+              false,
+            );
             break;
           }
 
