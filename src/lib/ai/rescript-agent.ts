@@ -8,6 +8,7 @@ import {
   type AgentOp,
 } from "@/rescript/lib/overlay/ops-schema";
 import { verifyPlan, type PlanWorld } from "@/rescript/lib/overlay/verify";
+import { checkCraft } from "@/rescript/lib/overlay/craft";
 
 /**
  * Turns "put a title card on the first clip and burn in subtitles" into work.
@@ -1633,22 +1634,49 @@ ${
       transcript: input.context.transcript ?? "",
       can: input.context.can,
     };
+    /**
+     * Two checks, not one.
+     *
+     * `verifyPlan` asks whether the plan would *run* — a caption past the end
+     * of the cut, a boundary that does not exist, a phrase the transcript does
+     * not contain. `checkCraft` asks whether it should have been made: two
+     * accent colours, four transition kinds, a caption every eight seconds.
+     *
+     * The second only became necessary when the agent was handed a template
+     * library, 1,776 icons, seven grades and four more transitions. A bigger
+     * box of toys makes worse videos by default, and reviewing its own plan
+     * against the house style before showing it is the cheap half of what a
+     * professional does — watching the cut back is the expensive half, and
+     * needs eyes this agent does not have yet.
+     *
+     * Only errors are fed back. A warning is a smell, sometimes deliberate,
+     * and spending a whole repair round making the model defend a choice it
+     * was entitled to make is worse than letting it through.
+     */
     const problems = proposed ? verifyPlan(everyOp, world) : [];
-    if (proposed) emit?.({ type: "verify", problems: problems.length });
+    const craft = proposed
+      ? checkCraft(everyOp, { duration: input.context.duration }).filter(
+          (finding) => finding.severity === "error"
+        )
+      : [];
+    const faults = [...problems, ...craft.map((c) => c.message)];
+    if (proposed) emit?.({ type: "verify", problems: faults.length });
 
-    if (problems.length && !repaired) {
+    if (faults.length && !repaired) {
       repaired = true;
-      emit?.({ type: "repair", problems });
+      emit?.({ type: "repair", problems: faults });
       trace.push({
         tool: "verify",
-        detail: `Checked the plan — ${problems.length} problem${problems.length === 1 ? "" : "s"} to fix`,
+        detail: `Checked the plan — ${faults.length} problem${faults.length === 1 ? "" : "s"} to fix`,
       });
       messages.push({ role: "assistant", content: result.text.slice(0, 2_500) });
       messages.push({
         role: "user",
         content: [
-          "That plan was checked against the project before running it, and these are wrong:",
-          ...problems.map((p) => `  - ${p}`),
+          problems.length
+            ? "That plan was checked against the project before running it, and these are wrong:"
+            : "That plan would run, but it breaks the house style you were given:",
+          ...faults.map((p) => `  - ${p}`),
           "",
           "Send the whole plan again with those fixed. Keep everything that was right; change only what has to change.",
         ].join("\n"),
@@ -1656,10 +1684,10 @@ ${
       continue;
     }
 
-    if (problems.length) {
+    if (faults.length) {
       trace.push({
         tool: "verify",
-        detail: `${problems.length} problem${problems.length === 1 ? "" : "s"} could not be resolved`,
+        detail: `${faults.length} problem${faults.length === 1 ? "" : "s"} could not be resolved`,
       });
     }
 
@@ -1670,7 +1698,11 @@ ${
       ops: flat.ops,
       rejected,
       trace,
-      warnings: problems,
+      // Both kinds. A style fault that survived the repair round has to reach
+      // the person too — the probe's contract is that an empty `warnings`
+      // beside a non-empty plan is the only pass, and it would stop meaning
+      // that if half the faults were dropped on the way out.
+      warnings: faults,
     };
   }
 

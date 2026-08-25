@@ -244,4 +244,101 @@ function model(replies: (n: number) => string) {
   assert(plan.ops.length === 1, "the plan should come straight through");
 }
 
+/* ------------------- a plan that runs but breaks the style ------------------ */
+
+{
+  // Two accent colours. Nothing here is *wrong* in the sense `verifyPlan`
+  // means — every operation would execute — so before the craft rules the
+  // agent had no reason not to hand this over. It is the exact failure a
+  // bigger toy box produces: valid, and worse than what a person would make.
+  const clashing = JSON.stringify({
+    thinking: "adding some colour",
+    summary: "Two captions.",
+    findings: ["The delivery is clean already."],
+    steps: [
+      {
+        title: "Caption the first claim",
+        detail: "on the beat",
+        ops: [{ op: "addText", text: "three times faster", color: "#ffd60a", start: 4, duration: 2 }],
+      },
+      {
+        title: "Caption the second",
+        detail: "later",
+        ops: [{ op: "addText", text: "and cheaper", color: "#4ade80", start: 20, duration: 2 }],
+      },
+    ],
+  });
+
+  const fixed = JSON.stringify({
+    thinking: "one accent",
+    summary: "Two captions.",
+    findings: ["The delivery is clean already."],
+    steps: [
+      {
+        title: "Caption the first claim",
+        detail: "on the beat",
+        ops: [{ op: "addText", text: "three times faster", color: "#ffd60a", start: 4, duration: 2 }],
+      },
+      {
+        title: "Caption the second",
+        detail: "later",
+        ops: [{ op: "addText", text: "and cheaper", color: "#ffd60a", start: 20, duration: 2 }],
+      },
+    ],
+  });
+
+  const repairs: string[][] = [];
+  const stub = model((n) => (n === 0 ? clashing : fixed));
+  const plan = await planRescriptEdit({
+    instruction: "caption the two claims",
+    context,
+    mode: "propose",
+    generate: stub.generate,
+    onEvent: (event) => {
+      if (event.type === "repair") repairs.push(event.problems);
+    },
+  });
+
+  assert(stub.calls === 2, `a style fault should cost one repair round, took ${stub.calls}`);
+  assert(repairs.length === 1, "and should announce it");
+  assert(
+    repairs[0].some((p) => p.toLowerCase().includes("accent")),
+    `the repair should name the fault: ${JSON.stringify(repairs[0])}`
+  );
+  assert(plan.warnings.length === 0, "and nothing should be left over once it is fixed");
+  assert(plan.steps?.length === 2, "both steps survive the repair");
+}
+
+{
+  // The other half of the same rule: a *warning* must not cost a round. A
+  // smell is sometimes deliberate, and making the model defend a choice it was
+  // entitled to make is worse than letting it through.
+  const smelly = JSON.stringify({
+    thinking: "zooms",
+    summary: "Punch in on the claims.",
+    findings: [],
+    steps: [
+      {
+        title: "Punch in",
+        detail: "on the beats",
+        ops: [
+          { op: "autoPunchIns" },
+          { op: "setCamera", start: 4, end: 7, camera: "punchIn" },
+        ],
+      },
+    ],
+  });
+
+  const stub = model(() => smelly);
+  const plan = await planRescriptEdit({
+    instruction: "punch in on the claims",
+    context,
+    mode: "propose",
+    generate: stub.generate,
+  });
+
+  assert(stub.calls === 1, `a warning must not trigger a repair, took ${stub.calls}`);
+  assert(plan.steps?.length === 1, "and the plan comes through");
+}
+
 console.log("ALL AGENT LOOP TESTS PASSED");
