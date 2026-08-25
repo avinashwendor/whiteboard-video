@@ -42,6 +42,7 @@ import {
   standingPreferences,
   type Exemplar,
 } from "@/rescript/lib/feedback/retrieve";
+import { takeGlances } from "@/rescript/lib/overlay/glance";
 import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
 
 /**
@@ -536,6 +537,15 @@ export default function AiPanel() {
     // should count towards the very next plan.
     const learned = await gatherLearned(instruction);
 
+    // A few frames of the cut, so the planner is not editing blind. Skipped for
+    // audio — there is nothing to look at — and skipped on a repair, which is
+    // the same request again and has already been shown them.
+    const media = useEditorStore.getState();
+    const glances =
+      repair || media.mediaKind !== "video" || !media.mediaUrl
+        ? []
+        : await takeGlances(media.mediaUrl, timeline);
+
     try {
       const overlay = useOverlayStore.getState();
       const ordered = [...overlay.elements].sort((a, b) => a.z - b.z);
@@ -602,6 +612,7 @@ export default function AiPanel() {
         ...(learned.preferences.length
           ? { preferences: learned.preferences }
           : {}),
+        ...(glances.length ? { glances } : {}),
       };
 
       const res = await fetch("/api/rescript/agent", {

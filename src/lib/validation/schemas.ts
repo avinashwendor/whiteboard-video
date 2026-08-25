@@ -242,6 +242,28 @@ export const rescriptAgentRequestSchema = z.object({
     .optional(),
   /** Standing preferences inferred from the same store. */
   preferences: z.array(z.string().trim().max(300)).max(4).optional(),
+  /**
+   * A few small frames of the cut, so the planner is not editing blind.
+   *
+   * Capped hard on both count and size. These are ~384px JPEGs at quality
+   * 0.6 — around 20KB each — and the bound is generous enough for that while
+   * being nowhere near large enough for someone to post a video through it.
+   */
+  glances: z
+    .array(
+      z.object({
+        at: z.number().min(0).max(24 * 3600),
+        dataUrl: z
+          .string()
+          .max(400_000)
+          .refine(
+            (value) => value.startsWith("data:image/"),
+            "must be an inline image"
+          ),
+      }),
+    )
+    .max(4)
+    .optional(),
 });
 export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
 

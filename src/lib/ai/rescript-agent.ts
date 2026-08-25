@@ -233,6 +233,13 @@ These are the rules a working editor applies without thinking. Follow them.
   and the middle of the frame belongs to the speaker. Subtitles sit centre or low-centre where a thumb is
   not covering them.
 
+WHAT YOU CAN SEE
+When frames of the footage are attached, look at them before you plan anything that sits on the picture.
+Where the subject is decides which side a caption goes; how tight the shot already is decides whether a
+punch-in would crop them; what the background is doing decides whether text needs a scrim behind it. If
+there are no frames, say nothing about how it looks — you cannot see it, and a confident guess about
+composition is worse than none.
+
 LOOK
 One grade for the whole video, chosen once. A look is the thing that makes separate clips read as one piece,
 and grading shots individually is how you lose that — the exception is genuinely mismatched footage. If the
@@ -601,6 +608,13 @@ export interface RescriptAgentInput {
   exemplars?: RescriptExemplar[];
   /** Standing preferences inferred from the same history. */
   preferences?: string[];
+  /**
+   * A few frames of the cut, so the planner can see what it is editing.
+   *
+   * Attached by the browser rather than fetched, because that is the only
+   * place the media exists — and it stays that way.
+   */
+  glances?: { at: number; dataUrl: string }[];
   model?: string;
   signal?: AbortSignal;
   /**
@@ -1298,10 +1312,50 @@ ${
     });
   }
 
-  messages.push({
-    role: "user",
-    content: `${brief.text}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`,
-  });
+  /**
+   * The brief, with a few frames of the footage attached.
+   *
+   * Every tool this agent has reads text, so until now it had never seen the
+   * video it was editing — which is why its plans read as competent and
+   * generic. It could not know the speaker sits left of frame, that the
+   * background is busy where a caption is about to go, or that the shot is
+   * already tight enough that a punch-in would crop them.
+   *
+   * A `look(t)` tool would be the better shape and is not available: the loop
+   * runs on the server and the footage is in the browser, so a tool call would
+   * have to suspend the loop and round-trip to the client. Every other tool
+   * answers from the request payload precisely so that it cannot.
+   *
+   * Absent when the browser could not grab them, when the project is audio, or
+   * when the model does not take images — all of which are the old behaviour.
+   */
+  const written = `${brief.text}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`;
+  const glances = input.glances ?? [];
+
+  messages.push(
+    glances.length === 0
+      ? { role: "user", content: written }
+      : {
+          role: "user",
+          content: [
+            {
+              type: "text" as const,
+              text: `${written}\n\nWHAT IT LOOKS LIKE\n\n${glances
+                .map((g) => `  · a frame at ${g.at.toFixed(1)}s`)
+                .join("\n")}\n\nUse them for composition, not for content: where the subject sits in frame, how tight the
+shot is, what the background is doing, whether there is room for a caption and where. The transcript is
+still what the video is *about*.`,
+            },
+            ...glances.map((g) => ({
+              type: "image_url" as const,
+              // "low" is the point. What is being asked is where things sit in
+              // the frame, and that does not need resolution — a larger frame
+              // costs more and answers the same questions.
+              image_url: { url: g.dataUrl, detail: "low" as const },
+            })),
+          ],
+        }
+  );
 
   const trace: RescriptTraceEntry[] = [];
   /**
