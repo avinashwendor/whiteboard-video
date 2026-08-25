@@ -19,6 +19,7 @@ import { cameraFor, fitCamera } from "./camera";
 import { findBeats, placePunchIns } from "./emphasis";
 import { shotAt } from "./shots";
 import { gradePreset, NEUTRAL_GRADE } from "./grade";
+import { textTemplate } from "./templates";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -38,6 +39,7 @@ import {
   regionCount,
   SHOT_LAYOUT_LABELS,
   type AnimationKind,
+  type AnimationSpec,
   type OverlayElement,
   type Plate,
   type Rect,
@@ -115,6 +117,60 @@ function textWidthFor(
 /** Numbered as the model sees them: paint order, 1-based. */
 function orderedElements(): OverlayElement[] {
   return [...useOverlayStore.getState().elements].sort((a, b) => a.z - b.z);
+}
+
+/**
+ * Resolve a template into the fields that build a text element.
+ *
+ * A template supplies the look, the motion, the size and the placement; every
+ * one of those is still overridable by the operation, so a template can be
+ * nudged rather than rebuilt. Falls through to the old style-name path when no
+ * template is named, or when the name is not one we have — an invented template
+ * should produce a plain caption rather than nothing at all.
+ */
+type Placement = PositionName | { x: number; y: number } | undefined;
+
+function resolveTextLook(op: {
+  template?: string;
+  style?: Parameters<typeof textStyleFields>[0];
+  size?: SizeName;
+  position?: Placement;
+  enter?: AnimationKind;
+  exit?: AnimationKind;
+}): {
+  fields: ReturnType<typeof textStyleFields>;
+  scale: number;
+  size: SizeName;
+  position: Placement;
+  enter: AnimationSpec;
+  exit: AnimationSpec;
+} {
+  const template = op.template ? textTemplate(op.template) : null;
+
+  if (!template) {
+    const styleName = op.style ?? "plain";
+    return {
+      fields: textStyleFields(styleName),
+      scale: textStyleScale(styleName),
+      size: op.size ?? "l",
+      position: op.position,
+      enter: animation(op.enter, "slideUp"),
+      exit: animation(op.exit, "fade"),
+    };
+  }
+
+  const { sizeScale, ...look } = template.style;
+  return {
+    fields: look as ReturnType<typeof textStyleFields>,
+    scale: sizeScale ?? 1,
+    size: op.size ?? template.size,
+    position: op.position ?? template.position,
+    // An explicit kind wins, but the template's timing is kept: a template
+    // whose reveal is 0.7s per word does not become a 0.4s fade because
+    // someone named a different kind.
+    enter: op.enter ? animation(op.enter, "slideUp") : template.enter,
+    exit: op.exit ? animation(op.exit, "fade") : template.exit,
+  };
 }
 
 function elementByNumber(n: number): OverlayElement | null {
@@ -234,12 +290,11 @@ async function runOne(
   switch (op.op) {
     case "addText": {
       const { start, end } = resolveWindow(op, ctx);
-      const styleName = op.style ?? "plain";
-      const fontSize = TEXT_SIZE[op.size ?? "l"] * textStyleScale(styleName);
-      const w = textWidthFor(op.position);
+      const look = resolveTextLook(op);
+      const fontSize = TEXT_SIZE[look.size] * look.scale;
+      const w = textWidthFor(look.position);
       const h = textBoxHeight(fontSize);
-      const rect = resolveRect(op.position, w, h, "lower-third");
-      const styleFields = textStyleFields(styleName);
+      const rect = resolveRect(look.position, w, h, "lower-third");
 
       overlay.addText({
         text: op.text,
@@ -248,15 +303,16 @@ async function runOne(
         end,
         rect,
         fontSize,
-        ...styleFields,
+        ...look.fields,
         ...(op.color ? { color: op.color } : {}),
         ...(op.background !== undefined ? { background: op.background } : {}),
         ...(op.align ? { align: op.align } : {}),
         ...(op.uppercase !== undefined ? { uppercase: op.uppercase } : {}),
-        enter: animation(op.enter, "slideUp"),
-        exit: animation(op.exit, "fade"),
+        enter: look.enter,
+        exit: look.exit,
       });
-      return { ok: true, message: `Added text “${op.text.slice(0, 40)}”` };
+      const named = op.template ? ` (${op.template})` : "";
+      return { ok: true, message: `Added text “${op.text.slice(0, 40)}”${named}` };
     }
 
     case "addImage": {

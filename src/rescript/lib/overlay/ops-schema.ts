@@ -128,6 +128,16 @@ export const addTextOp = z.object({
   position: position.optional(),
   size: z.enum(SIZES).optional(),
   style: z.enum(TEXT_STYLES).optional(),
+  /**
+   * A named template: a look *and* a motion, in one word.
+   *
+   * Preferred over `style` plus `enter`/`exit`, because a template is a
+   * complete answer that someone has already made work over footage, and the
+   * three fields separately are three chances to produce something that has
+   * never been looked at. Anything set alongside it wins, so a template can be
+   * nudged without being rebuilt.
+   */
+  template: z.string().trim().max(40).optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   align: z.enum(["left", "center", "right"]).optional(),
@@ -302,6 +312,8 @@ export const captionPhraseOp = z.object({
   position: position.optional(),
   size: z.enum(SIZES).optional(),
   style: z.enum(TEXT_STYLES).optional(),
+  /** A named template. Same meaning as on addText, and preferred for the same reason. */
+  template: z.string().trim().max(40).optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   enter: animationField.optional(),

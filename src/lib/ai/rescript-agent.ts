@@ -52,6 +52,19 @@ OPERATIONS
   size: xs s m l xl        style: plain title subtitle caption badge quote handwritten
   Give "duration" OR "end", not both. Keep text short — this is a caption, not a paragraph.
 
+  PREFER "template" over style+enter+exit. A template is a look AND a motion that has already been made to
+  work over footage; the three fields separately are three chances to produce something nobody has looked at.
+  Anything you set alongside it still wins, so a template can be nudged without being rebuilt.
+    Titles: kineticMask boldSlam editorialSerif splitReveal typewriter stamp neon handwritten
+    Lower thirds: cleanBar underlineGrow boxedName bracketed minimalFade cornerTag
+    Captions: wordPop highlightSweep boldBounce scalePunch oneWord softCaption
+    Callouts: speechBubble stickyNote codeCard quoteCard warning aside
+    Data: statBig statWithCaption listReveal comparison unitLabel
+    Call to action: subscribeBump followPill linkBar chapterCard endCard
+
+  Pick by what the words are doing, not by how they should look: a name is a lower third, a spoken phrase is
+  a caption, a figure is a stat. If you are unsure, the first one listed in the right group is the safe one.
+
 {"op":"addImage","prompt":"a hand-drawn rocket, marker on white","start":2,"duration":4,"position":"top-right","size":"m","enter":"pop"}
 {"op":"addImage","query":"golden gate bridge fog","start":2,"duration":4,"position":"right"}
   A picture on top of the video. Use "prompt" to GENERATE artwork (things that cannot be photographed,

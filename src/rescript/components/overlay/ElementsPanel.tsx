@@ -29,6 +29,7 @@ import {
 } from "@/rescript/lib/overlay/presets";
 import type { TextStyleName } from "@/rescript/lib/overlay/ops-schema";
 import type { OverlayElement } from "@/rescript/lib/overlay/types";
+import TemplatePicker from "./TemplatePicker";
 import { Button, Empty, Section, Segmented, TextInput, formatSeconds } from "./ui";
 
 /**
@@ -58,6 +59,7 @@ export default function ElementsPanel() {
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
       <AddSection at={at} />
+      <TemplateSection at={at} />
       <GeneratorSection at={at} />
       <LayerSection elements={elements} selectedId={selectedId} at={at} />
     </div>
@@ -153,6 +155,43 @@ function AddSection({ at }: { at: number }) {
         onChange={(e) => {
           void placeFiles(e.target.files);
           e.target.value = "";
+        }}
+      />
+    </Section>
+  );
+}
+
+/* -------------------------------- templates -------------------------------- */
+
+/**
+ * The template library.
+ *
+ * Below "Add" rather than replacing it: the plain buttons are how you put an
+ * unstyled box on the frame to type into, and a library is how you pick
+ * something finished. Conflating the two would make every quick label a
+ * decision about house style.
+ */
+function TemplateSection({ at }: { at: number }) {
+  const addText = useOverlayStore((s) => s.addText);
+
+  return (
+    <Section title="Templates">
+      <TemplatePicker
+        onPick={(template) => {
+          const { sizeScale, ...fields } = template.style;
+          addText({
+            text: template.sample,
+            name: template.label,
+            start: at,
+            // A template's entrance can be most of a second, so a fixed
+            // three-second life would leave some of them still arriving when
+            // they begin to leave. Long enough that every one of them settles.
+            end: at + Math.max(DEFAULT_SECONDS, template.enter.duration * 3),
+            fontSize: 0.082 * (sizeScale ?? 1),
+            enter: template.enter,
+            exit: template.exit,
+            ...fields,
+          });
         }}
       />
     </Section>
