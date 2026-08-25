@@ -164,6 +164,20 @@ OPERATIONS
 {"op":"removeShot","at":12}
   Drops whatever framing covers that second, back to the footage as shot.
 
+{"op":"addMusic","query":"calm piano","kind":"music"}
+{"op":"addMusic","query":"whoosh","kind":"sfx","start":12}
+  Puts music under the whole video, or an effect at a moment. Say what it should SOUND like — "calm piano",
+  "driving drums", "warm acoustic" — not a title or an artist; the browser searches a licensed catalogue and
+  takes the best usable result. Music defaults to the full length, ducks under speech and fades at both ends.
+  Only add music if it was asked for, or if the video is plainly a montage with nothing being said: a bed
+  under a talking head that did not ask for one is the most common way an automatic edit is made worse.
+
+{"op":"setMusicLevel","gain":0.2}
+  Turns the music up or down. "duck":false stops it dropping under speech, which is almost always wrong.
+
+{"op":"removeMusic"}
+  Takes the music out.
+
 {"op":"setGrade","preset":"warmFilm"}
   The look, over the whole video. Presets: none, clean (a touch of contrast — safe on anything), warmFilm,
   tealOrange, bleach, mono, vivid, moody. Add "at" with a second inside a shot to grade only that shot, which
@@ -239,6 +253,15 @@ Where the subject is decides which side a caption goes; how tight the shot alrea
 punch-in would crop them; what the background is doing decides whether text needs a scrim behind it. If
 there are no frames, say nothing about how it looks — you cannot see it, and a confident guess about
 composition is worse than none.
+
+SOUND
+Music is a decision, not a default. Under a talking head it competes with the thing people came for, and the
+version that buries the voice is the one that gets shipped — so add a bed when it is asked for, or when the
+footage is a montage with nothing being said, and otherwise leave it alone. When you do add one, leave it
+ducking: a bed at a fixed level is either inaudible or it is on top of the speech.
+
+An effect earns its place the same way a transition does. One whoosh on a hard cut is punctuation; one on
+every cut is a ringtone.
 
 LOOK
 One grade for the whole video, chosen once. A look is the thing that makes separate clips read as one piece,

@@ -26,6 +26,8 @@ import {
   type AudioClip,
 } from "../src/rescript/lib/overlay/audio";
 import { buildMixGraph } from "../src/rescript/lib/overlay/mix";
+import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
 import {
   emptyComposition,
   isEmptyComposition,
@@ -255,6 +257,81 @@ function clip(over: Partial<AudioClip> = {}): AudioClip {
   ]);
   assert(out.length === 2, "muted clips are not in the mix at all");
   assert(out[0].name === "early" && out[1].name === "late", "and the rest are in start order");
+}
+
+/* ------------------------------ the operations ------------------------------ */
+
+{
+  const good = siftOps([
+    { op: "addMusic", query: "calm piano" },
+    { op: "addMusic", query: "whoosh", kind: "sfx", start: 12 },
+    { op: "setMusicLevel", gain: 0.2 },
+    { op: "removeMusic" },
+  ]);
+  assert(good.ops.length === 4, `all four should pass: ${good.rejected.join("; ")}`);
+
+  // The model asks for a *sound*, never a file. It cannot know what is in a
+  // catalogue, and a URL it invented would be refused by the proxy's allowlist
+  // — correctly, but with an error nobody could act on.
+  const url = siftOps([
+    { op: "addMusic", query: "calm piano", src: "https://example.org/track.mp3" },
+  ]);
+  assert(url.ops.length === 1, "an unknown field is dropped, not fatal");
+  assert(
+    !("src" in (url.ops[0] as Record<string, unknown>)),
+    "and a URL never reaches the executor"
+  );
+
+  assert(siftOps([{ op: "addMusic", query: "calm", gain: 4 }]).ops.length === 0, "gain is bounded");
+  assert(siftOps([{ op: "setMusicLevel", gain: -1 }]).ops.length === 0, "and so is the level");
+}
+
+{
+  const world: PlanWorld = {
+    duration: 90,
+    boundaryCount: 1,
+    elementCount: 0,
+    subtitlesOn: false,
+    subtitlePosition: "bottom",
+    transcript: "[00:00] something was said",
+    can: { generateImage: true, photoSearch: true },
+  };
+
+  assert(
+    verifyPlan([{ op: "addMusic", query: "calm", kind: "music" }], world).length === 0,
+    "one bed is fine"
+  );
+
+  // Two beds play at once. Nobody means that, and it is inaudible *as a
+  // mistake* — it sounds like one badly-mixed track rather than two.
+  assert(
+    verifyPlan(
+      [
+        { op: "addMusic", query: "calm", kind: "music" },
+        { op: "addMusic", query: "drums", kind: "music" },
+      ],
+      world
+    ).length > 0,
+    "two music beds must be caught"
+  );
+
+  // Effects are not beds; several is normal.
+  assert(
+    verifyPlan(
+      [
+        { op: "addMusic", query: "whoosh", kind: "sfx", start: 10 },
+        { op: "addMusic", query: "click", kind: "sfx", start: 20 },
+        { op: "addMusic", query: "calm", kind: "music" },
+      ],
+      world
+    ).length === 0,
+    "a bed plus two effects is a normal plan"
+  );
+
+  assert(
+    verifyPlan([{ op: "addMusic", query: "whoosh", kind: "sfx", start: 500 }], world).length > 0,
+    "an effect past the end of the cut must be caught"
+  );
 }
 
 console.log("ALL AUDIO TESTS PASSED");

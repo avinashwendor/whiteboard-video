@@ -7,6 +7,7 @@ import {
   Contrast,
   Crop,
   Layers,
+  Music,
   Redo2,
   Shuffle,
   SlidersHorizontal,
@@ -19,6 +20,7 @@ import ElementsPanel from "./ElementsPanel";
 import FramePanel from "./FramePanel";
 import InspectorPanel from "./InspectorPanel";
 import GradePanel from "./GradePanel";
+import MusicPanel from "./MusicPanel";
 import ShotsPanel from "./ShotsPanel";
 import SubtitlesPanel from "./SubtitlesPanel";
 import TransitionsPanel from "./TransitionsPanel";
@@ -39,6 +41,7 @@ type Tab =
   | "style"
   | "shots"
   | "look"
+  | "music"
   | "subtitles"
   | "transitions"
   | "frame";
@@ -52,6 +55,7 @@ const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   // whole file, and is set once.
   { id: "shots", label: "Shots", icon: Camera },
   { id: "look", label: "Look", icon: Contrast },
+  { id: "music", label: "Sound", icon: Music },
   { id: "subtitles", label: "Subs", icon: Captions },
   { id: "transitions", label: "Cuts", icon: Shuffle },
   { id: "frame", label: "Frame", icon: Crop },
@@ -124,6 +128,7 @@ export default function Sidebar() {
       {tab === "style" && <InspectorPanel />}
       {tab === "shots" && <ShotsPanel />}
       {tab === "look" && <GradePanel />}
+      {tab === "music" && <MusicPanel />}
       {tab === "subtitles" && <SubtitlesPanel />}
       {tab === "transitions" && <TransitionsPanel />}
       {tab === "frame" && <FramePanel />}

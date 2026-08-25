@@ -137,6 +137,8 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   let autoPunches = 0;
   /** Whole-video grades. A second one silently replaces the first. */
   let gradeCount = 0;
+  /** Music beds the plan lays down. More than one is never meant. */
+  let beds = 0;
 
   /**
    * How long the video is by this point in the plan — as an upper bound.
@@ -345,6 +347,29 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
         break;
 
       case "setFrame":
+        break;
+
+      case "addMusic":
+        if (op.start !== undefined && op.start >= remaining) {
+          problems.push(
+            `addMusic at ${op.start.toFixed(1)}s is past the end of the finished video.`
+          );
+          break;
+        }
+        // Two beds play at once. Nobody means that, and it is inaudible as a
+        // mistake — it sounds like one badly-mixed track rather than two.
+        if (op.kind !== "sfx") {
+          if (beds > 0) {
+            problems.push(
+              "The video already has a music bed in this plan; a second one would play over the first."
+            );
+          }
+          beds += 1;
+        }
+        break;
+
+      case "setMusicLevel":
+      case "removeMusic":
         break;
 
       case "setGrade":

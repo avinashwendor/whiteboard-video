@@ -493,6 +493,40 @@ export const setGradeOp = z.object({
   at: seconds.optional(),
 });
 
+/* ---------------------------------- sound ---------------------------------- */
+
+/**
+ * Put music or an effect under the video.
+ *
+ * A *search*, not a URL. The model has no way to know what is in a catalogue
+ * and no business choosing a file — the browser searches, takes the first
+ * commercially-usable result, and proxies it onto our origin. What the model is
+ * good for is knowing that this video wants something calm and that it should
+ * start before the first word.
+ */
+export const addMusicOp = z.object({
+  op: z.literal("addMusic"),
+  /** What to look for: "calm piano", "driving drums", "whoosh". */
+  query: z.string().trim().min(2).max(80),
+  kind: z.enum(["music", "sfx"]).default("music"),
+  /** Output-clock seconds. Music defaults to the whole video. */
+  start: seconds.optional(),
+  end: seconds.optional(),
+  /** 0..1. Leave it alone unless asked — the defaults are chosen levels. */
+  gain: z.number().min(0).max(1).optional(),
+});
+
+export const setMusicLevelOp = z.object({
+  op: z.literal("setMusicLevel"),
+  gain: z.number().min(0).max(1),
+  /** Pull the bed down while someone is speaking. On by default. */
+  duck: z.boolean().optional(),
+});
+
+export const removeMusicOp = z.object({
+  op: z.literal("removeMusic"),
+});
+
 export const agentOpSchema = z.discriminatedUnion("op", [
   addTextOp,
   addImageOp,
@@ -519,6 +553,9 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   removeShotOp,
   autoPunchInsOp,
   setGradeOp,
+  addMusicOp,
+  setMusicLevelOp,
+  removeMusicOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

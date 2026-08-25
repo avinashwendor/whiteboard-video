@@ -21,6 +21,7 @@ import { shotAt } from "./shots";
 import { gradePreset, NEUTRAL_GRADE } from "./grade";
 import { textTemplate } from "./templates";
 import { knownShape } from "./shapes";
+import { defaultGainFor } from "./audio";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -172,6 +173,65 @@ function resolveTextLook(op: {
     enter: op.enter ? animation(op.enter, "slideUp") : template.enter,
     exit: op.exit ? animation(op.exit, "fade") : template.exit,
   };
+}
+
+/* ---------------------------------- media ---------------------------------- */
+
+interface FoundMedia {
+  title: string;
+  artist: string;
+  downloadUrl: string;
+  duration?: number;
+  licence: { name: string; attributionRequired: boolean };
+  pageUrl?: string;
+}
+
+/**
+ * The first commercially-usable result for a query.
+ *
+ * "First" is the right answer here rather than a weak one: the route already
+ * ranks best-first and filters out anything that cannot be published, so the
+ * top result is the best *usable* one. Offering the model a list to choose from
+ * would mean sending it twenty titles it has no way to judge between.
+ */
+async function findMedia(
+  query: string,
+  kind: "music" | "sfx",
+  signal?: AbortSignal
+): Promise<FoundMedia | null> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, kind, limit: 5 }),
+      signal,
+    });
+    const json = (await res.json()) as { success?: boolean; results?: FoundMedia[] };
+    if (!json.success) return null;
+    return json.results?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Bring the bytes onto our origin, where the mix can read them. */
+async function proxyMedia(
+  url: string,
+  filename: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "fetch", url, filename: filename.slice(0, 40) }),
+      signal,
+    });
+    const json = (await res.json()) as { success?: boolean; url?: string };
+    return json.success && json.url ? json.url : null;
+  } catch {
+    return null;
+  }
 }
 
 function elementByNumber(n: number): OverlayElement | null {
@@ -947,6 +1007,91 @@ async function runOne(
         ok: true,
         message: `“${op.preset}” on the shot at ${op.at.toFixed(1)}s`,
       };
+    }
+
+    /* ---------------------------------- sound ---------------------------------- */
+
+    case "addMusic": {
+      const isBed = op.kind === "music";
+      const start = isBed ? 0 : Math.max(0, Math.min(op.start ?? ctx.playhead, ctx.duration));
+      const end = Math.min(op.end ?? (isBed ? ctx.duration : start + 3), ctx.duration);
+      if (end - start < 0.2) {
+        return { ok: false, message: "That is too short a stretch to put sound under." };
+      }
+
+      // Searched here rather than by the model: it cannot know what is in a
+      // catalogue, and a URL it invented would fail the proxy's allowlist —
+      // correctly, but with an error nobody could act on.
+      const found = await findMedia(op.query, op.kind, signal);
+      if (!found) {
+        return {
+          ok: false,
+          message: `Nothing usable came back for “${op.query}”. A broader word usually helps.`,
+        };
+      }
+
+      const src = await proxyMedia(found.downloadUrl, found.title, signal);
+      if (!src) {
+        return { ok: false, message: `“${found.title}” could not be fetched.` };
+      }
+
+      overlay.addAudio({
+        kind: op.kind,
+        name: `${found.title} — ${found.artist}`,
+        src,
+        start,
+        end,
+        trimIn: 0,
+        gain: op.gain ?? defaultGainFor(op.kind),
+        fadeIn: isBed ? 1.5 : 0,
+        fadeOut: isBed ? 2 : 0,
+        duck: isBed,
+        loop: isBed && (found.duration ?? 0) < end - start,
+        muted: false,
+        credit: {
+          title: found.title,
+          artist: found.artist,
+          licence: found.licence.name,
+          url: found.pageUrl,
+          attributionRequired: found.licence.attributionRequired,
+        },
+      });
+
+      // The licence is named in the log, not buried: it is the thing that
+      // decides whether the person can publish what was just added.
+      const owed = found.licence.attributionRequired ? ", credit required" : "";
+      return {
+        ok: true,
+        message: `“${found.title}” by ${found.artist} (${found.licence.name}${owed})`,
+      };
+    }
+
+    case "setMusicLevel": {
+      const beds = overlay.audio.filter((clip) => clip.kind === "music");
+      if (beds.length === 0) {
+        return { ok: false, message: "There is no music to set the level of." };
+      }
+      for (const bed of beds) {
+        overlay.updateAudio(bed.id, {
+          gain: op.gain,
+          ...(op.duck !== undefined ? { duck: op.duck } : {}),
+        });
+      }
+      return {
+        ok: true,
+        message: `Music at ${Math.round(op.gain * 100)}%${
+          op.duck === false ? ", no ducking" : ""
+        }`,
+      };
+    }
+
+    case "removeMusic": {
+      const beds = overlay.audio.filter((clip) => clip.kind === "music");
+      if (beds.length === 0) {
+        return { ok: false, message: "There is no music to remove." };
+      }
+      for (const bed of beds) overlay.removeAudio(bed.id);
+      return { ok: true, message: `Removed the music` };
     }
 
     default: {

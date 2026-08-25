@@ -15,6 +15,7 @@ import { paintFrame } from "@/rescript/lib/overlay/frame";
 import { loadImage } from "@/rescript/lib/overlay/render";
 import { transitionAt } from "@/rescript/lib/overlay/timeline";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
+import { useAudioMix } from "@/rescript/hooks/useAudioMix";
 import { useFreezeFrames } from "@/rescript/hooks/useFreezeFrames";
 import type { OverlayElement, Rect } from "@/rescript/lib/overlay/types";
 
@@ -86,6 +87,10 @@ export default function OverlayStage({
   const setSourceAspect = useOverlayStore((s) => s.setSourceAspect);
 
   const timeline = useOutputTimeline();
+
+  // Music and effects, heard live. Mounted here because this component already
+  // owns the preview clock and the timeline the mix is scheduled against.
+  useAudioMix(timeline);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
