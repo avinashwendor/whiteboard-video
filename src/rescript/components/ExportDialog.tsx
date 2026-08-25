@@ -22,6 +22,7 @@ import {
   FRAME_ASPECTS,
   frameRatio,
   outputSize,
+  type FrameAspectId,
 } from "@/rescript/lib/overlay/types";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
 import { formatTime, getEditedDuration, getKeepRanges } from "@/rescript/lib/edits";
@@ -32,6 +33,11 @@ import {
   type VideoExportFormat,
   type VideoExportResolution,
 } from "@/rescript/lib/ffmpeg";
+import {
+  compositionFor,
+  extraTargets,
+  nameFor,
+} from "@/rescript/lib/overlay/deliver";
 import {
   downloadTranscript,
   type SubtitleFormat,
@@ -100,6 +106,15 @@ export default function ExportDialog() {
   const [tab, setTab] = useState<ExportTab>("video");
   const [videoFormat, setVideoFormat] = useState<VideoExportFormat>("mp4");
   const [resolution, setResolution] = useState<VideoExportResolution>("original");
+  /**
+   * Extra shapes to deliver beside the one the project is framed in.
+   *
+   * The cut is aspect-independent — ffmpeg trims the media once and only the
+   * composite pass knows what shape the output is — so three deliverables cost
+   * one trim and three composites, and the composite is the fast half.
+   */
+  const [alsoMake, setAlsoMake] = useState<FrameAspectId[]>([]);
+  const [extras, setExtras] = useState<{ name: string; url: string }[]>([]);
   const [audioFormat, setAudioFormat] = useState<AudioExportFormat>("m4a");
   const [transcriptFormat, setTranscriptFormat] =
     useState<TranscriptDocFormat>("txt");
@@ -172,6 +187,23 @@ export default function ExportDialog() {
       : { width: nativeWidth, height: nativeHeight };
     return outputSize(ratio, base.width, base.height);
   }, [compositionFrame, resolution]);
+
+  /**
+   * The shapes worth offering beside the one the project is already in.
+   *
+   * Compared by shape rather than by name, so a 16:9 project is not offered
+   * "Source" and a 4:3 recording is not offered 4:3 — either would produce two
+   * identical files and a question about which is which.
+   */
+  const otherShapes = useMemo(
+    () =>
+      extraTargets(
+        compositionFrame.aspect,
+        sourceAspect,
+        resolution === "original" ? undefined : Number.parseInt(resolution, 10)
+      ),
+    [compositionFrame.aspect, sourceAspect, resolution]
+  );
 
   const frameLabel =
     FRAME_ASPECTS.find((a) => a.id === compositionFrame.aspect)?.label ??
@@ -308,6 +340,10 @@ export default function ExportDialog() {
               }
             );
 
+      // Held because every extra shape composites from the *cut*, not from a
+      // finished file: compositing a composite burns the captions in twice.
+      const cutOnly = blob;
+
       if (burnIn) {
         if (!canCompose()) {
           throw new Error(
@@ -329,6 +365,34 @@ export default function ExportDialog() {
         setStage(null);
       }
 
+      // The other shapes, from the same trimmed source. `blob` at this point
+      // is already composited for the project's own frame, so each extra
+      // re-composites the *cut* rather than the finished file — compositing a
+      // composite would burn the captions in twice, at two different sizes.
+      const madeExtras: { name: string; url: string }[] = [];
+      if (activeTab === "video" && alsoMake.length > 0 && canCompose()) {
+        for (const [i, aspect] of alsoMake.entries()) {
+          setStage(`Also making ${aspect}`);
+          setProgress(i / alsoMake.length);
+          const shaped = await composeOverlays({
+            source: cutOnly,
+            composition: compositionFor(composition, aspect),
+            timeline,
+            withAudio: hasAudioTrack,
+            onProgress: (fraction) =>
+              setProgress((i + fraction) / alsoMake.length),
+          });
+          madeExtras.push({
+            name: nameFor(mediaFileName, aspect, "mp4"),
+            url: URL.createObjectURL(shaped.blob),
+          });
+        }
+        setStage(null);
+      }
+
+      for (const extra of extras) URL.revokeObjectURL(extra.url);
+      setExtras(madeExtras);
+
       const prev = useEditorStore.getState().exportUrl;
       if (prev) URL.revokeObjectURL(prev);
       setExportUrl(URL.createObjectURL(blob));
@@ -345,6 +409,9 @@ export default function ExportDialog() {
   }, [
     videoFile,
     activeTab,
+    alsoMake,
+    extras,
+    mediaFileName,
     isAudioProject,
     hasAudioTrack,
     cuts,
@@ -574,6 +641,46 @@ export default function ExportDialog() {
               {frameLabel} frame — {frameSize.width}×{frameSize.height}. Change it
               in the Frame tab.
             </p>
+
+            {canCompose() && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                  Also make
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {otherShapes.map((target) => {
+                    const on = alsoMake.includes(target.aspect);
+                    return (
+                      <button
+                        key={target.aspect}
+                        type="button"
+                        disabled={exporting}
+                        title={`${target.width}×${target.height}`}
+                        onClick={() =>
+                          setAlsoMake((prev) =>
+                            prev.includes(target.aspect)
+                              ? prev.filter((a) => a !== target.aspect)
+                              : [...prev, target.aspect]
+                          )
+                        }
+                        className={`cursor-pointer rounded-lg border px-2 py-1 text-[11px] font-medium transition disabled:opacity-40 ${
+                          on
+                            ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+                            : "border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500"
+                        }`}
+                      >
+                        {target.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {alsoMake.length === 0
+                    ? "The same edit in other shapes. The cut is only made once, so each extra costs a re-render and not a re-cut."
+                    : `${alsoMake.length + 1} files from one edit.`}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -724,6 +831,17 @@ export default function ExportDialog() {
                 <Download size={15} className="shrink-0" />
                 <span className="truncate">{t("export.downloadFile", { name: mediaFileName })}</span>
               </a>
+              {extras.map((extra) => (
+                <a
+                  key={extra.url}
+                  href={extra.url}
+                  download={extra.name}
+                  className="flex h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 px-4 text-sm font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
+                >
+                  <Download size={15} className="shrink-0" />
+                  <span className="truncate">{extra.name}</span>
+                </a>
+              ))}
               <button
                 onClick={startMediaExport}
                 className="h-10 rounded-xl text-sm font-medium text-zinc-500 transition hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800"

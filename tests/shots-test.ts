@@ -45,6 +45,12 @@ import { paintFrame } from "../src/rescript/lib/overlay/frame";
 import { cameraFor, fitCamera } from "../src/rescript/lib/overlay/camera";
 import { findBeats, placePunchIns, type Beat } from "../src/rescript/lib/overlay/emphasis";
 import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
+import {
+  compositionFor,
+  extraTargets,
+  nameFor,
+} from "../src/rescript/lib/overlay/deliver";
+import { NEUTRAL_GRADE } from "../src/rescript/lib/overlay/grade";
 import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
 import type { Word } from "../src/rescript/lib/types";
 
@@ -705,6 +711,62 @@ const world: PlanWorld = {
   ]);
   assert(bad.ops.length === 0, "none of those are real");
   assert(bad.rejected.length === 3, `all three should be reported, got ${bad.rejected.length}`);
+}
+
+/* ------------------------------- delivering -------------------------------- */
+
+{
+  // Offering a shape the project is already in produces two identical files and
+  // a question about which is which. Compared by *shape*, not by name — ids
+  // cannot see that "Source" on a 16:9 project is 16:9.
+  const fromWide = extraTargets("16:9", 16 / 9).map((t) => t.aspect);
+  assert(!fromWide.includes("16:9"), "never the current shape");
+  assert(!fromWide.includes("source"), "and not Source when Source is the same shape");
+  assert(fromWide.includes("9:16") && fromWide.includes("1:1"), "the useful ones are there");
+
+  // A 4:3 recording framed as shot must not be offered 4:3 either.
+  const fromFourThree = extraTargets("source", 4 / 3).map((t) => t.aspect);
+  assert(!fromFourThree.includes("4:3"), "4:3 source must not offer 4:3");
+  assert(fromFourThree.includes("16:9"), "but widescreen is a real deliverable from it");
+
+  // Sizes are real, even, and the right way up.
+  for (const target of extraTargets("16:9", 16 / 9)) {
+    assert(target.width > 0 && target.height > 0, `${target.aspect}: has a size`);
+    assert(target.width % 2 === 0 && target.height % 2 === 0, `${target.aspect}: H.264 needs even`);
+  }
+  const vertical = extraTargets("16:9", 16 / 9).find((t) => t.aspect === "9:16");
+  assert(vertical && vertical.height > vertical.width, "9:16 is taller than it is wide");
+  const square = extraTargets("16:9", 16 / 9).find((t) => t.aspect === "1:1");
+  assert(square && square.width === square.height, "1:1 is square");
+}
+
+{
+  // Only the shape changes. Everything else is the edit, and the edit is the
+  // same edit in every shape — a delivery that also moved the captions or
+  // dropped the look would be a different video, not another format of one.
+  const source: Composition = {
+    ...composition([shot()]),
+    grade: { ...NEUTRAL_GRADE, contrast: 0.3 },
+    frame: { ...DEFAULT_FRAME, aspect: "16:9", zoom: 1.2, focusX: 0.3 },
+  };
+  const vertical = compositionFor(source, "9:16");
+
+  assert(vertical.frame.aspect === "9:16", "the shape changed");
+  assert(vertical.frame.zoom === 1.2, "the framing did not");
+  assert(vertical.frame.focusX === 0.3, "nor the focus point");
+  assert(vertical.grade === source.grade, "nor the look");
+  assert(vertical.shots === source.shots, "nor the shots");
+  assert(vertical.elements === source.elements, "nor what is on screen");
+  assert(source.frame.aspect === "16:9", "and the original is untouched");
+}
+
+{
+  // Three downloads have to be tellable apart, and a colon is not a filename
+  // character on any platform worth supporting.
+  assert(nameFor("talk.mp4", "9:16", "mp4") === "talk-9x16.mp4", "named by its shape");
+  assert(nameFor("talk.mp4", "2.39:1", "mp4") === "talk-2.39x1.mp4", "no colons");
+  assert(nameFor("talk.mp4", "source", "mp4") === "talk.mp4", "the master keeps its own name");
+  assert(nameFor("no-extension", "1:1", "mp4") === "no-extension-1x1.mp4", "and a stem without one works");
 }
 
 console.log("ALL SHOT TESTS PASSED");
