@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Copy, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Copy, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { planEdit } from "@/lib/studio/api";
 import { applyOps, pruneForAgent } from "@/lib/studio/edit-ops";
@@ -362,8 +362,14 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
                   >
                     <button type="button" onClick={() => openScene(index)} className="block w-full text-left">
                       <span className="flex items-center justify-between font-mono text-[11.5px]">
-                        <span className={open ? "text-muted" : "text-dim"}>
+                        <span className={cn("flex items-center gap-1.5", open ? "text-muted" : "text-dim")}>
                           {String(index + 1).padStart(2, "0")} · {sceneKind(scene, project.videoStyle)}
+                          {sceneTrouble(scene) ? (
+                            <AlertTriangle
+                              className="size-3 shrink-0 text-danger"
+                              aria-label={sceneTrouble(scene) ?? undefined}
+                            />
+                          ) : null}
                         </span>
                         <span className={open ? "text-muted" : "text-dim"}>
                           {sceneSeconds(scene).toFixed(1)}s
@@ -609,6 +615,25 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
 /* -------------------------------- timeline -------------------------------- */
 
 /** What a scene is made of, for the mono meta line. */
+/**
+ * What went wrong with a scene, if anything, in one line.
+ *
+ * The runner has always recorded this -- a failed voice request, a photo
+ * search that came back with nothing -- and nothing has ever shown it. A scene
+ * whose narration failed still renders: you get a finished-looking video with
+ * one silent shot in the middle of it and no indication which one, or why.
+ *
+ * A silent scene counts even when the run reported success, because the
+ * failure that matters to a viewer is the missing voice, not the status field.
+ */
+function sceneTrouble(scene: SceneAsset): string | null {
+  if (scene.status === "error") return scene.error ?? "This scene didn't generate.";
+  if (scene.narration?.trim() && !scene.audio) {
+    return scene.error ?? "No narration was recorded for this scene — it will play silent.";
+  }
+  return scene.error ?? null;
+}
+
 function sceneKind(scene: SceneAsset, videoStyle?: string) {
   if (videoStyle === "hyperframes") return "Frame";
   if (scene.image) return "Image";

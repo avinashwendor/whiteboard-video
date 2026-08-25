@@ -1,5 +1,20 @@
 import { useState, useCallback, useRef } from "react";
 
+/**
+ * The message off a thrown value, whatever it turned out to be.
+ *
+ * `getUserMedia` rejects with a `DOMException`, `fetch` with a `TypeError`,
+ * and a route's own failure arrives as a plain object. None of them are
+ * guaranteed to be an `Error`, which is what the `any` here was standing in
+ * for -- and reading `.message` off `any` is how "undefined" ends up shown to
+ * someone whose microphone was simply blocked.
+ */
+function messageOf(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  const detail = err as { message?: unknown };
+  return typeof detail?.message === "string" && detail.message ? detail.message : fallback;
+}
+
 export function useVoiceDictation(onTranscription: (text: string) => void) {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -52,9 +67,9 @@ export function useVoiceDictation(onTranscription: (text: string) => void) {
           if (json.transcript) {
             onTranscription(json.transcript);
           }
-        } catch (err: any) {
+        } catch (err) {
           console.error("Dictation error:", err);
-          setError(err.message || "Failed to transcribe audio");
+          setError(messageOf(err, "Failed to transcribe audio"));
         } finally {
           setIsProcessing(false);
           // Stop all tracks to release the microphone
@@ -64,9 +79,9 @@ export function useVoiceDictation(onTranscription: (text: string) => void) {
 
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to start recording:", err);
-      setError(err.message || "Microphone access denied");
+      setError(messageOf(err, "Microphone access denied"));
     }
   }, [onTranscription]);
 

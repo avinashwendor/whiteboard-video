@@ -8,6 +8,15 @@ import { generateRequestSchema } from "@/lib/validation/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * Explicit, because the default is short and this route streams.
+ *
+ * Every other LLM route in the app declares one; these three were left on the
+ * platform default, which on a serverless host is measured in seconds. A long
+ * completion would be cut mid-sentence and arrive as a truncated answer rather
+ * than an error, which is the hardest kind of failure to recognise.
+ */
+export const maxDuration = 120;
 
 const DEFAULT_SYSTEM = `You are a sharp, versatile writer.
 

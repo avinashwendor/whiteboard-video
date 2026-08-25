@@ -300,8 +300,50 @@ export function SceneInspector({
       ? ((settings.imageStyle === "auto" ? "photorealistic" : settings.imageStyle) as ImageStyle)
       : ("whiteboard" as ImageStyle);
 
+  /**
+   * What went wrong with this scene, and the one thing that fixes it.
+   *
+   * The runner records a scene's failure and nothing has ever shown it, so a
+   * request that fell over halfway leaves a video with a silent shot in the
+   * middle and no trace of why. The button is the point: an explanation with
+   * no action beside it just moves the problem to the reader.
+   */
+  const silent = Boolean(scene.narration.trim()) && !scene.audio;
+  const trouble = scene.status === "error" || silent || scene.error;
+
   return (
     <div className="space-y-5 pb-6">
+      {trouble ? (
+        <div className="border border-danger/30 bg-danger/[0.06] px-3 py-2.5">
+          <p className="text-[12.5px] leading-relaxed text-danger">
+            {silent
+              ? "This scene has no recorded narration — it will play silent."
+              : (scene.error ?? "This scene didn't finish generating.")}
+          </p>
+          {scene.error && silent ? (
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted">{scene.error}</p>
+          ) : null}
+          {silent ? (
+            <button
+              type="button"
+              disabled={busy || task === "voice" || !scene.narration.trim()}
+              onClick={() =>
+                run("voice", "Recorded the narration", async (draft) => {
+                  const target = draft.scenes[index];
+                  await speakScene(target, settings, undefined, {
+                    voiceId: prevailingVoice(draft.scenes, settings.voiceId),
+                  });
+                  return `Scene ${index + 1}: recorded the narration`;
+                })
+              }
+              className="mt-2 border border-line-strong px-2.5 py-1 text-[12px] text-ink transition-colors hover:bg-surface-hover disabled:opacity-40"
+            >
+              {task === "voice" ? "Recording…" : "Record it now"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <LabelledArea
         label="Heading"
         rows={2}

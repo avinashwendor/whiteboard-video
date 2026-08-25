@@ -8,6 +8,8 @@ import { promptField } from "@/lib/validation/schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** An LLM round trip; the platform default is too short for one. */
+export const maxDuration = 60;
 
 /**
  * Prompt rewriting on its own route, because the browser-side Puter provider
