@@ -1,12 +1,14 @@
 import { omega } from "./omega";
 import type { ChatMessage, TextGenerationInput } from "./types";
 import { AppError } from "@/lib/utils/errors";
+import { inputBudget, packMessages } from "./budget";
 import {
   agentPlanSchema,
   siftOps,
   type AgentOp,
 } from "@/rescript/lib/overlay/ops-schema";
 import { verifyPlan, type PlanWorld } from "@/rescript/lib/overlay/verify";
+import { checkCraft } from "@/rescript/lib/overlay/craft";
 
 /**
  * Turns "put a title card on the first clip and burn in subtitles" into work.
@@ -51,6 +53,19 @@ OPERATIONS
   size: xs s m l xl        style: plain title subtitle caption badge quote handwritten
   Give "duration" OR "end", not both. Keep text short — this is a caption, not a paragraph.
 
+  PREFER "template" over style+enter+exit. A template is a look AND a motion that has already been made to
+  work over footage; the three fields separately are three chances to produce something nobody has looked at.
+  Anything you set alongside it still wins, so a template can be nudged without being rebuilt.
+    Titles: kineticMask boldSlam editorialSerif splitReveal typewriter stamp neon handwritten
+    Lower thirds: cleanBar underlineGrow boxedName bracketed minimalFade cornerTag
+    Captions: wordPop highlightSweep boldBounce scalePunch oneWord softCaption
+    Callouts: speechBubble stickyNote codeCard quoteCard warning aside
+    Data: statBig statWithCaption listReveal comparison unitLabel
+    Call to action: subscribeBump followPill linkBar chapterCard endCard
+
+  Pick by what the words are doing, not by how they should look: a name is a lower third, a spoken phrase is
+  a caption, a figure is a stat. If you are unsure, the first one listed in the right group is the safe one.
+
 {"op":"addImage","prompt":"a hand-drawn rocket, marker on white","start":2,"duration":4,"position":"top-right","size":"m","enter":"pop"}
 {"op":"addImage","query":"golden gate bridge fog","start":2,"duration":4,"position":"right"}
   A picture on top of the video. Use "prompt" to GENERATE artwork (things that cannot be photographed,
@@ -59,6 +74,12 @@ OPERATIONS
 
 {"op":"addShape","shape":"rect","position":"bottom","size":"l","fill":"rgba(0,0,0,0.6)"}
   A plain block — usually a scrim so text over busy footage stays readable. shape: rect ellipse line
+
+{"op":"addShape","shape":"path","mark":"circleThis","start":18,"duration":2.5,"position":"center","strokeColor":"#ffd60a"}
+  Draws a mark on the frame. Marks: arrow arrowCurved circleThis underline doubleUnderline strike box
+  bracketLeft bracketRight scribble check cross divider chevron plus star — plus any Lucide icon name
+  (rocket, server, clock, trending-up, …). It draws itself on when "enter" is "wipeRight", which is the
+  point of them. Use a mark to point at something already on screen; do not use one as decoration.
 
 {"op":"updateElement","element":2,"text":"New words","color":"#ffd60a","size":"xl","uppercase":true}
   Changes an existing element in place. Only include the fields you are changing.
@@ -71,9 +92,13 @@ OPERATIONS
 
 {"op":"setTransition","between":1,"kind":"dissolve","duration":0.5}
 {"op":"setAllTransitions","kind":"fadeBlack","duration":0.4}
-  Animation over a cut. kinds: none fadeBlack fadeWhite dissolve slideLeft slideRight slideUp slideDown
-  zoomIn zoomOut blur. Transitions never shorten the video and never touch the audio, so they are always
-  safe to add. Keep them 0.2–0.8s unless asked otherwise.
+  Animation over a cut. kinds: none morphCut dissolve fadeBlack fadeWhite whipPan zoomBlur iris slideLeft
+  slideRight slideUp slideDown zoomIn zoomOut blur. Transitions never shorten the video and never touch the
+  audio, so they are always safe to add. Keep them 0.2–0.8s unless asked otherwise.
+  morphCut is the one to reach for on a talking head. Deleting words is how this editor cuts, so its cuts
+  ARE jump cuts, and a morph hides them: 0.2–0.3s, and nobody should be able to name it afterwards. whipPan
+  and zoomBlur are energetic and belong in short-form. iris and the slides are graphic and belong in almost
+  nothing.
 
 {"op":"subtitles","action":"on","preset":"shorts"}
 {"op":"subtitles","action":"style","color":"#ffffff","highlight":"#ffd60a","size":"l","position":"bottom","uppercase":true}
@@ -116,6 +141,49 @@ OPERATIONS
 {"op":"splitAt","at":30}
   Puts a clip boundary at that second without removing anything. Transitions sit between clips, so if the
   video has no cuts yet, split before asking for one.
+
+{"op":"autoPunchIns","perMinute":2.5}
+  Pushes the camera in on the moments the delivery itself emphasises — after a pause, on a figure, at the
+  start of a new thought, on a change of speaker. It reads the word timings and places its own zooms, spaced
+  so they never become a tic. THIS IS HOW YOU ADD ZOOMS. Do not place them one at a time; you cannot see the
+  delivery and this can. One call, once, for the whole video.
+
+{"op":"setCamera","start":42,"end":46,"camera":"punchIn"}
+  Moves the camera over one stretch, when the person named a moment. Kinds: punchIn (tighter, lands in half
+  a second — emphasis), punchOut (opens up), push (a slow creep that should never be noticed as movement),
+  driftLeft / driftRight, kenBurns, snap (hard cut to tighter, no travel — the energetic short-form look),
+  hold (no move). Add "amount" (0-2, 1 is the house amount) only if asked for more or less.
+
+{"op":"addShot","start":10,"end":18,"layout":"splitLeft","plates":[{"slot":0},{"slot":1,"source":"selfCrop","camera":"snap","focusX":0.6}]}
+  Divides the frame for a stretch. Layouts: full, splitLeft, splitRight, splitTop, splitBottom, stack (a face
+  above, the demonstration below — the vertical tutorial shape), pip (a bubble in the corner), card (a flat
+  colour to put text on), grid. Every layout except full, card and grid needs TWO plates: say what is in each.
+  Sources: "primary" is the footage; "selfCrop" is the footage again framed tighter, which is the cutaway
+  that always works and needs nothing fetched; "solid" with a "color" is a card to put type on.
+
+{"op":"removeShot","at":12}
+  Drops whatever framing covers that second, back to the footage as shot.
+
+{"op":"addMusic","query":"calm piano","kind":"music"}
+{"op":"addMusic","query":"whoosh","kind":"sfx","start":12}
+  Puts music under the whole video, or an effect at a moment. Say what it should SOUND like — "calm piano",
+  "driving drums", "warm acoustic" — not a title or an artist; the browser searches a licensed catalogue and
+  takes the best usable result. Music defaults to the full length, ducks under speech and fades at both ends.
+  Only add music if it was asked for, or if the video is plainly a montage with nothing being said: a bed
+  under a talking head that did not ask for one is the most common way an automatic edit is made worse.
+
+{"op":"setMusicLevel","gain":0.2}
+  Turns the music up or down. "duck":false stops it dropping under speech, which is almost always wrong.
+
+{"op":"removeMusic"}
+  Takes the music out.
+
+{"op":"setGrade","preset":"warmFilm"}
+  The look, over the whole video. Presets: none, clean (a touch of contrast — safe on anything), warmFilm,
+  tealOrange, bleach, mono, vivid, moody. Add "at" with a second inside a shot to grade only that shot, which
+  is worth doing when a cutaway was filmed on a different camera and does not match. You can nudge a preset
+  with exposure / contrast / saturation / temperature / vignette / grain (-1 to 1), but do not build a look
+  out of those from scratch: pick the preset that is closest and leave it alone.
 
 RULES ABOUT ORDER
 Cuts change the clock. Put every cutting operation (removeFillers, removeSilences, deletePhrase,
@@ -178,6 +246,40 @@ These are the rules a working editor applies without thinking. Follow them.
   are shorter and stacked, pictures go full width across the top or the bottom rather than into a corner,
   and the middle of the frame belongs to the speaker. Subtitles sit centre or low-centre where a thumb is
   not covering them.
+
+WHAT YOU CAN SEE
+When frames of the footage are attached, look at them before you plan anything that sits on the picture.
+Where the subject is decides which side a caption goes; how tight the shot already is decides whether a
+punch-in would crop them; what the background is doing decides whether text needs a scrim behind it. If
+there are no frames, say nothing about how it looks — you cannot see it, and a confident guess about
+composition is worse than none.
+
+SOUND
+Music is a decision, not a default. Under a talking head it competes with the thing people came for, and the
+version that buries the voice is the one that gets shipped — so add a bed when it is asked for, or when the
+footage is a montage with nothing being said, and otherwise leave it alone. When you do add one, leave it
+ducking: a bed at a fixed level is either inaudible or it is on top of the speech.
+
+An effect earns its place the same way a transition does. One whoosh on a hard cut is punctuation; one on
+every cut is a ringtone.
+
+LOOK
+One grade for the whole video, chosen once. A look is the thing that makes separate clips read as one piece,
+and grading shots individually is how you lose that — the exception is genuinely mismatched footage. If the
+person has not asked for a look, "clean" is the only one to reach for unprompted; anything stronger is a
+decision they did not make.
+
+CAMERA
+A zoom is punctuation. It means "this bit", and a video where every eighth second means "this bit" means
+nothing at all. Reach for autoPunchIns once and let it space them; place one by hand only when the person
+named the moment. Never put a move on a stretch shorter than about two seconds — it cannot arrive, and what
+plays is a creep that stops at the cut. Do not mix push and punchIn in one video: one is atmosphere, the
+other is emphasis, and together they read as an accident.
+
+A split screen is for two things that are genuinely both worth looking at. If the second half would only
+hold a bigger version of the first, that is a punch-in, not a split. "stack" is for vertical; "pip" is for a
+screen recording with a person in the corner; "card" is for when the words are the point and the picture is
+not.
 
 B-ROLL
 When the speaker names something concrete and visual — a place, an object, a company, a chart, a person —
@@ -263,6 +365,55 @@ Group the steps the way an editor would talk about them, cutting steps first, in
 apply: shape (the frame), tighten (fillers, silences), choose (what to keep), pace (transitions), read
 (subtitles), produce (titles, kinetic captions, b-roll). Three to six steps. Every step must carry the
 operations that do it — a step with an empty "ops" is not a step, it is a comment.`;
+
+/**
+ * Watching the cut back.
+ *
+ * The half of an editor's job the agent has never done. It plans, the browser
+ * runs the plan, and nobody looks at the result — so a caption over a busy
+ * background, a title that collides with a burned-in subtitle, or a punch-in
+ * that crops someone's forehead all survive to the export. `checkCraft` catches
+ * what is checkable from the plan alone; this catches what is only visible in
+ * the frame.
+ *
+ * The frames it is shown are rendered *with the composition burned in*, by the
+ * same renderer that will make the file. So it is looking at what ships, not at
+ * a description of it.
+ *
+ * It replies with the same plan shape as propose mode, which is the whole point
+ * of doing it this way: a fix goes back through the identical accept-or-decline
+ * surface as anything else. A review that could quietly change the video would
+ * be worse than no review.
+ */
+const REVIEW_SUFFIX = `
+
+YOU ARE REVIEWING YOUR OWN WORK
+The edit has been applied. The frames attached are what the finished video actually looks like at those
+moments — captions, framing, look and all, rendered by the same code that will encode the file.
+
+Watch it back the way you would watch someone else's cut: looking for what is wrong, not for reasons the
+plan was reasonable. Specifically, and only from what you can see —
+
+  · Type that cannot be read. Over a busy background, too small, too close to an edge, low contrast, or
+    fighting the burned-in subtitles.
+  · Two things occupying the same part of the frame at the same moment.
+  · Anything outside the safe area, which is a problem on a phone even where it looks fine here.
+  · A framing that crops the subject badly, or a punch-in on a shot that was already tight.
+  · A look that has gone too far — crushed shadows, skin that has turned.
+
+Say nothing about the writing, the pacing or what was cut. You cannot judge those from stills and a
+confident guess about them is worse than silence.
+
+Reply in this shape:
+{"thinking":"what you actually see",
+ "summary":"one sentence: is this ready, or what is wrong with it",
+ "findings":["one short sentence per problem, naming the moment it happens at"],
+ "steps":[{"title":"Short name","detail":"why","ops":[ ... ]}]}
+
+If it is fine, say so in "summary", leave "findings" empty and send NO steps. That is a real answer and the
+most common correct one — an edit that has just been accepted step by step is usually right, and inventing
+a problem to look useful is how a reviewer stops being trusted. Only propose a step for something you can
+point at in a frame.`;
 
 function stripFence(value: string): string {
   const trimmed = value.trim();
@@ -457,13 +608,89 @@ export interface RescriptExchange {
   outcome?: string;
 }
 
+/** One past decision, as an example. */
+export interface RescriptExemplar {
+  instruction: string;
+  title: string;
+  detail: string;
+  /** True when the person kept it. */
+  good: boolean;
+}
+
+/**
+ * Past decisions, written as something the model can act on.
+ *
+ * Presented as *this person's* judgements rather than as rules, because that is
+ * what they are — one editor's taste on their own footage — and a model told
+ * "the rule is X" generalises it to cases where it does not hold. Told "they
+ * kept this and dropped that", it treats them as evidence, which is the correct
+ * weight for three examples.
+ */
+function learnedBlock(
+  exemplars: RescriptExemplar[] | undefined,
+  preferences: string[] | undefined
+): string {
+  const kept = (exemplars ?? []).filter((e) => e.good);
+  const dropped = (exemplars ?? []).filter((e) => !e.good);
+  const notes = preferences ?? [];
+  if (!kept.length && !dropped.length && !notes.length) return "";
+
+  const lines: string[] = [
+    "WHAT THIS PERSON HAS ACCEPTED BEFORE",
+    "",
+    "Their own past decisions on this kind of request. Evidence about their taste, not rules — where they",
+    "conflict with the brief in front of you, the brief wins.",
+  ];
+
+  if (kept.length) {
+    lines.push("", "Kept:");
+    for (const e of kept) {
+      lines.push(`  · asked "${e.instruction}" → kept "${e.title}" (${e.detail})`);
+    }
+  }
+  if (dropped.length) {
+    lines.push("", "Turned down:");
+    for (const e of dropped) {
+      lines.push(`  · asked "${e.instruction}" → rejected "${e.title}" (${e.detail})`);
+    }
+  }
+  if (notes.length) {
+    lines.push("", "Standing:");
+    for (const note of notes) lines.push(`  · ${note}`);
+  }
+
+  return lines.join("\n");
+}
+
 export interface RescriptAgentInput {
   instruction: string;
   context: RescriptAgentContext;
-  /** "propose" returns named steps to accept; "execute" returns flat ops. */
-  mode?: "propose" | "execute";
+  /**
+   * "propose" returns named steps to accept; "execute" returns flat ops;
+   * "review" looks at frames of the finished edit and reports what is wrong
+   * with it, in the same shape as "propose" so any fix is accepted the same way.
+   */
+  mode?: "propose" | "execute" | "review";
   /** Earlier turns in this conversation, oldest first. */
   history?: RescriptExchange[];
+  /**
+   * Plans this person has kept or dropped, for instructions like this one.
+   *
+   * The prompt has no few-shot examples of its own — every operation is taught
+   * by one inline JSON line — so these are the only worked examples the model
+   * ever sees, and they have the advantage of being about this person's own
+   * footage and taste rather than a style guide's idea of either.
+   */
+  exemplars?: RescriptExemplar[];
+  /** Standing preferences inferred from the same history. */
+  preferences?: string[];
+  /**
+   * A few frames of the cut, so the planner can see what it is editing.
+   *
+   * Attached by the browser rather than fetched, because that is the only
+   * place the media exists — and it stays that way.
+   */
+  glances?: { at: number; dataUrl: string }[];
   model?: string;
   signal?: AbortSignal;
   /**
@@ -838,7 +1065,9 @@ export type AgentEvent =
   | { type: "look"; tool: string; detail: string }
   | { type: "verify"; problems: number }
   | { type: "repair"; problems: string[] }
-  | { type: "retry"; reason: string };
+  | { type: "retry"; reason: string }
+  /** The conversation was shortened to fit the model's context window. */
+  | { type: "trim"; dropped: number; digested: number; tokens: number };
 
 /**
  * Pulls the `thinking` field out of a JSON object that is still arriving.
@@ -922,6 +1151,22 @@ class ThinkingTap {
 }
 
 /**
+ * Is a zero-token stream failure worth one non-streaming retry?
+ *
+ * Only when the provider has not already made up its mind about the request. A
+ * 4xx is a verdict — malformed body, no credit, over the rate limit, context
+ * too long — and it will be the same verdict a second time. Anything else
+ * (a transport error, a 5xx, a deployment that simply does not stream) can
+ * legitimately succeed on the unstreamed path.
+ */
+function worthRetryingUnstreamed(err: unknown): boolean {
+  if (err instanceof AppError) {
+    return err.status < 400 || err.status >= 500;
+  }
+  return true;
+}
+
+/**
  * One model turn, streamed where possible.
  *
  * Falls back to the non-streaming call if the deployment behind the id will not
@@ -945,8 +1190,13 @@ async function runTurn(
     }
   } catch (err) {
     if (text) throw err;
-    // Nothing arrived at all: this is a provider that will not stream, not a
-    // failed generation. Ask for it the old way rather than failing the turn.
+    // Nothing arrived at all. That is *usually* a provider which will not
+    // stream, in which case asking again the old way is right — but it is also
+    // what a rejected request looks like, and those are rejected identically
+    // the second time. Retrying a 400 or a 429 bought nothing and cost a second
+    // billed call, so the retry is limited to failures that are plausibly about
+    // streaming rather than about the request.
+    if (!worthRetryingUnstreamed(err)) throw err;
     return (await omega.generateText(input)).text;
   }
   return text;
@@ -1082,14 +1332,21 @@ const MAX_TURNS = 16;
 export async function planRescriptEdit(
   input: RescriptAgentInput
 ): Promise<RescriptPlan> {
-  const propose = input.mode === "propose";
+  const reviewing = input.mode === "review";
+  // A review answers in the propose shape — named steps, accepted one at a
+  // time — so everything downstream that understands a proposal understands a
+  // review without knowing there is a difference.
+  const propose = input.mode === "propose" || reviewing;
   const lines = parseTranscript(input.context.transcript);
   const brief = describe(input.context, lines);
+
+  const learned = learnedBlock(input.exemplars, input.preferences);
 
   const system = [
     SYSTEM,
     PROTOCOL,
-    propose ? PROPOSE_SUFFIX : "",
+    reviewing ? REVIEW_SUFFIX : propose ? PROPOSE_SUFFIX : "",
+    learned,
     brief.windowed
       ? "\nThis transcript was shown to you as an outline. Do not plan a cut or a caption on a stretch you have not read in full."
       : "",
@@ -1105,7 +1362,8 @@ export async function planRescriptEdit(
    */
   const closedSystem = [
     SYSTEM,
-    propose ? PROPOSE_SUFFIX : "",
+    reviewing ? REVIEW_SUFFIX : propose ? PROPOSE_SUFFIX : "",
+    learned,
     `HOW TO REPLY
 
 Reply with one JSON object and nothing else — no prose, no code fence. There are no tools; you have already
@@ -1134,10 +1392,50 @@ ${
     });
   }
 
-  messages.push({
-    role: "user",
-    content: `${brief.text}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`,
-  });
+  /**
+   * The brief, with a few frames of the footage attached.
+   *
+   * Every tool this agent has reads text, so until now it had never seen the
+   * video it was editing — which is why its plans read as competent and
+   * generic. It could not know the speaker sits left of frame, that the
+   * background is busy where a caption is about to go, or that the shot is
+   * already tight enough that a punch-in would crop them.
+   *
+   * A `look(t)` tool would be the better shape and is not available: the loop
+   * runs on the server and the footage is in the browser, so a tool call would
+   * have to suspend the loop and round-trip to the client. Every other tool
+   * answers from the request payload precisely so that it cannot.
+   *
+   * Absent when the browser could not grab them, when the project is audio, or
+   * when the model does not take images — all of which are the old behaviour.
+   */
+  const written = `${brief.text}\n\nWHAT THEY ASKED FOR:\n${input.instruction}`;
+  const glances = input.glances ?? [];
+
+  messages.push(
+    glances.length === 0
+      ? { role: "user", content: written }
+      : {
+          role: "user",
+          content: [
+            {
+              type: "text" as const,
+              text: `${written}\n\nWHAT IT LOOKS LIKE\n\n${glances
+                .map((g) => `  · a frame at ${g.at.toFixed(1)}s`)
+                .join("\n")}\n\nUse them for composition, not for content: where the subject sits in frame, how tight the
+shot is, what the background is doing, whether there is room for a caption and where. The transcript is
+still what the video is *about*.`,
+            },
+            ...glances.map((g) => ({
+              type: "image_url" as const,
+              // "low" is the point. What is being asked is where things sit in
+              // the frame, and that does not need resolution — a larger frame
+              // costs more and answers the same questions.
+              image_url: { url: g.dataUrl, detail: "low" as const },
+            })),
+          ],
+        }
+  );
 
   const trace: RescriptTraceEntry[] = [];
   /**
@@ -1182,24 +1480,95 @@ ${
 
   const emit = input.onEvent;
 
-  for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-    emit?.({ type: "turn", index: turn });
+  /**
+   * The first two messages are never trimmed.
+   *
+   * The system prompt is the operation vocabulary and the house style; the
+   * brief is the project itself. Shortening either does not shorten the
+   * conversation, it lobotomises it — the model would still answer, in a
+   * vocabulary it no longer has.
+   */
+  const PINNED = 2;
 
+  /**
+   * Ask the model, having first made the conversation fit.
+   *
+   * `squeeze` shrinks the budget below what the model claims to take. It is
+   * only ever above zero on the one retry after a rejection for length: the
+   * table in `budget.ts` holds floors rather than the vendors' advertised
+   * maxima, and a model whose real window is smaller than its entry is exactly
+   * the case that estimate cannot catch.
+   */
+  const ask = async (
+    turn: number,
+    squeeze = 1
+  ): Promise<{ text: string; finishReason?: string }> => {
+    const maxTokens = 12_000;
+    const budget = Math.floor(inputBudget(input.model, maxTokens) * squeeze);
+    const packed = packMessages({
+      pinned: messages.slice(0, PINNED),
+      body: messages.slice(PINNED),
+      budget,
+      keepRecent: 4,
+    });
+
+    if (packed.dropped || packed.digested) {
+      emit?.({
+        type: "trim",
+        dropped: packed.dropped,
+        digested: packed.digested,
+        tokens: packed.tokens,
+      });
+    }
+
+    let finishReason: string | undefined;
     const text = await runTurn(
       {
-        messages,
+        messages: packed.messages,
         model: input.model,
         // Cooler on a retry: the first attempt is allowed some judgement, a
         // second one is being asked to comply with something specific.
         temperature: turn === 0 ? 0.35 : 0.15,
-        maxTokens: 12_000,
+        maxTokens,
         json: true,
         signal: input.signal,
+        onMeta: (meta) => {
+          finishReason = meta.finishReason;
+        },
       },
       emit,
       input.generate
     );
-    const result = { text };
+    return { text, finishReason };
+  };
+
+  for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+    emit?.({ type: "turn", index: turn });
+
+    let result: { text: string; finishReason?: string };
+    try {
+      result = await ask(turn);
+    } catch (err) {
+      // A rejection for length is the one provider error worth answering
+      // rather than surrendering to: the estimate was wrong, so make the same
+      // request from less. Everything else is a verdict — no credit, no key,
+      // over the rate limit — and asking again would only spend another call
+      // on the same answer.
+      if (!(err instanceof AppError) || err.code !== "context_overflow") throw err;
+      emit?.({ type: "retry", reason: "the conversation was too long to read" });
+      result = await ask(turn, 0.6);
+    }
+
+    /**
+     * The provider says the reply hit the output ceiling.
+     *
+     * Previously this was only ever inferred — from a reply that was all
+     * reasoning, or from a parse that failed on an unterminated object. Both
+     * heuristics still stand, because a stub model and some deployments report
+     * nothing; this just makes the common case certain instead of guessed, and
+     * changes what the model is told to do about it.
+     */
+    const truncated = result.finishReason === "length";
 
     const reply = parseReply(result.text);
     // Set RESCRIPT_AGENT_DEBUG to a path to see what the model actually said.
@@ -1299,7 +1668,9 @@ ${
     if (!reply.plan || !reply.plan.success) {
       emit?.({
         type: "retry",
-        reason: reply.problem ?? "the reply could not be used",
+        reason: truncated
+          ? "the reply ran out of room before it finished"
+          : (reply.problem ?? "the reply could not be used"),
       });
       problem =
         reply.problem ??
@@ -1309,7 +1680,9 @@ ${
       messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
       messages.push({
         role: "user",
-        content: `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
+        content: truncated
+          ? `That reply was cut off before it finished — it ran past the output budget, so what arrived was incomplete (${problem}). Send the same plan again, shorter: one sentence of "thinking", and fewer, larger steps.`
+          : `That was rejected: ${problem}. Reply again with only the JSON object, using the operations exactly as specified.`,
       });
       continue;
     }
@@ -1346,7 +1719,15 @@ ${
        * cannot even manage a sentence is asked again.
        */
       const justified = parsed.summary.trim().length > 0;
-      if (justified && queriedEmpty) {
+      // A review is asked once and taken at its word.
+      //
+      // For a plan, an empty answer is usually the model stalling, so it is
+      // worth one challenge. For a review it is the *most common correct
+      // answer* — an edit accepted step by step is usually right — and pushing
+      // back on it asks a reviewer to justify finding nothing, which is how you
+      // get an invented fault. The prompt tells it not to invent one; querying
+      // the answer would tell it otherwise, louder.
+      if (justified && (queriedEmpty || reviewing)) {
         return {
           summary: parsed.summary,
           findings: parsed.findings,
@@ -1395,22 +1776,49 @@ ${
       transcript: input.context.transcript ?? "",
       can: input.context.can,
     };
+    /**
+     * Two checks, not one.
+     *
+     * `verifyPlan` asks whether the plan would *run* — a caption past the end
+     * of the cut, a boundary that does not exist, a phrase the transcript does
+     * not contain. `checkCraft` asks whether it should have been made: two
+     * accent colours, four transition kinds, a caption every eight seconds.
+     *
+     * The second only became necessary when the agent was handed a template
+     * library, 1,776 icons, seven grades and four more transitions. A bigger
+     * box of toys makes worse videos by default, and reviewing its own plan
+     * against the house style before showing it is the cheap half of what a
+     * professional does — watching the cut back is the expensive half, and
+     * needs eyes this agent does not have yet.
+     *
+     * Only errors are fed back. A warning is a smell, sometimes deliberate,
+     * and spending a whole repair round making the model defend a choice it
+     * was entitled to make is worse than letting it through.
+     */
     const problems = proposed ? verifyPlan(everyOp, world) : [];
-    if (proposed) emit?.({ type: "verify", problems: problems.length });
+    const craft = proposed
+      ? checkCraft(everyOp, { duration: input.context.duration }).filter(
+          (finding) => finding.severity === "error"
+        )
+      : [];
+    const faults = [...problems, ...craft.map((c) => c.message)];
+    if (proposed) emit?.({ type: "verify", problems: faults.length });
 
-    if (problems.length && !repaired) {
+    if (faults.length && !repaired) {
       repaired = true;
-      emit?.({ type: "repair", problems });
+      emit?.({ type: "repair", problems: faults });
       trace.push({
         tool: "verify",
-        detail: `Checked the plan — ${problems.length} problem${problems.length === 1 ? "" : "s"} to fix`,
+        detail: `Checked the plan — ${faults.length} problem${faults.length === 1 ? "" : "s"} to fix`,
       });
       messages.push({ role: "assistant", content: result.text.slice(0, 2_500) });
       messages.push({
         role: "user",
         content: [
-          "That plan was checked against the project before running it, and these are wrong:",
-          ...problems.map((p) => `  - ${p}`),
+          problems.length
+            ? "That plan was checked against the project before running it, and these are wrong:"
+            : "That plan would run, but it breaks the house style you were given:",
+          ...faults.map((p) => `  - ${p}`),
           "",
           "Send the whole plan again with those fixed. Keep everything that was right; change only what has to change.",
         ].join("\n"),
@@ -1418,10 +1826,10 @@ ${
       continue;
     }
 
-    if (problems.length) {
+    if (faults.length) {
       trace.push({
         tool: "verify",
-        detail: `${problems.length} problem${problems.length === 1 ? "" : "s"} could not be resolved`,
+        detail: `${faults.length} problem${faults.length === 1 ? "" : "s"} could not be resolved`,
       });
     }
 
@@ -1432,7 +1840,11 @@ ${
       ops: flat.ops,
       rejected,
       trace,
-      warnings: problems,
+      // Both kinds. A style fault that survived the repair round has to reach
+      // the person too — the probe's contract is that an empty `warnings`
+      // beside a non-empty plan is the only pass, and it would stop meaning
+      // that if half the faults were dropped on the way out.
+      warnings: faults,
     };
   }
 

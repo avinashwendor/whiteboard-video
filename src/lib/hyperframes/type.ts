@@ -210,7 +210,7 @@ export function drawDisplay(
         const wipe = smootherstep(clamp01((t - 0.3) / 0.5));
         const height = Math.max(3, layout.size * 0.085);
         ctx.save();
-        ctx.fillStyle = withAlpha(theme.accent, 0.6);
+        ctx.fillStyle = withAlpha(theme.mark, 0.6);
         ctx.beginPath();
         ctx.roundRect(
           x - layout.size * 0.03,
@@ -229,7 +229,7 @@ export function drawDisplay(
         ctx.shadowBlur = shadow.blur;
         ctx.shadowOffsetY = layout.size * 0.06;
       }
-      ctx.fillStyle = word.emphasis ? theme.accent : options.colour ?? theme.ink;
+      ctx.fillStyle = word.emphasis ? theme.mark : options.colour ?? theme.ink;
       ctx.fillText(word.text, x, baseline + (1 - rise) * layout.size * 0.92);
       ctx.restore();
     }
@@ -268,12 +268,13 @@ export function drawEyebrow(
   const width = ctx.measureText(label).width;
   const left = options.align === "center" ? options.x - width / 2 : options.x;
 
-  // A short accent rule leads the label in.
+  // A short accent rule leads the label in. Both this and the label itself
+  // are thin, so both use the mark weight rather than the plate colour.
   const rule = easeOutCubic(t) * 26;
-  ctx.fillStyle = options.theme.accent;
+  ctx.fillStyle = options.theme.mark;
   ctx.fillRect(left - 38, options.y - size * 0.38, rule, 3);
 
-  ctx.fillStyle = options.theme.accent;
+  ctx.fillStyle = options.theme.mark;
   ctx.fillText(label, options.x, options.y);
   ctx.letterSpacing = "0px";
   ctx.restore();

@@ -27,6 +27,7 @@ export const zhCN: Record<MessageKey, string> = {
   "model.language": "语言",
   "model.transcriptLanguage": "转录语言",
   "model.importTranscript": "导入转录文本",
+  "upload.continueProject": "继续上次的项目",
   "upload.recentProjects": "最近项目",
   "upload.removeRecent": "从最近项目中移除",
   "upload.dropPrefix": "将视频或音频文件拖到此处，或者",

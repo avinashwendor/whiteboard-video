@@ -263,16 +263,20 @@ export const omega: TextProvider = {
       });
     }
 
+    const usage = {
+      promptTokens: json.usage?.prompt_tokens,
+      completionTokens: json.usage?.completion_tokens,
+      totalTokens: json.usage?.total_tokens,
+    };
+    const finishReason = json.choices?.[0]?.finish_reason;
+    input.onMeta?.({ finishReason, usage });
+
     return {
       text,
       model: json.model ?? model,
       provider: "omega",
-      finishReason: json.choices?.[0]?.finish_reason,
-      usage: {
-        promptTokens: json.usage?.prompt_tokens,
-        completionTokens: json.usage?.completion_tokens,
-        totalTokens: json.usage?.total_tokens,
-      },
+      finishReason,
+      usage,
     } satisfies TextGenerationResult;
   },
 
@@ -296,6 +300,13 @@ export const omega: TextProvider = {
     const decoder = new TextDecoder();
     let buffer = "";
     let emitted = false;
+    // Carried out of the loop and reported once at the end. `finish_reason` is
+    // on the final chunk of an OpenAI-compatible stream; `usage` is only there
+    // if the provider volunteers it, and is deliberately not asked for — an
+    // unrecognised `stream_options` is a rejected request, and this path is
+    // load-bearing for every plan the editor makes.
+    let finishReason: string | undefined;
+    let usage: OmegaChatResponse["usage"];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -316,7 +327,10 @@ export const omega: TextProvider = {
           } catch {
             continue;
           }
-          const delta = parsed.choices?.[0]?.delta?.content;
+          const choice = parsed.choices?.[0];
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+          if (parsed.usage) usage = parsed.usage;
+          const delta = choice?.delta?.content;
           if (typeof delta === "string" && delta) {
             emitted = true;
             yield delta;
@@ -328,6 +342,17 @@ export const omega: TextProvider = {
     if (!emitted) {
       throw new AppError("malformed_response", { detail: "omega stream produced no tokens" });
     }
+
+    input.onMeta?.({
+      finishReason,
+      usage: usage
+        ? {
+            promptTokens: usage.prompt_tokens,
+            completionTokens: usage.completion_tokens,
+            totalTokens: usage.total_tokens,
+          }
+        : undefined,
+    });
   },
 };
 

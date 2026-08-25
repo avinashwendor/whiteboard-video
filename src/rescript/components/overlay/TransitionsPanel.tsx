@@ -25,11 +25,23 @@ import { Button, Empty, Row, Section, Select, Slider, formatSeconds } from "./ui
  * editor where the cuts land on word boundaries.
  */
 
+/**
+ * Ordered by how often each is the right answer, not by family.
+ *
+ * `morphCut` sits directly after "Cut" because it is the one this editor
+ * specifically needs: deleting words is how it cuts, so it manufactures jump
+ * cuts on a talking head, and hiding those is a more common job here than any
+ * other transition in the list.
+ */
 const KINDS: TransitionKind[] = [
   "none",
+  "morphCut",
+  "dissolve",
   "fadeBlack",
   "fadeWhite",
-  "dissolve",
+  "whipPan",
+  "zoomBlur",
+  "iris",
   "slideLeft",
   "slideRight",
   "slideUp",

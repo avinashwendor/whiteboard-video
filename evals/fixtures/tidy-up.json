@@ -1,0 +1,12 @@
+{
+  "name": "tidy-up",
+  "instruction": "clean this up — cut the ums and the long pauses",
+  "duration": 95,
+  "boundaryCount": 0,
+  "transcript": "[00:00] Um so the thing is, uh, we shipped it on Friday.\n[00:12] And uh nobody noticed for about three days.\n[00:40] Which um tells you something about how we were measuring success.",
+  "expect": {
+    "ops": ["removeFillers"],
+    "forbid": ["keepOnly"],
+    "maxSteps": 4
+  }
+}

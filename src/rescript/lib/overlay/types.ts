@@ -15,6 +15,9 @@
  * definition of what a composition looks like.
  */
 
+import { isNeutralGrade, type GradeSpec } from "./grade";
+import { audioIsIdle, type AudioClip } from "./audio";
+
 /** Normalised rectangle: 0..1 of the frame, origin top-left. */
 export interface Rect {
   x: number;
@@ -42,13 +45,44 @@ export type AnimationKind =
   | "pop"
   | "blur"
   | "wipeRight"
-  | "typewriter";
+  | "typewriter"
+  /**
+   * Rises out from behind its own baseline, clipped.
+   *
+   * The clip is the whole trick. Type that fades reads as a slide; type that
+   * rises out from behind a hard edge reads as typography. Ported from the
+   * generated-video engine (`lib/hyperframes/type.ts`), where it has always
+   * been the best animation in the repo and was unreachable from here.
+   */
+  | "mask";
+
+/**
+ * What a reveal is applied to.
+ *
+ * `element` is the whole thing at once — the default, and exactly the
+ * behaviour that existed before this. The other two split text into tokens and
+ * give each its own progress, offset by `stagger`, which is the difference
+ * between a caption that appears and one that is *delivered*.
+ */
+export type AnimationUnit = "element" | "word" | "char";
 
 export interface AnimationSpec {
   kind: AnimationKind;
   /** Seconds the animation runs for. Clamped to half the element's life. */
   duration: number;
   easing: EasingName;
+  /** Defaults to "element": the whole thing at once, as it always was. */
+  unit?: AnimationUnit;
+  /**
+   * How far each token is delayed behind the one before it, as a fraction of
+   * the whole animation.
+   *
+   * A fraction rather than seconds, so a long caption and a short one read the
+   * same: the reveal always finishes when the animation does, however many
+   * words there are. In seconds, a twelve-word title would still be arriving
+   * after a three-word one had settled.
+   */
+  stagger?: number;
 }
 
 export const DEFAULT_ENTER: AnimationSpec = {
@@ -132,7 +166,13 @@ export interface ImageElement extends Common {
   shadow: boolean;
 }
 
-export type ShapeKind = "rect" | "ellipse" | "line";
+/**
+ * `path` is any named mark — an annotation or one of the 1,776 icons — drawn
+ * from the shared geometry in `lib/icons`. It exists so that an arrow, a
+ * circle-this and a "server" icon are one kind of element with one animation,
+ * rather than three features.
+ */
+export type ShapeKind = "rect" | "ellipse" | "line" | "path";
 
 export interface ShapeElement extends Common {
   kind: "shape";
@@ -142,6 +182,14 @@ export interface ShapeElement extends Common {
   /** Fraction of frame height. */
   strokeWidth: number;
   radius: number;
+  /**
+   * Which mark, when `shape` is "path". An annotation name or an icon name.
+   *
+   * A name rather than path data: it survives the catalogue being regenerated,
+   * it is what the agent can reasonably be asked for, and it is the thing worth
+   * showing in the layer list.
+   */
+  pathName?: string;
 }
 
 export type OverlayElement = TextElement | ImageElement | ShapeElement;
@@ -225,7 +273,23 @@ export type TransitionKind =
   | "slideDown"
   | "zoomIn"
   | "zoomOut"
-  | "blur";
+  | "blur"
+  /**
+   * Hides a jump cut.
+   *
+   * The most useful transition this editor can have, because deleting words is
+   * how it cuts — so it *manufactures* jump cuts on a talking head as its
+   * central interaction, and had nothing to offer for them. A short warp and
+   * dissolve across the boundary, scaled to meet in the middle, reads as the
+   * speaker having moved rather than the frame having jumped.
+   */
+  | "morphCut"
+  /** Directional blur and slide: the standard energetic cut. */
+  | "whipPan"
+  /** Radial push with the blur peaking mid-way. Pairs with a punch-in. */
+  | "zoomBlur"
+  /** A circular hole in the outgoing frame, opening onto the incoming one. */
+  | "iris";
 
 /**
  * A transition sits on the boundary *before* clip `index` (so `index` is always
@@ -246,6 +310,9 @@ export const DUAL_SOURCE_TRANSITIONS: ReadonlySet<TransitionKind> = new Set([
   "slideRight",
   "slideUp",
   "slideDown",
+  "morphCut",
+  "whipPan",
+  "iris",
 ]);
 
 export const TRANSITION_LABELS: Record<TransitionKind, string> = {
@@ -260,7 +327,169 @@ export const TRANSITION_LABELS: Record<TransitionKind, string> = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   blur: "Blur through",
+  morphCut: "Morph cut",
+  whipPan: "Whip pan",
+  zoomBlur: "Zoom blur",
+  iris: "Iris",
 };
+
+/* ---------------------------------- shots ---------------------------------- */
+
+/**
+ * How the frame is divided for a stretch of the video.
+ *
+ * Until this existed the frame was one region showing one source, for the whole
+ * runtime — so "camera on the left, text on the right", "screen recording with
+ * the webcam in the corner" and "cam on top, screen underneath" were not
+ * expressible, and neither was a plain cutaway. Those are not five features:
+ * they are one mechanism with different region counts, which is the only reason
+ * this is a small change to the renderer rather than a second one.
+ *
+ * A composition with no shots renders exactly as it did before.
+ */
+export type ShotLayout =
+  | "full"
+  | "splitLeft"
+  | "splitRight"
+  | "splitTop"
+  | "splitBottom"
+  | "stack"
+  | "pip"
+  | "card"
+  | "grid";
+
+export const SHOT_LAYOUT_LABELS: Record<ShotLayout, string> = {
+  full: "Full frame",
+  splitLeft: "Split — left",
+  splitRight: "Split — right",
+  splitTop: "Split — top",
+  splitBottom: "Split — bottom",
+  stack: "Stacked",
+  pip: "Picture in picture",
+  card: "Card",
+  grid: "Grid",
+};
+
+/** How many regions a layout divides the frame into. `grid` varies. */
+export function regionCount(layout: ShotLayout, plates = 2): number {
+  switch (layout) {
+    case "full":
+    case "card":
+      return 1;
+    case "grid":
+      return Math.min(4, Math.max(2, plates));
+    default:
+      return 2;
+  }
+}
+
+export type CameraKind =
+  | "hold"
+  | "punchIn"
+  | "punchOut"
+  | "push"
+  | "driftLeft"
+  | "driftRight"
+  | "kenBurns"
+  | "snap";
+
+/** One framing of a source: what `FrameSpec` already means, minus the shape. */
+export interface CameraFraming {
+  /** Extra zoom on top of the fit, 1 = none. */
+  zoom: number;
+  /** The point of the source held at the centre of its region, 0..1. */
+  focusX: number;
+  focusY: number;
+}
+
+export const NEUTRAL_FRAMING: CameraFraming = { zoom: 1, focusX: 0.5, focusY: 0.5 };
+
+/**
+ * A move from one framing to another, over part of the shot.
+ *
+ * `duration` is how long the move takes, not how long the shot is: the rest of
+ * the shot holds at `to`. A push-in that keeps creeping for ninety seconds is
+ * a different thing from one that arrives and settles, and only the second is
+ * what anyone means by a punch-in.
+ */
+export interface CameraMove {
+  kind: CameraKind;
+  from: CameraFraming;
+  to: CameraFraming;
+  easing: EasingName;
+  duration: number;
+}
+
+export const HOLD_CAMERA: CameraMove = {
+  kind: "hold",
+  from: { ...NEUTRAL_FRAMING },
+  to: { ...NEUTRAL_FRAMING },
+  easing: "easeOut",
+  duration: 0,
+};
+
+/** Where a plate's picture comes from. */
+export type PlateSource =
+  /** The transcribed footage — the one recording that owns the clock. */
+  | { kind: "primary" }
+  /** Another recording attached to the project: a screen capture, a second camera. */
+  | { kind: "media"; mediaId: string }
+  /** A cutaway from the project's b-roll library. */
+  | { kind: "broll"; brollId: string }
+  /** A flat colour. What a card sits on when no footage should show through. */
+  | { kind: "solid"; color: string };
+
+/** What fills one region of a layout. */
+export interface Plate {
+  /** Region index within the layout. 0 is the primary/largest. */
+  slot: number;
+  source: PlateSource;
+  fit: FrameFit;
+  camera: CameraMove;
+  /** Corner radius as a fraction of the region's shorter side. */
+  radius: number;
+  /**
+   * Overrides the layout's region when the person drags it.
+   *
+   * Normalised to the frame, like everything else here. A deliberate placement
+   * outranks the layout, which is the same rule `layout.ts` keeps for elements.
+   */
+  rect?: Rect;
+}
+
+/**
+ * A stretch of the edited timeline, and how the frame is filled during it.
+ *
+ * Times are edited-timeline seconds — the same clock as elements and
+ * subtitles — so a shot survives an upstream cut moving where its moment sits
+ * in the source, exactly as a caption does.
+ */
+export interface Shot {
+  id: string;
+  start: number;
+  end: number;
+  layout: ShotLayout;
+  plates: Plate[];
+  /**
+   * A look for this stretch only. Absent means the project's.
+   *
+   * Per-shot rather than only per-project because a cutaway to different
+   * footage is the one place a single look genuinely does not fit — the two
+   * cameras were never going to match out of the box.
+   */
+  grade?: GradeSpec | null;
+}
+
+/** A full-frame plate of the footage, framed as shot. The default everything. */
+export function primaryPlate(): Plate {
+  return {
+    slot: 0,
+    source: { kind: "primary" },
+    fit: "cover",
+    camera: { ...HOLD_CAMERA, from: { ...NEUTRAL_FRAMING }, to: { ...NEUTRAL_FRAMING } },
+    radius: 0,
+  };
+}
 
 /* ------------------------------- composition ------------------------------- */
 
@@ -271,6 +500,29 @@ export interface Composition {
   transitions: Transition[];
   /** The shape of the output. See the frame section below. */
   frame: FrameSpec;
+  /**
+   * How the frame is divided over time. Empty means the whole runtime is one
+   * full-frame plate of the footage — which is what it always was.
+   *
+   * Optional on the way in, because a composition saved before shots existed
+   * does not have one and must keep rendering identically.
+   */
+  shots: Shot[];
+  /**
+   * The look, applied to the footage and never to the overlays.
+   *
+   * Optional for the same reason as `shots`: absent means neutral, which is
+   * what every project made before this rendered as.
+   */
+  grade?: GradeSpec | null;
+  /**
+   * Music, effects and anything else over the recording's own sound.
+   *
+   * Empty — and absent, for saves made before it existed — means the export
+   * still stream-copies the voice track exactly as it always has. Only a
+   * project that actually adds sound pays for a mix.
+   */
+  audio?: AudioClip[];
 }
 
 export function emptyComposition(): Composition {
@@ -284,7 +536,41 @@ export function emptyComposition(): Composition {
     },
     transitions: [],
     frame: { ...DEFAULT_FRAME },
+    shots: [],
+    grade: null,
+    audio: [],
   };
+}
+
+/** True when a shot changes nothing about how the frame is filled. */
+export function isPlainShot(shot: Shot): boolean {
+  if (shot.layout !== "full") return false;
+  if (shot.plates.length !== 1) return false;
+  const plate = shot.plates[0];
+  if (plate.source.kind !== "primary") return false;
+  if (plate.rect) return false;
+  if (plate.radius !== 0) return false;
+  const { from, to } = plate.camera;
+  return (
+    plate.camera.kind === "hold" &&
+    from.zoom === NEUTRAL_FRAMING.zoom &&
+    from.focusX === NEUTRAL_FRAMING.focusX &&
+    from.focusY === NEUTRAL_FRAMING.focusY &&
+    to.zoom === NEUTRAL_FRAMING.zoom &&
+    to.focusX === NEUTRAL_FRAMING.focusX &&
+    to.focusY === NEUTRAL_FRAMING.focusY
+  );
+}
+
+/**
+ * True when the shot list changes nothing, so export can take the fast path.
+ *
+ * A list of shots that are all plain full-frame holds is work someone did in
+ * the editor and no work at all for the encoder.
+ */
+export function shotsAreIdle(shots: Shot[] | undefined): boolean {
+  if (!shots || shots.length === 0) return true;
+  return shots.every(isPlainShot);
 }
 
 /**
@@ -302,6 +588,9 @@ export function isEmptyComposition(
     c.elements.every((e) => e.hidden) &&
     (!c.subtitles.enabled || c.subtitles.cues.length === 0) &&
     c.transitions.every((t) => t.kind === "none" || t.duration <= 0) &&
+    shotsAreIdle(c.shots) &&
+    isNeutralGrade(c.grade) &&
+    audioIsIdle(c.audio) &&
     !frameReframes(c.frame ?? DEFAULT_FRAME, sourceAspect)
   );
 }

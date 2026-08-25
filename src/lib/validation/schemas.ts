@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { IMAGE_STYLES } from "@/lib/ai/prompt-engineering";
+import { THEME_NAMES } from "@/lib/hyperframes/theme";
+import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
+import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
 
 /**
  * Every request body crosses this boundary. Limits here are the first line of
@@ -203,8 +206,11 @@ export const rescriptAgentRequestSchema = z.object({
       .optional(),
     can: z.object({ generateImage: z.boolean(), photoSearch: z.boolean() }),
   }),
-  /** "propose" describes the edit and waits; "execute" performs it. */
-  mode: z.enum(["propose", "execute"]).optional(),
+  /**
+   * "propose" describes the edit and waits; "execute" performs it; "review"
+   * looks at frames of the finished edit and reports what is wrong with it.
+   */
+  mode: z.enum(["propose", "execute", "review"]).optional(),
   /**
    * Earlier turns of this conversation, oldest first. Compressed to what was
    * asked and what came of it — enough for "make that bigger" to resolve
@@ -221,6 +227,49 @@ export const rescriptAgentRequestSchema = z.object({
     .max(12)
     .optional(),
   model: modelId.optional(),
+  /**
+   * Examples retrieved from this person's own past decisions.
+   *
+   * They ride in the request rather than being looked up server-side because
+   * that is where they live: the feedback store is in the browser, like the
+   * media and the transcript, and shipping it to a server to be queried would
+   * undo the one property this editor has that nothing else does.
+   */
+  exemplars: z
+    .array(
+      z.object({
+        instruction: z.string().trim().max(500),
+        title: z.string().trim().max(200),
+        detail: z.string().trim().max(400),
+        good: z.boolean(),
+      }),
+    )
+    .max(8)
+    .optional(),
+  /** Standing preferences inferred from the same store. */
+  preferences: z.array(z.string().trim().max(300)).max(4).optional(),
+  /**
+   * A few small frames of the cut, so the planner is not editing blind.
+   *
+   * Capped hard on both count and size. These are ~384px JPEGs at quality
+   * 0.6 — around 20KB each — and the bound is generous enough for that while
+   * being nowhere near large enough for someone to post a video through it.
+   */
+  glances: z
+    .array(
+      z.object({
+        at: z.number().min(0).max(24 * 3600),
+        dataUrl: z
+          .string()
+          .max(400_000)
+          .refine(
+            (value) => value.startsWith("data:image/"),
+            "must be an inline image"
+          ),
+      }),
+    )
+    .max(4)
+    .optional(),
 });
 export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
 
@@ -235,7 +284,7 @@ export const createRequestSchema = z.object({
     .regex(/^[a-zA-Z-]+$/)
     .optional(),
   tone: z.enum(["explainer", "story", "advert", "lesson"]).optional(),
-  videoStyle: z.enum(["whiteboard", "hyperframes"]).optional(),
+  videoStyle: z.enum(["whiteboard", "hyperframes", "auto"]).optional(),
 });
 export type CreateRequest = z.infer<typeof createRequestSchema>;
 
@@ -260,6 +309,14 @@ export const sceneSchema = z.object({
    * treatment five times.
    */
   support_visual: z.enum(["photo", "generated", "none"]).optional(),
+  /**
+   * The composition the director wants this beat cut as.
+   *
+   * A request, not an instruction: the renderer refuses any shot the scene
+   * cannot actually carry, because a step rail with one item on it is worse
+   * than the layout the content would have chosen for itself.
+   */
+  shot: z.enum(SCENE_ROLES_TUPLE).optional(),
 });
 
 export const storyboardSchema = z.object({
@@ -275,9 +332,11 @@ export const storyboardSchema = z.object({
    */
   visual_style: z.string().trim().max(300).optional(),
   /** Palette the renderer should grade the video in. */
-  visual_theme: z.enum(["studio-dark", "cyber-blue", "sunset", "clean-light"]).optional(),
+  visual_theme: z.enum(THEME_NAMES).optional(),
   /** Underscore for the whole video. */
   music_mood: z.enum(["calm", "curious", "driving", "warm", "serious", "none"]).optional(),
+  /** The surface a whiteboard video is drawn on. Ignored by the modern engine. */
+  board_stock: z.enum(BOARD_STOCK_NAMES_TUPLE).optional(),
   /**
    * The qualities the narrator should have. Matched against the voice
    * catalogue rather than naming a voice, so it survives a provider swap.

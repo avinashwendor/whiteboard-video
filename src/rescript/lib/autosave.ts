@@ -1,17 +1,19 @@
 /**
  * Debounced autosave of the current editor project into IndexedDB.
  *
- * Two stores are written as one record. The transcript store owns the cut; the
- * overlay store owns the captions, the overlays, the transitions and the output
- * frame. They are deliberately separate in memory — see `overlay/store.ts` — but
- * they are one *project*, and saving only half of it is what let a composition
- * outlive the video it was made for.
+ * Three stores are written as one record. The transcript store owns the cut;
+ * the overlay store owns the captions, the overlays, the transitions and the
+ * output frame; the chat store owns the conversation about all of it. They are
+ * deliberately separate in memory — see `overlay/store.ts` — but they are one
+ * *project*, and saving only part of it is what let a composition outlive the
+ * video it was made for.
  */
 
 import { useEditorStore } from "./store";
 import { useOverlayStore } from "./overlay/store";
+import { useChatStore } from "./chat/store";
 import { isEmptyComposition } from "./overlay/types";
-import { putProject } from "./projects";
+import { putProject, saveLastProjectId } from "./projects";
 
 const DEBOUNCE_MS = 500;
 
@@ -95,14 +97,24 @@ async function writeSnapshot() {
     subtitles: overlay.subtitles,
     transitions: overlay.transitions,
     frame: overlay.frame,
+    shots: overlay.shots,
+    grade: overlay.grade,
+    audio: overlay.audio,
   };
   // The composition counts as work: a project whose only edit is "make it
   // vertical and burn in captions" has an untouched transcript and still has to
   // be saved.
   const hasComposition = !isEmptyComposition(composition, overlay.sourceAspect);
 
+  // A conversation counts as work too. Someone who asked for a plan, read it
+  // and has not accepted it yet has done nothing to the composition and would
+  // lose the plan on a refresh without this.
+  const chat = useChatStore.getState().snapshot();
+  const hasChat = chat.turns.length > 0 || chat.log.length > 0;
+
   if (
     !hasComposition &&
+    !hasChat &&
     s.words.length === 0 &&
     s.manualCuts.length === 0 &&
     s.sceneBoundaries.length === 0
@@ -135,12 +147,17 @@ async function writeSnapshot() {
       speakers: s.speakers,
       composition,
       assets,
+      chat,
       media: s.videoFile,
       mediaType: s.videoFile.type,
     });
     if (useEditorStore.getState().projectId !== id) {
       useEditorStore.setState({ projectId: id });
     }
+    // A freshly dropped file only becomes a project here, on its first save.
+    // Recording it now is what makes a brand-new upload resumable too, rather
+    // than only projects that were opened from the recent list.
+    saveLastProjectId(id);
   } catch (err) {
     console.warn("Failed to autosave project.", err);
   }
@@ -160,7 +177,25 @@ if (typeof window !== "undefined") {
       state.elements === previous.elements &&
       state.subtitles === previous.subtitles &&
       state.transitions === previous.transitions &&
-      state.frame === previous.frame
+      state.frame === previous.frame &&
+      state.shots === previous.shots &&
+      state.grade === previous.grade &&
+      state.audio === previous.audio
+    ) {
+      return;
+    }
+    if (useEditorStore.getState().status !== "ready") return;
+    scheduleProjectAutosave();
+  });
+
+  // Same reasoning for the conversation: it is changed by the panel, not by an
+  // action on the transcript store, so it is watched from outside. `abort` and
+  // `sequence` are deliberately not triggers — neither is persisted state.
+  useChatStore.subscribe((state, previous) => {
+    if (
+      state.turns === previous.turns &&
+      state.log === previous.log &&
+      state.proposal === previous.proposal
     ) {
       return;
     }

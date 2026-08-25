@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Captions, Image as ImageIcon, Shapes, Type } from "lucide-react";
+import { Camera, Captions, Image as ImageIcon, Shapes, Type } from "lucide-react";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import {
   outputRangeToSource,
   type OutputTimeline,
 } from "@/rescript/lib/overlay/timeline";
-import type { OverlayElement } from "@/rescript/lib/overlay/types";
+import {
+  SHOT_LAYOUT_LABELS,
+  type OverlayElement,
+} from "@/rescript/lib/overlay/types";
 
 /**
  * The composition, drawn on the timeline.
@@ -27,6 +30,8 @@ const ROW_H = 13;
 const ROW_GAP = 2;
 const MAX_ROWS = 4;
 const SUBTITLE_ROW_H = 9;
+/** The shot lane. Thin: it is a reference strip, not something to drag in. */
+const SHOT_ROW_H = 9;
 
 const TONE: Record<OverlayElement["kind"], { bar: string; ring: string }> = {
   text: {
@@ -58,15 +63,24 @@ export interface OverlayTrackProps {
 }
 
 /** Height this lane needs, so the caller can reserve room for it. */
-export function overlayLaneHeight(rows: number, hasSubtitles: boolean): number {
+export function overlayLaneHeight(
+  rows: number,
+  hasSubtitles: boolean,
+  hasShots = false
+): number {
   const used = Math.min(Math.max(rows, 0), MAX_ROWS);
-  if (!used && !hasSubtitles) return 0;
-  return used * (ROW_H + ROW_GAP) + (hasSubtitles ? SUBTITLE_ROW_H + ROW_GAP : 0);
+  if (!used && !hasSubtitles && !hasShots) return 0;
+  return (
+    used * (ROW_H + ROW_GAP) +
+    (hasSubtitles ? SUBTITLE_ROW_H + ROW_GAP : 0) +
+    (hasShots ? SHOT_ROW_H + ROW_GAP : 0)
+  );
 }
 
 export default function OverlayTrack({ pps, top, timeline }: OverlayTrackProps) {
   const elements = useOverlayStore((s) => s.elements);
   const subtitles = useOverlayStore((s) => s.subtitles);
+  const shots = useOverlayStore((s) => s.shots);
   const selectedId = useOverlayStore((s) => s.selectedId);
   const select = useOverlayStore((s) => s.select);
 
@@ -233,6 +247,54 @@ export default function OverlayTrack({ pps, top, timeline }: OverlayTrackProps) 
           <Captions
             size={8}
             className="sticky left-0.5 text-sky-600 dark:text-sky-400"
+            aria-hidden
+          />
+        </div>
+      )}
+
+      {shots.length > 0 && (
+        <div
+          className="pointer-events-none absolute right-0 left-0"
+          style={{
+            top:
+              rowCount * (ROW_H + ROW_GAP) +
+              (subtitles.enabled && subtitles.cues.length > 0
+                ? SUBTITLE_ROW_H + ROW_GAP
+                : 0),
+            height: SHOT_ROW_H,
+          }}
+        >
+          {shots.map((shot) => {
+            // A shot is stated on the output clock and this ruler is source
+            // time, so one shot can be several bars — a cut inside it splits it
+            // on screen exactly as it splits the footage.
+            const spans = outputRangeToSource(
+              shot.start,
+              shot.end,
+              timeline.keepRanges
+            );
+            const moving = shot.plates[0]?.camera.kind !== "hold";
+            return spans.map((span, part) => (
+              <div
+                key={`${shot.id}-${part}`}
+                title={`${SHOT_LAYOUT_LABELS[shot.layout]}${
+                  moving ? ` · ${shot.plates[0]?.camera.kind}` : ""
+                }`}
+                className={`absolute rounded-[2px] ${
+                  moving ? "bg-violet-500/80" : "bg-violet-500/45"
+                }`}
+                style={{
+                  left: span.start * pps,
+                  width: Math.max(2, (span.end - span.start) * pps),
+                  top: 0,
+                  height: SHOT_ROW_H,
+                }}
+              />
+            ));
+          })}
+          <Camera
+            size={8}
+            className="sticky left-0.5 text-violet-600 dark:text-violet-400"
             aria-hidden
           />
         </div>

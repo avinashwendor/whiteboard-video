@@ -72,6 +72,10 @@ export const TRANSITIONS = [
   "zoomIn",
   "zoomOut",
   "blur",
+  "morphCut",
+  "whipPan",
+  "zoomBlur",
+  "iris",
 ] as const;
 
 export const SUBTITLE_PRESET_IDS = [
@@ -128,6 +132,16 @@ export const addTextOp = z.object({
   position: position.optional(),
   size: z.enum(SIZES).optional(),
   style: z.enum(TEXT_STYLES).optional(),
+  /**
+   * A named template: a look *and* a motion, in one word.
+   *
+   * Preferred over `style` plus `enter`/`exit`, because a template is a
+   * complete answer that someone has already made work over footage, and the
+   * three fields separately are three chances to produce something that has
+   * never been looked at. Anything set alongside it wins, so a template can be
+   * nudged without being rebuilt.
+   */
+  template: z.string().trim().max(40).optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   align: z.enum(["left", "center", "right"]).optional(),
@@ -153,7 +167,15 @@ export const addImageOp = z.object({
 
 export const addShapeOp = z.object({
   op: z.literal("addShape"),
-  shape: z.enum(["rect", "ellipse", "line"]).default("rect"),
+  shape: z.enum(["rect", "ellipse", "line", "path"]).default("rect"),
+  /**
+   * Which mark, when `shape` is "path".
+   *
+   * An annotation name (arrow, circleThis, underline, check, …) or any of the
+   * 1,776 Lucide icon names. Free text rather than an enum: an enum of 1,792
+   * values in the schema handed to the model would be most of the prompt.
+   */
+  mark: z.string().trim().max(48).optional(),
   start: seconds.optional(),
   end: seconds.optional(),
   duration: z.number().min(0.1).max(600).optional(),
@@ -302,6 +324,8 @@ export const captionPhraseOp = z.object({
   position: position.optional(),
   size: z.enum(SIZES).optional(),
   style: z.enum(TEXT_STYLES).optional(),
+  /** A named template. Same meaning as on addText, and preferred for the same reason. */
+  template: z.string().trim().max(40).optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   enter: animationField.optional(),
@@ -340,6 +364,169 @@ export const setFrameOp = z.object({
   background: z.enum(["black", "blur", "white"]).optional(),
 });
 
+/* ---------------------------------- shots ---------------------------------- */
+
+/**
+ * How the frame is filled over a stretch of the finished video.
+ *
+ * A camera move is expressed as a preset rather than as two framings, because
+ * "punch in on that line" is the instruction anyone actually gives, and a model
+ * asked for `from`/`to` pairs invents zoom levels that read as a mistake. The
+ * preset is turned into the framing pair by `cameraFor`, in one place, against
+ * numbers that were chosen once.
+ */
+export const cameraKinds = [
+  "hold",
+  "punchIn",
+  "punchOut",
+  "push",
+  "driftLeft",
+  "driftRight",
+  "kenBurns",
+  "snap",
+] as const;
+
+export const shotLayouts = [
+  "full",
+  "splitLeft",
+  "splitRight",
+  "splitTop",
+  "splitBottom",
+  "stack",
+  "pip",
+  "card",
+  "grid",
+] as const;
+
+/** What goes in one region. Kept flat: a nested union is where plans go wrong. */
+const plateSpec = z.object({
+  /** Region index. 0 is the primary — the largest, or the one behind a bubble. */
+  slot: z.number().int().min(0).max(3),
+  /**
+   * `primary` is the footage. `selfCrop` is the footage again, framed
+   * differently — the cutaway a real editor reaches for most, and the only one
+   * that needs no provider and no upload.
+   */
+  source: z.enum(["primary", "selfCrop", "solid"]).optional(),
+  color: colour.optional(),
+  fit: z.enum(["cover", "contain"]).optional(),
+  camera: z.enum(cameraKinds).optional(),
+  /** How far the move travels. 1 is the preset's own amount. */
+  amount: z.number().min(0).max(2).optional(),
+  /** What the move centres on, 0..1 of the source. */
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+  radius: z.number().min(0).max(0.5).optional(),
+});
+
+export const addShotOp = z.object({
+  op: z.literal("addShot"),
+  /** Seconds on the finished video's own clock. */
+  start: seconds,
+  end: seconds,
+  layout: z.enum(shotLayouts),
+  plates: z.array(plateSpec).min(1).max(4).optional(),
+});
+
+export const setCameraOp = z.object({
+  op: z.literal("setCamera"),
+  start: seconds,
+  end: seconds,
+  camera: z.enum(cameraKinds),
+  amount: z.number().min(0).max(2).optional(),
+  focusX: z.number().min(0).max(1).optional(),
+  focusY: z.number().min(0).max(1).optional(),
+});
+
+export const removeShotOp = z.object({
+  op: z.literal("removeShot"),
+  /** Any second inside the shot to remove. */
+  at: seconds,
+});
+
+/**
+ * Place punch-ins automatically, on the beats the footage actually has.
+ *
+ * One operation rather than twenty `addShot`s: a model asked to place its own
+ * zooms spends its whole output budget on them and spaces them by eye, and the
+ * spacing is the part that decides whether an edit reads as produced or as
+ * restless. The rules live in `emphasis.ts` and are the same ones the manual
+ * button uses.
+ */
+export const autoPunchInsOp = z.object({
+  op: z.literal("autoPunchIns"),
+  /** Roughly how many per minute. The placer still enforces its own spacing. */
+  perMinute: z.number().min(0.5).max(8).optional(),
+  amount: z.number().min(0).max(2).optional(),
+});
+
+/* ---------------------------------- grade ---------------------------------- */
+
+/**
+ * The look.
+ *
+ * A preset by name, optionally nudged. Named looks rather than seven sliders
+ * for the same reason the camera takes preset names: asked for raw numbers a
+ * model reaches for the ends of every range, and what comes back is a video
+ * that has been *processed* rather than graded.
+ */
+export const setGradeOp = z.object({
+  op: z.literal("setGrade"),
+  preset: z.enum([
+    "none",
+    "clean",
+    "warmFilm",
+    "tealOrange",
+    "bleach",
+    "mono",
+    "vivid",
+    "moody",
+  ]),
+  /** Adjustments on top of the preset, each -1..1. */
+  exposure: z.number().min(-1).max(1).optional(),
+  contrast: z.number().min(-1).max(1).optional(),
+  saturation: z.number().min(-1).max(1).optional(),
+  temperature: z.number().min(-1).max(1).optional(),
+  vignette: z.number().min(0).max(1).optional(),
+  grain: z.number().min(0).max(1).optional(),
+  /** A second inside one shot, to grade only that. Omit for the whole video. */
+  at: seconds.optional(),
+});
+
+/* ---------------------------------- sound ---------------------------------- */
+
+/**
+ * Put music or an effect under the video.
+ *
+ * A *search*, not a URL. The model has no way to know what is in a catalogue
+ * and no business choosing a file — the browser searches, takes the first
+ * commercially-usable result, and proxies it onto our origin. What the model is
+ * good for is knowing that this video wants something calm and that it should
+ * start before the first word.
+ */
+export const addMusicOp = z.object({
+  op: z.literal("addMusic"),
+  /** What to look for: "calm piano", "driving drums", "whoosh". */
+  query: z.string().trim().min(2).max(80),
+  kind: z.enum(["music", "sfx"]).default("music"),
+  /** Output-clock seconds. Music defaults to the whole video. */
+  start: seconds.optional(),
+  end: seconds.optional(),
+  /** 0..1. Leave it alone unless asked — the defaults are chosen levels. */
+  gain: z.number().min(0).max(1).optional(),
+});
+
+export const setMusicLevelOp = z.object({
+  op: z.literal("setMusicLevel"),
+  gain: z.number().min(0).max(1),
+  /** Pull the bed down while someone is speaking. On by default. */
+  duck: z.boolean().optional(),
+});
+
+export const removeMusicOp = z.object({
+  op: z.literal("removeMusic"),
+});
+
 export const agentOpSchema = z.discriminatedUnion("op", [
   addTextOp,
   addImageOp,
@@ -361,6 +548,14 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   splitAtOp,
   captionPhraseOp,
   setFrameOp,
+  addShotOp,
+  setCameraOp,
+  removeShotOp,
+  autoPunchInsOp,
+  setGradeOp,
+  addMusicOp,
+  setMusicLevelOp,
+  removeMusicOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

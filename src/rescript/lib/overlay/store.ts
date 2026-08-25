@@ -19,7 +19,16 @@ import {
   type Rect,
   type Transition,
   type TransitionKind,
+  primaryPlate,
+  regionCount,
+  type CameraMove,
+  type Plate,
+  type Shot,
+  type ShotLayout,
 } from "./types";
+import { normaliseShots } from "./shots";
+import { withGradeDefaults, type GradeSpec } from "./grade";
+import type { AudioClip } from "./audio";
 import { forgetImage, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
 
@@ -50,6 +59,16 @@ function nextId(prefix: string): string {
 }
 
 export interface OverlayState extends Composition {
+  /**
+   * Required here even though it is optional on a `Composition`.
+   *
+   * Optional on the stored shape because a save made before the audio layer
+   * existed does not have one. In the *store* it is always present — `reset`
+   * and `loadComposition` both guarantee an array — and narrowing it here means
+   * every action can push to it without a `?? []` that would silently discard a
+   * clip if the assumption ever broke.
+   */
+  audio: AudioClip[];
   selectedId: string | null;
   /** Element ids being dragged/resized, so history coalesces to one entry. */
   gestureActive: boolean;
@@ -102,10 +121,76 @@ export interface OverlayState extends Composition {
   setAllTransitions: (kind: TransitionKind, duration?: number) => void;
   replaceTransitions: (transitions: Transition[]) => void;
 
+  /**
+   * The project's look, or one shot's.
+   *
+   * A patch rather than a whole grade, so a slider does not have to know about
+   * the other six fields. `null` clears it back to neutral.
+   */
+  setGrade: (patch: Partial<GradeSpec> | null, shotId?: string) => void;
+
+  /**
+   * Add a shot over `start`–`end`, clipping whatever it overlaps.
+   *
+   * Returns the id. A shot with no plates is given a plain full-frame one, so
+   * the caller can add a shot first and decide what goes in it second — the
+   * order the UI naturally works in.
+   */
+  addShot: (shot: Omit<Shot, "id"> & { id?: string }) => string;
+  updateShot: (id: string, patch: Partial<Omit<Shot, "id">>) => void;
+  /** Patch one plate of a shot, by slot. */
+  setPlate: (id: string, slot: number, patch: Partial<Plate>) => void;
+  /** Change the layout, adding or trimming plates so the count matches. */
+  setLayout: (id: string, layout: ShotLayout) => void;
+  setCamera: (id: string, slot: number, camera: CameraMove) => void;
+  removeShot: (id: string) => void;
+  replaceShots: (shots: Shot[]) => void;
+
+  /** Add a music bed or an effect. Returns the id. */
+  addAudio: (clip: Omit<AudioClip, "id"> & { id?: string }) => string;
+  updateAudio: (id: string, patch: Partial<Omit<AudioClip, "id">>) => void;
+  removeAudio: (id: string) => void;
+
   loadComposition: (composition: Composition) => void;
   undo: () => void;
   redo: () => void;
   reset: () => void;
+}
+
+/**
+ * Re-clear every element against a frame that has changed shape.
+ *
+ * Returns the same array when nothing had to move, so a reframe that breaks
+ * nothing costs no re-render and leaves the undo stack describing the frame
+ * change alone.
+ */
+function reflow(state: OverlayState, aspect: number): OverlayElement[] {
+  let moved = false;
+  const next = state.elements.map((element) => {
+    if (element.locked || element.hidden) return element;
+
+    const blocked = blockedFor(
+      element.start,
+      element.end,
+      state.elements,
+      state.subtitles,
+      element.id,
+      aspect
+    );
+    const placed = nudgeClear(element.rect, blocked);
+    if (
+      Math.abs(placed.x - element.rect.x) < 1e-6 &&
+      Math.abs(placed.y - element.rect.y) < 1e-6 &&
+      Math.abs(placed.w - element.rect.w) < 1e-6 &&
+      Math.abs(placed.h - element.rect.h) < 1e-6
+    ) {
+      return element;
+    }
+    moved = true;
+    return { ...element, rect: placed };
+  });
+
+  return moved ? next : state.elements;
 }
 
 function snapshot(s: OverlayState): Composition {
@@ -114,6 +199,9 @@ function snapshot(s: OverlayState): Composition {
     subtitles: s.subtitles,
     transitions: s.transitions,
     frame: s.frame,
+    shots: s.shots,
+    grade: s.grade,
+    audio: s.audio,
   };
 }
 
@@ -162,6 +250,10 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
 
   return {
     ...emptyComposition(),
+    // Restated because the stored shape has it optional (older saves have
+    // none) while the store's is not. `emptyComposition` already sets it; this
+    // is what tells the type system so.
+    audio: [],
     selectedId: null,
     gestureActive: false,
     past: [],
@@ -176,11 +268,27 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     },
 
     setFrame: (patch) => {
+      const previous = get().aspect;
       const frame = { ...get().frame, ...patch };
+      const aspect = frameRatio(frame, get().sourceAspect);
       // The output shape is what every rect is a fraction of, so it is kept
       // beside the frame rather than recomputed by each reader.
-      set({ aspect: frameRatio(frame, get().sourceAspect) });
-      commit({ frame });
+      set({ aspect });
+
+      // Changing the *shape* moves the ground under everything on screen.
+      //
+      // Rects are fractions of the frame, so elements survive a reframe rather
+      // than sliding off it — that much was already true. What is not true is
+      // that they still *work*: the subtitle band is a different height in 9:16
+      // than in 16:9 (type is measured against a corrected unit, rects are not),
+      // so a lower third that cleared it in widescreen sits under it in
+      // vertical, and two captions that were comfortably apart can now touch.
+      //
+      // This is the same collision pass every other placement goes through, run
+      // again against the new shape. A rect somebody dragged is still obeyed to
+      // the pixel — this only moves what the new frame has actually broken.
+      const changed = Math.abs(aspect - previous) > 0.001;
+      commit(changed ? { frame, elements: reflow(get(), aspect) } : { frame });
     },
 
     addElement: (element) => {
@@ -277,13 +385,24 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     },
 
     addShape: (partial = {}) => {
+      // A mark is a drawn gesture and a rectangle is a plate to put something
+      // on, so their defaults are opposites: one wants ink and no fill, the
+      // other a fill and no ink. Getting this wrong makes every placed arrow
+      // arrive as an invisible black-on-black box.
+      const isMark = partial.shape === "path";
       const element: ShapeElement = {
         id: nextId("shape"),
         kind: "shape",
-        name: partial.name ?? "Shape",
+        name: partial.name ?? (isMark ? (partial.pathName ?? "Mark") : "Shape"),
         start: partial.start ?? 0,
         end: partial.end ?? (partial.start ?? 0) + 4,
-        rect: partial.rect ?? { x: 0.08, y: 0.62, w: 0.84, h: 0.22 },
+        rect:
+          partial.rect ??
+          (isMark
+            ? // Square, because a mark is scaled to fit and a wide box would
+              // simply centre it in empty space.
+              { x: 0.38, y: 0.34, w: 0.24, h: 0.24 }
+            : { x: 0.08, y: 0.62, w: 0.84, h: 0.22 }),
         rotation: 0,
         opacity: 1,
         z: 0,
@@ -292,9 +411,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         enter: partial.enter ?? { ...DEFAULT_ENTER },
         exit: partial.exit ?? { ...DEFAULT_EXIT },
         shape: "rect",
-        fill: "rgba(0,0,0,0.55)",
-        strokeColor: null,
-        strokeWidth: 0.004,
+        fill: isMark ? null : "rgba(0,0,0,0.55)",
+        strokeColor: isMark ? "#ffd60a" : null,
+        strokeWidth: isMark ? 0.009 : 0.004,
         radius: 0.06,
         ...partial,
       };
@@ -475,6 +594,95 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
     replaceTransitions: (transitions) =>
       commit({ transitions: [...transitions].sort((a, b) => a.index - b.index) }),
 
+    setGrade: (patch, shotId) => {
+      if (!shotId) {
+        commit({
+          grade: patch === null ? null : withGradeDefaults({ ...get().grade, ...patch }),
+        });
+        return;
+      }
+      const shots = get().shots.map((s) =>
+        s.id === shotId
+          ? {
+              ...s,
+              grade:
+                patch === null
+                  ? null
+                  : withGradeDefaults({ ...(s.grade ?? get().grade), ...patch }),
+            }
+          : s
+      );
+      commit({ shots });
+    },
+
+    /* ---------------------------------- audio ---------------------------------- */
+
+    addAudio: (input) => {
+      const id = input.id ?? nextId("audio");
+      commit({ audio: [...get().audio, { ...input, id }] });
+      return id;
+    },
+
+    updateAudio: (id, patch) =>
+      commit({
+        audio: get().audio.map((clip) =>
+          clip.id === id ? { ...clip, ...patch } : clip
+        ),
+      }),
+
+    removeAudio: (id) =>
+      commit({ audio: get().audio.filter((clip) => clip.id !== id) }),
+
+    /* ---------------------------------- shots ---------------------------------- */
+
+    addShot: (input) => {
+      const id = input.id ?? nextId("shot");
+      const plates = input.plates?.length ? input.plates : [primaryPlate()];
+      const shot: Shot = { ...input, id, plates };
+      // Normalised on the way in rather than at read time: `shotAt` returns the
+      // first match, so an overlap left here would be silently invisible.
+      commit({ shots: normaliseShots([...get().shots, shot]) });
+      return id;
+    },
+
+    updateShot: (id, patch) => {
+      const shots = get().shots.map((s) => (s.id === id ? { ...s, ...patch } : s));
+      commit({ shots: normaliseShots(shots) });
+    },
+
+    setPlate: (id, slot, patch) => {
+      const shots = get().shots.map((s) => {
+        if (s.id !== id) return s;
+        const plates = s.plates.map((p) => (p.slot === slot ? { ...p, ...patch } : p));
+        return { ...s, plates };
+      });
+      commit({ shots });
+    },
+
+    setLayout: (id, layout) => {
+      const shots = get().shots.map((s) => {
+        if (s.id !== id) return s;
+        const want = regionCount(layout, s.plates.length);
+        const plates = s.plates.slice(0, want);
+        // Growing into a new layout fills the extra regions with the footage
+        // rather than with nothing: an empty half-frame reads as a bug, and
+        // "the same shot twice" is at least a picture someone can then change.
+        while (plates.length < want) {
+          plates.push({ ...primaryPlate(), slot: plates.length });
+        }
+        // Slots are re-seated because a plate list that survived a trim can
+        // otherwise carry a slot the new layout has no region for.
+        return { ...s, layout, plates: plates.map((p, i) => ({ ...p, slot: i })) };
+      });
+      commit({ shots });
+    },
+
+    setCamera: (id, slot, camera) => get().setPlate(id, slot, { camera }),
+
+    removeShot: (id) => commit({ shots: get().shots.filter((s) => s.id !== id) }),
+
+    replaceShots: (shots) => commit({ shots: normaliseShots(shots) }),
+
     loadComposition: (composition) => {
       const frame = composition.frame ?? { ...DEFAULT_FRAME };
       set({
@@ -487,6 +695,13 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
         },
         transitions: composition.transitions ?? [],
         frame,
+        // A save written before shots existed has none, and none means one
+        // full-frame plate of the footage — which is what it rendered as.
+        shots: composition.shots ?? [],
+        grade: composition.grade ?? null,
+        // Absent on a save made before there was an audio layer, and absent
+        // means silence — which is what those projects exported as.
+        audio: composition.audio ?? [],
         aspect: frameRatio(frame, get().sourceAspect),
         selectedId: null,
         // A loaded composition is a new starting point, not a step: undoing
@@ -557,5 +772,8 @@ export function currentComposition(): Composition {
     subtitles: s.subtitles,
     transitions: s.transitions,
     frame: s.frame,
+    shots: s.shots,
+    grade: s.grade,
+    audio: s.audio,
   };
 }

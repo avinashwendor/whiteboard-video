@@ -9,7 +9,11 @@
  */
 
 import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import { buildCues } from "../src/rescript/lib/overlay/subtitles";
+import {
+  buildCues,
+  fittedCharsPerLine,
+  rewrapCues,
+} from "../src/rescript/lib/overlay/subtitles";
 import {
   buildTimeline,
   clampTransitionDuration,
@@ -523,6 +527,95 @@ function word(
     !isEmptyComposition(empty),
     "subtitles switched on mean the export has work to do"
   );
+}
+
+/* -------------------- re-breaking captions for another shape ---------------- */
+
+{
+  // Line length is a function of the frame. Delivering a widescreen project
+  // vertically without re-breaking carries captions cut three words too long
+  // for it — every one of them — and the renderer resolves the overflow by
+  // running text off both edges.
+  const words: Word[] = [];
+  const sentence =
+    "the whole point of the redesign was to make the thing feel faster than it really is"
+      .split(" ");
+  sentence.forEach((text, i) => {
+    words.push({ id: i + 1, text, start: i * 0.4, end: i * 0.4 + 0.35, speaker: 0, deleted: false });
+  });
+
+  const style = { ...DEFAULT_SUBTITLE_STYLE };
+  const wideBudget = fittedCharsPerLine(style, 16 / 9);
+  const tallBudget = fittedCharsPerLine(style, 9 / 16);
+  assert(tallBudget < wideBudget, `a tall frame fits fewer characters: ${tallBudget} vs ${wideBudget}`);
+
+  const track = {
+    enabled: true,
+    style,
+    generated: true,
+    cues: buildCues(words, [], { maxCharsPerLine: wideBudget, maxLines: style.maxLines }),
+  };
+  assert(track.cues.length > 0, "there are cues to begin with");
+
+  const rewrapped = rewrapCues(track, 9 / 16);
+  assert(rewrapped !== track, "a re-break produces a new track");
+  assert(
+    rewrapped.cues.length >= track.cues.length,
+    `a tighter budget makes at least as many cues: ${track.cues.length} → ${rewrapped.cues.length}`
+  );
+
+  // Every cue must now fit the vertical budget.
+  const perCue = tallBudget * style.maxLines;
+  for (const cue of rewrapped.cues) {
+    assert(
+      cue.text.length <= perCue,
+      `"${cue.text}" is ${cue.text.length} chars, over the ${perCue} a 9:16 frame fits`
+    );
+  }
+
+  // Nothing may be lost or reordered — this is a re-break, not a re-edit.
+  const before = track.cues.flatMap((c) => c.words ?? []).map((w) => w.text).join(" ");
+  const after = rewrapped.cues.flatMap((c) => c.words ?? []).map((w) => w.text).join(" ");
+  assert(after === before, "every word survives, in order");
+
+  // …and the timings are the same ones, not recomputed.
+  const firstBefore = track.cues[0].words?.[0];
+  const firstAfter = rewrapped.cues[0].words?.[0];
+  assert(
+    firstBefore && firstAfter && firstBefore.start === firstAfter.start,
+    "word timings are carried, not rebuilt"
+  );
+
+  // Cues must not overlap after re-breaking, or two show at once.
+  for (let i = 0; i < rewrapped.cues.length - 1; i++) {
+    assert(
+      rewrapped.cues[i].end <= rewrapped.cues[i + 1].start + 1e-9,
+      `cue ${i} runs into cue ${i + 1}`
+    );
+  }
+}
+
+{
+  const style = { ...DEFAULT_SUBTITLE_STYLE };
+
+  // Nothing to do, and nothing done: the same object comes back, so a delivery
+  // that changes no captions costs no work and no re-render.
+  const off = { enabled: false, style, generated: false, cues: [] };
+  assert(rewrapCues(off, 9 / 16) === off, "disabled captions are left alone");
+
+  const empty = { enabled: true, style, generated: true, cues: [] };
+  assert(rewrapCues(empty, 9 / 16) === empty, "no cues, nothing to re-break");
+
+  // An imported SRT has no per-word timings. Re-flowing those by splitting text
+  // would move captions off the beats they were written for — slightly-long
+  // lines beat captions that no longer match the speech.
+  const imported = {
+    enabled: true,
+    style,
+    generated: false,
+    cues: [{ id: "c1", start: 0, end: 2, text: "a caption with no word timings at all" }],
+  };
+  assert(rewrapCues(imported, 9 / 16) === imported, "an imported track is not re-flowed");
 }
 
 console.log("ALL OVERLAY TESTS PASSED");

@@ -4,12 +4,13 @@ import {
   clamp01,
   easeOutCubic,
   easeOutQuint,
+  noise1,
   pulse,
   range,
   smootherstep,
 } from "@/lib/video/easing";
 import { lerp } from "@/lib/video/easing";
-import { withAlpha } from "@/lib/video/grade";
+import { supportsFilter, withAlpha } from "@/lib/video/grade";
 import {
   buildPhrases,
   phraseAt,
@@ -20,17 +21,35 @@ import {
   type WordTiming,
 } from "@/lib/video/timing";
 import { themeOf, type Theme, type ThemeName } from "./theme";
+import type { SceneRole } from "./roles";
+import type { Glyph } from "./glyphs";
 import {
   drawArrow,
-  drawCard,
   drawEdgeShape,
   drawEmoji,
   drawFramedPhoto,
-  drawGround,
   drawMarker,
   drawOutlineNumeral,
   drawWashedPhoto,
 } from "./paper";
+import {
+  chromeFill,
+  drawBloom,
+  drawBrackets,
+  drawCardStack,
+  drawConnector,
+  drawFinishGround,
+  drawFrameRule,
+  drawGhostNumeral,
+  drawGhostType,
+  drawGlyph,
+  drawNode,
+  drawPlate,
+  drawSectionMark,
+  drawSurface,
+  sway,
+  type Point,
+} from "./surface";
 import { emojiFor } from "./emoji";
 import {
   countUp,
@@ -59,14 +78,13 @@ import {
 
 /* ---------------------------------- types --------------------------------- */
 
-export type SceneRole =
-  | "hero"
-  | "statement"
-  | "split"
-  | "metric"
-  | "process"
-  | "contrast"
-  | "takeaway";
+/**
+ * The shot vocabulary lives in `./roles` so the server can name a composition
+ * without pulling in canvas code. Re-exported here because every consumer of
+ * the renderer wants both together.
+ */
+export type { SceneRole } from "./roles";
+export { SCENE_ROLES_TUPLE, SHOT_BRIEFS } from "./roles";
 
 export interface ModernRenderScene {
   heading: string;
@@ -79,6 +97,16 @@ export interface ModernRenderScene {
   stat?: string;
   statCaption?: string;
   visualTheme?: ThemeName;
+  /**
+   * The shot the director asked for.
+   *
+   * Honoured whenever the scene can actually carry it. The renderer keeps the
+   * veto because a layout that draws four items cannot be handed one, and an
+   * empty rail is worse than the wrong-but-full alternative.
+   */
+  shot?: SceneRole;
+  /** Line icons resolved from this scene's own words, in bullet order. */
+  glyphs?: Glyph[];
 }
 
 export interface SceneTiming {
@@ -109,7 +137,18 @@ export interface ModernRenderOptions {
   time: number;
   /** Total length of this scene. */
   duration: number;
+  /** The interface face. Captions, body copy, subtitles. */
   fontSans: string;
+  /**
+   * The display face: tight, heavy, drawn to be set large.
+   *
+   * Optional so an older caller still renders; every headline falls back to
+   * the interface face rather than to a system default, which would be worse
+   * than the thing being replaced.
+   */
+  fontDisplay?: string;
+  /** Ultra-condensed poster face, for one word filling the frame. */
+  fontPoster?: string;
   /** 0..1 through the whole video, for the chapter rail. */
   globalProgress?: number;
 }
@@ -117,49 +156,101 @@ export interface ModernRenderOptions {
 /* ---------------------------------- plan ---------------------------------- */
 
 /**
- * Picks the shot type from the scene's own content.
+ * What a shot needs before it can be asked to carry a scene.
  *
- * The alternation on bullet-heavy scenes is deliberate: two process shots in a
- * row is the one repetition a viewer notices.
+ * Consulted for both the director's request and the variety fallback, so
+ * neither can put three bullets into a layout that draws one, or ask for a
+ * spread of photographs when the scene has none. Exported so the editor can
+ * grey out a shot rather than accepting it and quietly rendering another --
+ * a control that silently does nothing is the worst kind there is.
+ */
+export function canCarry(
+  role: SceneRole,
+  scene: { bullets: string[]; stat?: string; image?: unknown },
+): boolean {
+  switch (role) {
+    case "metric":
+      return Boolean(scene.stat?.trim());
+    case "process":
+      return scene.bullets.length >= 3;
+    case "deck":
+      return scene.bullets.length >= 2;
+    case "contrast":
+      return scene.bullets.length === 2;
+    case "tree":
+      return scene.bullets.length >= 2 && scene.bullets.length <= 4;
+    case "split":
+      return scene.bullets.length > 0;
+    case "collage":
+      return scene.bullets.length >= 1;
+    case "bracket":
+      return scene.bullets.length <= 2;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Picks the shot type.
+ *
+ * Three inputs, in order of authority. The director may name a shot, and if
+ * the scene can carry it that is the end of the discussion -- a human deciding
+ * that this beat is a magazine cover knows something the content does not say.
+ * Failing that the shot is read off what the scene actually contains. Failing
+ * both, anything that would repeat a shot used in the last two scenes is
+ * swapped for the nearest alternative the scene can carry.
+ *
+ * The alternation is not fussiness. Two process rails in a row is the single
+ * repetition a viewer notices, and an A-B-A-B alternation across six scenes
+ * reads as a template just as clearly as a straight repeat does.
  */
 export function roleFor(scene: {
   index: number;
   totalScenes: number;
   bullets: string[];
+  heading?: string;
   stat?: string;
   image?: unknown;
+  /** The shot the director asked for, if any. */
+  requested?: SceneRole;
   /** The shots already used, most recent last, so the film keeps varying. */
   recentRoles?: SceneRole[];
 }): SceneRole {
   const pick = (): SceneRole => {
     if (scene.index === 0) return "hero";
     if (scene.totalScenes > 2 && scene.index === scene.totalScenes - 1) return "takeaway";
+    if (scene.requested && canCarry(scene.requested, scene)) return scene.requested;
     if (scene.stat?.trim()) return "metric";
-    if (scene.bullets.length >= 3) return "process";
+    // A question is a branch. Anything else with the same bullet count is not.
+    if (/\?\s*$/.test(scene.heading ?? "") && canCarry("tree", scene)) return "tree";
+    if (scene.image && scene.bullets.length >= 1 && scene.bullets.length <= 2) return "collage";
+    if (scene.bullets.length >= 4) return "deck";
+    if (scene.bullets.length === 3) return "process";
     if (scene.bullets.length === 2) return "contrast";
-    return "statement";
+    return scene.image ? "bracket" : "statement";
   };
 
   const role = pick();
-  // Two back is far enough to matter: at six or eight scenes an A-B-A-B
-  // alternation reads as a template just as clearly as a straight repeat.
   const recent = (scene.recentRoles ?? []).slice(-2);
   if (!recent.includes(role)) return role;
+
   const alternatives: Record<SceneRole, SceneRole[]> = {
-    hero: ["statement"],
-    statement: ["split", "contrast"],
-    split: ["statement", "contrast"],
-    metric: ["split", "statement"],
-    process: ["split", "contrast"],
-    contrast: ["split", "process"],
-    takeaway: ["statement"],
+    hero: ["bracket", "statement"],
+    statement: ["bracket", "split", "contrast"],
+    split: ["collage", "statement", "contrast"],
+    metric: ["statement", "split"],
+    process: ["deck", "tree", "split"],
+    contrast: ["tree", "split", "deck"],
+    takeaway: ["statement", "bracket"],
+    bracket: ["statement", "collage"],
+    deck: ["process", "tree", "collage"],
+    tree: ["process", "deck", "contrast"],
+    collage: ["split", "bracket", "deck"],
   };
 
   for (const candidate of alternatives[role]) {
     if (recent.includes(candidate)) continue;
-    if (candidate === "process" && scene.bullets.length < 3) continue;
-    if (candidate === "contrast" && scene.bullets.length < 2) continue;
-    if (candidate === "split" && !scene.bullets.length) continue;
+    if (!canCarry(candidate, scene)) continue;
     return candidate;
   }
   return role;
@@ -173,7 +264,7 @@ export function planModernScene(
   /** Glyphs already used in this video, so no two frames wear the same one. */
   usedGlyphs?: Set<string>,
 ): ModernPlan {
-  const role = roleFor({ ...scene, recentRoles });
+  const role = roleFor({ ...scene, requested: scene.shot, recentRoles });
   const { lead, speech, tail } = timing;
 
   const [heading] = planCues(
@@ -238,6 +329,23 @@ export function planModernScene(
 
 /* ---------------------------------- shots --------------------------------- */
 
+/**
+ * The face a shot sets its display type in.
+ *
+ * Headlines, statistics and numerals go here; captions and subtitles stay on
+ * the interface face. Pairing a tight display cut with a neutral text face is
+ * the oldest trick in editorial typography and the reason a headline can be
+ * enormous without the frame feeling shouty.
+ */
+function display(options: ModernRenderOptions): string {
+  return options.fontDisplay ?? options.fontSans;
+}
+
+/** The poster face, for a single word at frame scale. */
+function poster(options: ModernRenderOptions): string {
+  return options.fontPoster ?? display(options);
+}
+
 const MARGIN = 96;
 const CONTENT_WIDTH = BOARD_WIDTH - MARGIN * 2;
 /**
@@ -275,9 +383,46 @@ function drawRule(
   const t = easeOutQuint(clamp01(progress));
   if (t <= 0) return;
   ctx.save();
-  ctx.fillStyle = theme.accent;
+  // A rule is hairline work: it uses the mark weight, not the plate colour.
+  ctx.fillStyle = theme.mark;
   ctx.fillRect(x, y, width * t, height);
   ctx.restore();
+}
+
+/**
+ * The one object in the frame that is not a word.
+ *
+ * Which kind of object depends on the finish, and the rule is not arbitrary.
+ * Printed frames get an emoji: full colour, warm, handmade, and it sits on
+ * paper the way a sticker does. Editorial and glass frames get line work in
+ * the frame's own accent, because a full-colour cartoon on a magazine cover or
+ * a frosted panel is the one mark that will make the whole composition look
+ * like a school project.
+ *
+ * Falls back to the emoji whenever no icon resolved, so a frame is never left
+ * with an empty space where its subject was meant to be.
+ */
+function drawMark(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  index: number,
+  x: number,
+  y: number,
+  size: number,
+  theme: Theme,
+  options: { enter?: number; time?: number; tilt?: number; seed?: number; colour?: string } = {},
+) {
+  const glyph = scene.glyphs?.[index];
+  if (theme.finish !== "print" && glyph) {
+    drawGlyph(ctx, glyph, x, y, size * 0.84, {
+      colour: options.colour ?? theme.accent,
+      enter: options.enter,
+      width: 2.4,
+    });
+    return;
+  }
+  drawEmoji(ctx, plan.itemGlyphs[index] ?? plan.glyph, x, y, size, options);
 }
 
 /** The picture a shot was given, if it is actually usable. */
@@ -312,7 +457,7 @@ function shotHero(
     width: BOARD_WIDTH - MARGIN * 1.55,
     height: SAFE_BOTTOM - 88,
   };
-  drawCard(ctx, card, {
+  drawSurface(ctx, card, theme, {
     fill: theme.accent,
     radius: 34,
     offset: 12,
@@ -321,7 +466,7 @@ function shotHero(
   });
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: card.width - 150 - (picture ? 210 : 0),
     maxSize: 104,
     minSize: 46,
@@ -381,7 +526,7 @@ function shotHero(
   // One of the two, never both: a photograph and a glyph in the same corner
   // is two accents fighting.
   if (!picture) {
-    drawEmoji(ctx, plan.glyph, card.x + card.width - 150, card.y + card.height * 0.42, 150, {
+    drawMark(ctx, scene, plan, 0, card.x + card.width - 150, card.y + card.height * 0.42, 150, theme, {
       enter: smootherstep(range(time, 0.4, 1.1)),
       time,
       tilt: -8,
@@ -442,7 +587,7 @@ function shotStatement(
   );
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: CONTENT_WIDTH * (picture ? 0.62 : 0.86),
     maxSize: 92,
     minSize: 42,
@@ -488,7 +633,7 @@ function shotStatement(
   }
 
   if (!picture) {
-    drawEmoji(ctx, plan.glyph, BOARD_WIDTH - MARGIN - 96, 214, 168, {
+    drawMark(ctx, scene, plan, 0, BOARD_WIDTH - MARGIN - 96, 214, 168, theme, {
       enter: smootherstep(range(time, 0.35, 1.05)),
       time,
       tilt: 9,
@@ -546,7 +691,7 @@ function shotSplit(
       enter: smootherstep(range(time, 0.1, 0.9)),
     });
   } else {
-    drawCard(ctx, mediaBox, {
+    drawSurface(ctx, mediaBox, theme, {
       fill: theme.surface,
       offset: 10,
       shadow: theme.shadow,
@@ -555,7 +700,7 @@ function shotSplit(
   }
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: textWidth,
     maxSize: 62,
     minSize: 34,
@@ -566,7 +711,7 @@ function shotSplit(
   });
 
   const baseY = 214;
-  drawEmoji(ctx, plan.glyph, textX + 26, baseY - heading.size - 86, 54, {
+  drawMark(ctx, scene, plan, 0, textX + 26, baseY - heading.size - 86, 54, theme, {
     enter: smootherstep(range(time, 0.2, 0.8)),
     time,
     tilt: -6,
@@ -646,7 +791,7 @@ function shotMetric(
     ? { x: MARGIN, y: 128, width: CONTENT_WIDTH * 0.52, height: 352 }
     : { x: BOARD_WIDTH / 2 - 420, y: 132, width: 840, height: 348 };
 
-  drawCard(ctx, cardBox, {
+  drawSurface(ctx, cardBox, theme, {
     fill: theme.card,
     offset: 12,
     shadow: theme.shadow,
@@ -660,7 +805,7 @@ function shotMetric(
 
   ctx.save();
   const size = Math.min(168, (cardBox.width - 96) / Math.max(2.2, value.length * 0.56));
-  ctx.font = `800 ${size}px ${options.fontSans}`;
+  ctx.font = `800 ${size}px ${display(options)}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   const metrics = ctx.measureText(value || "0");
@@ -684,7 +829,7 @@ function shotMetric(
   ctx.fillText(value, centreX, numberY);
   ctx.restore();
 
-  drawEmoji(ctx, plan.glyph, cardBox.x + 60, cardBox.y + 60, 52, {
+  drawMark(ctx, scene, plan, 0, cardBox.x + 60, cardBox.y + 60, 52, theme, {
     enter: smootherstep(range(time, 0.25, 0.85)),
     time,
     tilt: -10,
@@ -720,7 +865,7 @@ function shotMetric(
     });
   } else {
     const heading = layoutDisplay(ctx, scene.heading, {
-      family: options.fontSans,
+      family: display(options),
       maxWidth: CONTENT_WIDTH * 0.7,
       maxSize: 44,
       minSize: 26,
@@ -759,7 +904,7 @@ function shotProcess(
   const enter = smootherstep(range(time, 0, 0.6));
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: CONTENT_WIDTH * 0.8,
     maxSize: 58,
     minSize: 32,
@@ -814,7 +959,7 @@ function shotProcess(
       );
     }
 
-    drawCard(ctx, { x, y: cardY, width: cardWidth, height: cardHeight }, {
+    drawSurface(ctx, { x, y: cardY, width: cardWidth, height: cardHeight }, theme, {
       fill: theme.card,
       radius: 22,
       offset: 9,
@@ -834,13 +979,13 @@ function shotProcess(
     ctx.arc(x + 44, cardY + 46, 19, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = theme.shadow;
-    ctx.font = `800 18px ${options.fontSans}`;
+    ctx.font = `800 18px ${display(options)}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(index + 1), x + 44, cardY + 47);
     ctx.restore();
 
-    drawEmoji(ctx, plan.itemGlyphs[index] ?? plan.glyph, x + cardWidth - 44, cardY + 46, 40, {
+    drawMark(ctx, scene, plan, index, x + cardWidth - 44, cardY + 46, 40, theme, {
       enter: reveal,
       time,
       tilt: index % 2 === 0 ? 7 : -7,
@@ -873,7 +1018,7 @@ function shotContrast(
   const { time } = options;
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: CONTENT_WIDTH * 0.78,
     maxSize: 54,
     minSize: 30,
@@ -904,7 +1049,7 @@ function shotContrast(
     if (reveal <= 0) return;
 
     const x = MARGIN + index * (cardWidth + gap);
-    drawCard(ctx, { x, y: cardY, width: cardWidth, height: cardHeight }, {
+    drawSurface(ctx, { x, y: cardY, width: cardWidth, height: cardHeight }, theme, {
       fill: theme.surface,
       radius: 30,
       offset: 11,
@@ -912,7 +1057,7 @@ function shotContrast(
       enter: reveal,
     });
 
-    drawEmoji(ctx, plan.itemGlyphs[index] ?? plan.glyph, x + cardWidth - 74, cardY + 78, 68, {
+    drawMark(ctx, scene, plan, index, x + cardWidth - 74, cardY + 78, 68, theme, {
       enter: reveal,
       time,
       tilt: index === 0 ? -8 : 8,
@@ -985,7 +1130,7 @@ function shotTakeaway(
     },
   );
 
-  drawEmoji(ctx, plan.glyph, MARGIN * 1.1, SAFE_BOTTOM - 40, 92, {
+  drawMark(ctx, scene, plan, 0, MARGIN * 1.1, SAFE_BOTTOM - 40, 92, theme, {
     enter: smootherstep(range(time, 0.5, 1.15)),
     time,
     tilt: -10,
@@ -998,7 +1143,7 @@ function shotTakeaway(
     width: BOARD_WIDTH * 0.74,
     height: SAFE_BOTTOM - 210,
   };
-  drawCard(ctx, card, {
+  drawSurface(ctx, card, theme, {
     fill: theme.card,
     radius: 44,
     offset: 12,
@@ -1007,7 +1152,7 @@ function shotTakeaway(
   });
 
   const heading = layoutDisplay(ctx, scene.heading, {
-    family: options.fontSans,
+    family: display(options),
     maxWidth: BOARD_WIDTH * 0.46,
     maxSize: 70,
     minSize: 34,
@@ -1093,13 +1238,40 @@ export function drawSubtitles(
     cursor += widths[index] + gap;
   });
 
-  // The band is the paper coming back up, not a cinema scrim.
-  const scrim = ctx.createLinearGradient(0, baseline - 82, 0, baseline + 44);
-  scrim.addColorStop(0, withAlpha(ground, 0));
-  scrim.addColorStop(0.45, withAlpha(ground, 0.92));
-  scrim.addColorStop(1, withAlpha(ground, 1));
-  ctx.fillStyle = scrim;
-  ctx.fillRect(0, baseline - 82, BOARD_WIDTH, 126);
+  // What sits behind the caption depends entirely on the finish.
+  //
+  // A printed frame gets the paper coming back up: a full-width wash that
+  // reads as the sheet the type is on. A frame made of light gets a pill sized
+  // to the phrase instead -- a band of flat colour across a bloom would kill
+  // the one thing that finish is for, and every product film worth copying
+  // uses a pill here.
+  if (theme.finish === "print") {
+    const scrim = ctx.createLinearGradient(0, baseline - 82, 0, baseline + 44);
+    scrim.addColorStop(0, withAlpha(ground, 0));
+    scrim.addColorStop(0.45, withAlpha(ground, 0.92));
+    scrim.addColorStop(1, withAlpha(ground, 1));
+    ctx.fillStyle = scrim;
+    ctx.fillRect(0, baseline - 82, BOARD_WIDTH, 126);
+  } else {
+    const padding = 30;
+    const pill = {
+      x: left - padding,
+      y: baseline - size * 0.98 - 14,
+      width: total + padding * 2,
+      height: size * 1.62,
+    };
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (theme.finish === "glass") {
+      drawSurface(ctx, pill, theme, { radius: pill.height / 2, glow: 0.35 });
+    } else {
+      ctx.fillStyle = withAlpha(ground, theme.dark ? 0.72 : 0.84);
+      ctx.beginPath();
+      ctx.roundRect(pill.x, pill.y, pill.width, pill.height, pill.height / 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // The whole phrase rises the last few pixels as it arrives.
   ctx.globalAlpha = alpha;
@@ -1158,7 +1330,7 @@ export function drawSubtitles(
     ctx.beginPath();
     ctx.rect(markerBox.x, markerBox.y - 6, markerBox.width, markerBox.height + 12);
     ctx.clip();
-    drawWords(() => (theme.dark ? "#131519" : theme.shadow));
+    drawWords(() => theme.accentInk);
     ctx.restore();
   }
 
@@ -1195,6 +1367,502 @@ function drawChapterRail(
   ctx.restore();
 }
 
+/* ------------------------- brushed-metal display -------------------------- */
+
+/**
+ * One line of display type filled with brushed metal.
+ *
+ * Kept separate from `drawDisplay` because a gradient fill is a different
+ * animal from an ink one: it has to be built in frame coordinates for the
+ * highlight to stay put as the type rises, and it only reads at scale. Used
+ * for a count or a title, never for a sentence.
+ */
+function drawChromeLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  options: {
+    x: number;
+    y: number;
+    size: number;
+    family: string;
+    theme: Theme;
+    align?: CanvasTextAlign;
+    reveal: number;
+    weight?: number;
+  },
+) {
+  const t = clamp01(options.reveal);
+  if (t <= 0.001) return;
+  const { size } = options;
+
+  ctx.save();
+  ctx.font = `${options.weight ?? 900} ${size}px ${options.family}`;
+  ctx.textAlign = options.align ?? "center";
+  ctx.textBaseline = "alphabetic";
+  // Display type wants negative tracking; the same face at 14px would not.
+  ctx.letterSpacing = `${-size * 0.03}px`;
+
+  const width = ctx.measureText(text).width;
+  const left = options.align === "left" ? options.x : options.x - width / 2;
+
+  // Rises out from behind its own cap height, as the ink type does.
+  const rise = easeOutQuint(t);
+  ctx.beginPath();
+  ctx.rect(left - size * 0.2, options.y - size * 1.1, width + size * 0.4, size * 1.45);
+  ctx.clip();
+
+  ctx.globalAlpha = easeOutCubic(t);
+  ctx.fillStyle = chromeFill(ctx, options.theme, options.y - size * 0.88, size * 1.08);
+  ctx.fillText(text, options.x, options.y + (1 - rise) * size * 0.9);
+  ctx.letterSpacing = "0px";
+  ctx.restore();
+}
+
+/* -------------------------------- 8. bracket ------------------------------- */
+
+/**
+ * THE COVER — the subject's own word set enormous, and the subject framed on a
+ * plate in front of it.
+ *
+ * This is the shot a magazine puts on its front. The word behind is not a
+ * heading and is not meant to be read as one: it is scale, and it is what
+ * makes a 300px plate in the middle of the frame feel like a photograph on a
+ * page rather than a thumbnail. The line of copy is broken around the plate,
+ * left and right, which is the detail that makes the layout look set rather
+ * than centred.
+ */
+function shotBracket(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) {
+  const { time } = options;
+  const picture = pictureOf(scene);
+
+  // One or two words, and never a sentence: past two the type has to shrink
+  // to fit and stops being texture.
+  const subject = (scene.keywords?.[0]?.trim() || scene.heading)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  drawGhostType(ctx, subject.join(" "), {
+    lines: subject,
+    family: poster(options),
+    colour: theme.ghost,
+    at: 0.5,
+    span: subject.length > 1 ? 0.98 : 0.82,
+    time,
+    drift: 0.6,
+    progress: smootherstep(range(time, 0, 1.2)),
+  });
+
+  const plateWidth = 302;
+  const plateHeight = 384;
+  const plate = {
+    x: BOARD_WIDTH / 2 - plateWidth / 2,
+    y: BOARD_HEIGHT * 0.47 - plateHeight / 2,
+    width: plateWidth,
+    height: plateHeight,
+  };
+
+  const wipe = range(time, plan.heading.at, plan.heading.at + 0.55);
+  drawPlate(ctx, plate, theme.accent, wipe, "up");
+
+  if (picture) {
+    // Cover-cropped inside the plate, so the accent shows only as a border of
+    // colour around the subject rather than behind a letterboxed photo.
+    const scale = Math.max(
+      plate.width / picture.naturalWidth,
+      (plate.height * 0.94) / picture.naturalHeight,
+    );
+    const width = picture.naturalWidth * scale;
+    const height = picture.naturalHeight * scale;
+    const reveal = easeOutQuint(range(time, plan.heading.at + 0.18, plan.heading.at + 0.9));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plate.x, plate.y + plate.height * (1 - reveal), plate.width, plate.height * reveal);
+    ctx.clip();
+    // A slow push on the picture alone: the plate is still, the subject is not.
+    const push = 1 + (time / Math.max(1, options.duration)) * 0.05;
+    ctx.translate(plate.x + plate.width / 2, plate.y + plate.height / 2);
+    ctx.scale(push, push);
+    ctx.drawImage(picture, -width / 2, -height / 2, width, height);
+    ctx.restore();
+  } else {
+    drawMark(ctx, scene, plan, 0, plate.x + plate.width / 2, plate.y + plate.height * 0.48, 168, theme, {
+      enter: smootherstep(range(time, plan.heading.at + 0.2, plan.heading.at + 1)),
+      time,
+      tilt: -5,
+      seed: scene.index,
+    });
+  }
+
+  drawBrackets(ctx, plate, theme.bracket, {
+    progress: range(time, plan.heading.at + 0.35, plan.heading.at + 1.1),
+    size: 42,
+    gap: 18,
+  });
+
+  /* the line of copy, broken around the plate */
+  const words = scene.heading.split(/\s+/).filter(Boolean);
+  const half = Math.ceil(words.length / 2);
+  const runs: Array<{ text: string; align: CanvasTextAlign; x: number }> = [
+    { text: words.slice(0, half).join(" "), align: "right", x: plate.x - 52 },
+    { text: words.slice(half).join(" "), align: "left", x: plate.x + plate.width + 52 },
+  ];
+
+  const size = 34;
+  const baseline = plate.y + plate.height * 0.45;
+  ctx.save();
+  ctx.font = `500 ${size}px ${options.fontSans}`;
+  ctx.textBaseline = "alphabetic";
+  runs.forEach((run, index) => {
+    if (!run.text) return;
+    const cue = plan.beats[index] ?? plan.heading;
+    const t = smootherstep(range(time, cue.at, cue.at + 0.5));
+    if (t <= 0.001) return;
+    ctx.globalAlpha = t;
+    ctx.textAlign = run.align;
+    ctx.fillStyle = theme.ink;
+    ctx.fillText(run.text, run.x + (1 - t) * (run.align === "right" ? -26 : 26), baseline);
+  });
+  ctx.restore();
+
+  drawSectionMark(ctx, theme, MARGIN * 0.7, 78, eyebrowFor(scene), {
+    family: options.fontSans,
+    progress: range(time, 0.1, 0.7),
+    width: BOARD_WIDTH - MARGIN * 0.7,
+  });
+}
+
+/* --------------------------------- 9. deck --------------------------------- */
+
+/**
+ * THE COUNT — "seven of these", said with the objects themselves.
+ *
+ * A number in type tells you how many. A stack of cards fanning open shows you,
+ * and the front one is close enough to read. The count is set in brushed metal
+ * because it is the one word in the frame that is a headline in its own right.
+ */
+function shotDeck(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) {
+  const { time } = options;
+  const items = scene.bullets.length ? scene.bullets : [scene.heading];
+  const count = Math.max(2, Math.min(7, items.length));
+
+  const cardWidth = 300;
+  const cardHeight = 336;
+  const spread = 52;
+  const totalWidth = cardWidth + spread * (count - 1);
+  const box = {
+    x: BOARD_WIDTH / 2 - totalWidth / 2,
+    y: 246,
+    width: cardWidth,
+    height: cardHeight,
+  };
+
+  const open = range(time, plan.heading.at + 0.2, plan.heading.at + 1.3);
+
+  // The house shape: one oversized corner, three ordinary ones.
+  const radii: [number, number, number, number] = [96, 26, 26, 26];
+
+  drawCardStack(ctx, box, theme, count, open, { radii, spread });
+
+  const front = smootherstep(range(time, plan.heading.at, plan.heading.at + 0.7));
+  drawSurface(ctx, box, theme, { enter: front, radii, glow: 1.1 });
+
+  drawGhostNumeral(ctx, `#${1}`, box.x + box.width - 34, box.y + 78, 92, {
+    family: display(options),
+    colour: withAlpha(theme.ink, 0.22),
+    progress: range(time, plan.heading.at + 0.3, plan.heading.at + 1),
+  });
+
+  /* the count, in metal, above the deck */
+  const label = `${count} ${(scene.keywords?.[0]?.trim() || "things").toLowerCase()}`;
+  drawChromeLine(ctx, label, {
+    x: BOARD_WIDTH / 2,
+    y: 186,
+    size: 96,
+    family: display(options),
+    theme,
+    reveal: range(time, plan.heading.at, plan.heading.at + 0.8),
+  });
+
+  /* the front card's contents */
+  const inner = box.width - 84;
+  const heading = layoutDisplay(ctx, items[0], {
+    family: display(options),
+    maxWidth: inner,
+    maxSize: 34,
+    minSize: 22,
+    weight: 800,
+    maxLines: 3,
+    lineRatio: 1.18,
+  });
+
+  drawDisplay(ctx, heading, {
+    x: box.x + 42,
+    y: box.y + box.height - 128,
+    align: "left",
+    theme,
+    shadow: false,
+    reveal: staggered(plan.beats[0] ?? plan.heading, heading.count, time, 0.05),
+  });
+
+  const caption = items[1];
+  if (caption) {
+    drawBodyLines(ctx, wrapAt(ctx, caption, options.fontSans, 20, inner, 2), {
+      x: box.x + 42,
+      y: box.y + box.height - 64,
+      align: "left",
+      theme,
+      family: options.fontSans,
+      size: 20,
+      lineHeight: 28,
+      reveal: range(
+        time,
+        (plan.beats[1] ?? plan.heading).at,
+        (plan.beats[1] ?? plan.heading).at + 0.5,
+      ),
+    });
+  }
+
+  drawSectionMark(ctx, theme, MARGIN * 0.7, 82, scene.heading, {
+    family: options.fontSans,
+    progress: range(time, 0.05, 0.6),
+    width: BOARD_WIDTH - MARGIN * 0.7,
+  });
+}
+
+/* --------------------------------- 10. tree -------------------------------- */
+
+/**
+ * THE BRANCH — a question at the top, and what it opens into underneath.
+ *
+ * Dotted routes rather than solid arrows, because a dashed line has a
+ * direction to be drawn in and a solid one only appears. The nodes carry
+ * numbers so the narration can refer to them, and each caption arrives on the
+ * word that names it.
+ */
+function shotTree(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) {
+  const { time } = options;
+  const items = scene.bullets.slice(0, 4);
+  const count = Math.max(1, items.length);
+
+  /* the question, in a pill */
+  const enter = smootherstep(range(time, plan.heading.at, plan.heading.at + 0.65));
+  const heading = layoutDisplay(ctx, scene.heading, {
+    family: display(options),
+    maxWidth: BOARD_WIDTH * 0.62,
+    maxSize: 64,
+    minSize: 34,
+    weight: 800,
+    maxLines: 2,
+    lineRatio: 1.1,
+  });
+
+  const pillWidth = Math.min(BOARD_WIDTH * 0.72, heading.lines[0]?.width ?? 400) + 108;
+  const pillHeight = heading.height + 58;
+  const pill = {
+    x: BOARD_WIDTH / 2 - pillWidth / 2,
+    y: 92,
+    width: pillWidth,
+    height: pillHeight,
+  };
+  drawSurface(ctx, pill, theme, { enter, radius: pillHeight / 2, glow: 1.2 });
+
+  drawDisplay(ctx, heading, {
+    x: BOARD_WIDTH / 2,
+    y: pill.y + pillHeight / 2 + heading.size * 0.34 - (heading.lines.length - 1) * heading.lineHeight * 0.5,
+    align: "center",
+    theme,
+    shadow: false,
+    reveal: staggered(plan.heading, heading.count, time, 0.07),
+  });
+
+  /* the routes */
+  const busY = pill.y + pill.height + 108;
+  const nodeY = busY + 96;
+  const spread = Math.min(BOARD_WIDTH * 0.66, 210 * count);
+  const step = count > 1 ? spread / (count - 1) : 0;
+  const firstX = BOARD_WIDTH / 2 - spread / 2;
+
+  items.forEach((item, index) => {
+    const cue = plan.beats[index] ?? plan.heading;
+    const draw = range(time, cue.at, cue.at + 0.7);
+    const x = count > 1 ? firstX + step * index : BOARD_WIDTH / 2;
+
+    const route: Point[] = [
+      { x: BOARD_WIDTH / 2, y: pill.y + pill.height + 6 },
+      { x: BOARD_WIDTH / 2, y: busY },
+      { x, y: busY },
+      { x, y: nodeY - 30 },
+    ];
+    drawConnector(ctx, route, withAlpha(theme.ink, 0.42), draw, {
+      dash: 6,
+      width: 2,
+      joint: theme.accent,
+      jointSize: 6,
+    });
+
+    drawNode(ctx, x, nodeY, String(index + 1), theme, {
+      family: display(options),
+      radius: 21,
+      enter: range(time, cue.at + 0.35, cue.at + 0.85),
+      colour: theme.accentAlt,
+    });
+
+    const lines = wrapAt(ctx, item, options.fontSans, 21, Math.max(140, step - 26), 3);
+    drawBodyLines(ctx, lines, {
+      x,
+      y: nodeY + 58,
+      align: "center",
+      theme,
+      family: options.fontSans,
+      size: 21,
+      lineHeight: 28,
+      colour: theme.ink,
+      reveal: range(time, cue.at + 0.45, cue.at + 0.95),
+    });
+  });
+}
+
+/* -------------------------------- 11. collage ------------------------------ */
+
+/**
+ * THE SPREAD — three plates at three sizes, sitting at three heights.
+ *
+ * The whole composition is the misalignment. Three equal tiles on one baseline
+ * is a gallery widget; three unequal ones on three baselines is a spread, and
+ * the eye travels across it in the order the sizes suggest. The picture takes
+ * the largest plate and the supporting points take the others, so a scene with
+ * one photograph still fills a frame that looks like it had three.
+ */
+function shotCollage(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) {
+  const { time } = options;
+  const picture = pictureOf(scene);
+
+  const plates = [
+    { x: 96, y: 190, width: 268, height: 268, lift: 0 },
+    { x: 392, y: 118, width: 424, height: 420, lift: -14 },
+    { x: 848, y: 236, width: 300, height: 300, lift: 10 },
+  ];
+
+  plates.forEach((plate, index) => {
+    const cue = plan.beats[index] ?? plan.heading;
+    const enter = smootherstep(range(time, cue.at, cue.at + 0.7));
+    if (enter <= 0.001) return;
+
+    const drift = sway(scene.index * 7 + index, time, 4);
+    const box = { ...plate, y: plate.y + plate.lift + drift };
+
+    if (index === 1 && picture) {
+      drawFramedPhoto(ctx, picture, box, {
+        time,
+        duration: options.duration,
+        index: scene.index,
+        theme,
+        radius: 18,
+        offset: theme.finish === "print" ? 12 : 0,
+        enter,
+      });
+      drawBrackets(ctx, box, theme.bracket, {
+        progress: range(time, cue.at + 0.3, cue.at + 0.9),
+        size: 30,
+        gap: 12,
+      });
+      return;
+    }
+
+    const bullet = scene.bullets[index === 0 ? 0 : 1] ?? scene.bullets[index] ?? "";
+    drawSurface(ctx, box, theme, {
+      enter,
+      radius: 18,
+      fill: index === 2 ? theme.accent : undefined,
+      glow: 0.8,
+    });
+
+    const ink = index === 2 ? theme.accentInk : theme.ink;
+    drawMark(
+      ctx,
+      scene,
+      plan,
+      index,
+      box.x + box.width / 2,
+      box.y + box.height * 0.38,
+      Math.min(96, box.width * 0.36),
+      theme,
+      {
+        enter: smootherstep(range(time, cue.at + 0.2, cue.at + 0.9)),
+        time,
+        seed: index,
+        colour: index === 2 ? theme.accentInk : theme.accent,
+      },
+    );
+
+    if (bullet) {
+      const lines = wrapAt(ctx, bullet, options.fontSans, 22, box.width - 48, 3, 600);
+      drawBodyLines(ctx, lines, {
+        x: box.x + box.width / 2,
+        y: box.y + box.height * 0.68,
+        align: "center",
+        theme,
+        family: options.fontSans,
+        size: 22,
+        lineHeight: 30,
+        colour: ink,
+        reveal: range(time, cue.at + 0.3, cue.at + 0.8),
+      });
+    }
+  });
+
+  /* the heading, sitting under the spread on one line */
+  const heading = layoutDisplay(ctx, scene.heading, {
+    family: display(options),
+    maxWidth: CONTENT_WIDTH,
+    maxSize: 46,
+    minSize: 28,
+    weight: 800,
+    maxLines: 1,
+    lineRatio: 1.05,
+    emphasis: scene.keywords,
+  });
+  drawDisplay(ctx, heading, {
+    x: BOARD_WIDTH / 2,
+    y: SAFE_BOTTOM - 6,
+    align: "center",
+    theme,
+    shadow: false,
+    reveal: staggered(plan.heading, heading.count, time, 0.06),
+  });
+
+  drawSectionMark(ctx, theme, MARGIN * 0.7, 74, eyebrowFor(scene), {
+    family: options.fontSans,
+    progress: range(time, 0.05, 0.6),
+    width: BOARD_WIDTH - MARGIN * 0.7,
+  });
+}
+
 /* ------------------------------- transitions ------------------------------- */
 
 export interface Transition {
@@ -1211,10 +1879,15 @@ export interface Transition {
 /**
  * A cut with weight.
  *
- * Three flavours, chosen by scene index so a video does not repeat the same
- * transition twice running: a dip through black, a push, and a whip that
- * blurs out and back. Each is expressed as a transform on the finished frame,
- * so no scene ever has to be rendered twice.
+ * Four flavours, cycled by scene index so no handover repeats inside a film,
+ * and each one is a transform on the finished frame rather than a second
+ * render -- which is what keeps a scrub instant.
+ *
+ * The blur is the part that matters and the part that used to be computed and
+ * then thrown away. A push without blur is a slide transition; a push with two
+ * frames of blur on the front of it is a whip pan, and the difference is the
+ * whole distance between motion graphics and PowerPoint. It is only ever on
+ * for a fifth of a second, so the cost is a rounding error.
  */
 export function transitionFor(index: number, time: number, duration: number): Transition {
   // Short scenes mean many more handovers, so these are quick and almost
@@ -1222,9 +1895,10 @@ export function transitionFor(index: number, time: number, duration: number): Tr
   // film on the join.
   const inT = smootherstep(range(time, 0, 0.3));
   const outT = smootherstep(range(time, duration - 0.24, duration));
-  const flavour = index % 3;
+  const flavour = index % 4;
 
   if (flavour === 0) {
+    // The straight cut: a short dip and a settle out of a slight push-in.
     return {
       dip: (1 - inT) * 0.55 + outT * 0.6,
       scale: lerp(1.03, 1, inT),
@@ -1233,17 +1907,30 @@ export function transitionFor(index: number, time: number, duration: number): Tr
     };
   }
   if (flavour === 1) {
+    // The whip: the frame arrives moving and smeared, and stops dead.
+    const smear = Math.max(1 - inT, outT);
     return {
-      dip: (1 - inT) * 0.35 + outT * 0.5,
+      dip: (1 - inT) * 0.28 + outT * 0.45,
       scale: 1,
-      shift: (1 - inT) * 54 - outT * 40,
-      blur: 0,
+      shift: (1 - inT) * 78 - outT * 60,
+      blur: smear * smear * 9,
     };
   }
+  if (flavour === 2) {
+    // The punch: in from slightly too big, with a breath of defocus.
+    return {
+      dip: (1 - inT) * 0.45 + outT * 0.55,
+      scale: lerp(1.07, 1, inT) + outT * 0.03,
+      shift: 0,
+      blur: (1 - inT) * 6,
+    };
+  }
+  // The drift: the quietest of the four, for a scene that should feel like a
+  // held breath rather than an edit.
   return {
-    dip: (1 - inT) * 0.45 + outT * 0.55,
-    scale: lerp(1.05, 1, inT),
-    shift: (1 - inT) * -34 + outT * 26,
+    dip: (1 - inT) * 0.4 + outT * 0.5,
+    scale: lerp(1.02, 1, inT),
+    shift: (1 - inT) * -30 + outT * 22,
     blur: 0,
   };
 }
@@ -1267,6 +1954,10 @@ const SHOTS: Record<
   process: shotProcess,
   contrast: shotContrast,
   takeaway: shotTakeaway,
+  bracket: shotBracket,
+  deck: shotDeck,
+  tree: shotTree,
+  collage: shotCollage,
 };
 
 /**
@@ -1282,6 +1973,12 @@ const WASHED: Record<SceneRole, boolean> = {
   process: false,
   contrast: false,
   takeaway: true,
+  // These four compose with the picture themselves -- washing it behind them
+  // as well would put the same photograph in the frame twice.
+  bracket: false,
+  deck: false,
+  tree: false,
+  collage: false,
 };
 
 /** Ruled paper by default; dotted where the frame is mostly empty. */
@@ -1293,7 +1990,67 @@ const DOTTED: Record<SceneRole, boolean> = {
   process: false,
   contrast: true,
   takeaway: false,
+  bracket: false,
+  deck: true,
+  tree: true,
+  collage: false,
 };
+
+/**
+ * Shots that set their own display type behind themselves. The frame must not
+ * put a second word back there, or the two fight and both lose.
+ */
+const OWN_GHOST = new Set<SceneRole>(["bracket"]);
+
+/**
+ * The furniture an editorial or glass frame wears regardless of its shot.
+ *
+ * Drawn behind the composition, never in front of it: the whole value of a
+ * ghosted word or a hairline border is that a viewer registers it without
+ * looking at it. Anything here that competes for attention is a mistake, so
+ * the contrasts are set deliberately low and are not exposed as options.
+ */
+function drawFurniture(
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) {
+  const { time } = options;
+
+  if (theme.finish === "editorial") {
+    drawFrameRule(ctx, theme, 34, range(time, 0.05, 0.8));
+    if (!OWN_GHOST.has(plan.role)) {
+      const word = (scene.keywords?.[0]?.trim() || scene.heading.split(/\s+/)[0] || "").trim();
+      if (word.length > 1) {
+        drawGhostType(ctx, word, {
+          family: poster(options),
+          colour: theme.ghost,
+          at: 0.52,
+          span: 1.02,
+          time,
+          drift: 0.4,
+          progress: smootherstep(range(time, 0, 1.4)),
+        });
+      }
+    }
+    return;
+  }
+
+  if (theme.finish === "glass") {
+    // One light behind the composition, drifting. It is what makes a frosted
+    // panel look lit rather than merely translucent.
+    drawBloom(
+      ctx,
+      BOARD_WIDTH * (0.5 + noise1(time * 0.06, 13) * 0.16),
+      BOARD_HEIGHT * (0.42 + noise1(time * 0.05, 29) * 0.12),
+      BOARD_WIDTH * 0.44,
+      theme.accentAlt,
+      0.18,
+    );
+  }
+}
 
 export function renderModernScene(
   ctx: CanvasRenderingContext2D,
@@ -1304,14 +2061,37 @@ export function renderModernScene(
   const theme = themeOf(scene.visualTheme);
   const transition = transitionFor(scene.index, options.time, options.duration);
 
-  ctx.save();
-  ctx.translate(BOARD_WIDTH / 2 + transition.shift, BOARD_HEIGHT / 2);
-  ctx.scale(transition.scale, transition.scale);
-  ctx.translate(-BOARD_WIDTH / 2, -BOARD_HEIGHT / 2);
+  /**
+   * The camera.
+   *
+   * A slow push across the whole scene, plus a few pixels of drift on noise.
+   * Two per cent over ten seconds is far too little to see as movement and
+   * exactly enough that no two frames of the finished file are identical --
+   * which is the difference between a video and a slideshow with a soundtrack.
+   * Alternates direction by scene so the film does not creep in one direction
+   * for two minutes.
+   */
+  const through = clamp01(options.time / Math.max(0.5, options.duration));
+  const towards = scene.index % 2 === 0 ? 1 : -1;
+  const push = 1 + (towards > 0 ? through * 0.022 : 0.022 - through * 0.022);
+  const driftX = noise1(options.time * 0.08, scene.index * 3 + 1) * 5;
+  const driftY = noise1(options.time * 0.07, scene.index * 3 + 2) * 4;
 
-  // The ground is paper, always. A shot that wants its picture behind the type
-  // washes it over the paper itself; the rest mount the picture in a frame.
-  drawGround(ctx, theme, options.time, { dots: DOTTED[plan.role] });
+  ctx.save();
+  // Applied to the whole scene rather than to a copy of it: every draw inside
+  // the save is filtered, which costs nothing at blur 0 and is only ever
+  // non-zero for the two hundred milliseconds either side of a cut.
+  if (transition.blur > 0.2 && supportsFilter(ctx)) {
+    ctx.filter = `blur(${transition.blur.toFixed(2)}px)`;
+  }
+  ctx.translate(BOARD_WIDTH / 2 + transition.shift, BOARD_HEIGHT / 2);
+  ctx.scale(transition.scale * push, transition.scale * push);
+  ctx.translate(-BOARD_WIDTH / 2 + driftX, -BOARD_HEIGHT / 2 + driftY);
+
+  // The ground is whatever the palette's finish is made of. A shot that wants
+  // its picture behind the type washes it over the ground itself; the rest
+  // mount the picture in a frame.
+  drawFinishGround(ctx, theme, options.time, { dots: DOTTED[plan.role] });
 
   const behind = WASHED[plan.role] ? scene.image : null;
   if (behind && behind.complete && behind.naturalWidth > 0) {
@@ -1323,6 +2103,8 @@ export function renderModernScene(
     });
   }
 
+  drawFurniture(ctx, scene, plan, theme, options);
+
   SHOTS[plan.role](ctx, scene, plan, theme, options);
 
   if (plan.phrases.length) {
@@ -1330,13 +2112,10 @@ export function renderModernScene(
     // plate does not get a strip of paper pasted across its foot.
     drawSubtitles(ctx, plan, theme, options.time, options.fontSans, {
       ground: plan.role === "takeaway" ? theme.accent : theme.ground,
-      ink: plan.role === "takeaway" ? theme.shadow : theme.ink,
+      ink: plan.role === "takeaway" ? theme.accentInk : theme.ink,
     });
   }
 
-  // Deliberately no vignette, grain or letterbox. They are the house style of
-  // every generated video, they fight flat printed work, and a frame that
-  // needs them to look finished was not composed properly.
   ctx.restore();
 
   drawChapterRail(
@@ -1346,7 +2125,8 @@ export function renderModernScene(
     scene.index,
     scene.totalScenes,
   );
-  // Scenes hand over through the paper, never through black.
+  // Scenes hand over through the ground, never through black -- a dip to black
+  // announces a video player, and these frames are meant to be a film.
   if (transition.dip > 0) {
     ctx.save();
     ctx.globalAlpha = clamp(transition.dip, 0, 1);
@@ -1356,13 +2136,26 @@ export function renderModernScene(
   }
 }
 
-/** The opening plate: the title, assembled. */
+/**
+ * The opening plate.
+ *
+ * Three seconds, and the only job is to make the next ninety worth watching.
+ * So it is built as a title sequence rather than a title card: the ground
+ * arrives first, then the furniture, then the words, each on its own beat --
+ * and the whole thing is still moving when it hands over, because a cover that
+ * settles into stillness before the cut has already ended.
+ *
+ * The type is set in metal on the two dark finishes and in ink on the rest.
+ * Chrome on a light ground is illegible; ink on an editorial black is flat.
+ */
 export function renderModernCover(
   ctx: CanvasRenderingContext2D,
   options: {
     title: string;
     description: string;
     fontSans: string;
+    fontDisplay?: string;
+    fontPoster?: string;
     progress: number;
     theme?: ThemeName;
     image?: HTMLImageElement | null;
@@ -1371,8 +2164,10 @@ export function renderModernCover(
   const theme = themeOf(options.theme);
   const p = clamp01(options.progress);
   const time = p * 3;
+  const titleFace = options.fontDisplay ?? options.fontSans;
+  const posterFace = options.fontPoster ?? titleFace;
 
-  drawGround(ctx, theme, time);
+  drawFinishGround(ctx, theme, time);
 
   if (options.image?.complete && options.image.naturalWidth > 0) {
     drawWashedPhoto(ctx, options.image, theme, {
@@ -1383,28 +2178,47 @@ export function renderModernCover(
     });
   }
 
-  // Shapes breaking the corners, the way a printed cover would be furnished.
-  drawEdgeShape(ctx, "square", { x: -70, y: -80, width: 250, height: 250 }, theme.surface, 0.9);
-  drawEdgeShape(
-    ctx,
-    "circle",
-    { x: BOARD_WIDTH - 150, y: BOARD_HEIGHT - 190, width: 320, height: 320 },
-    theme.surface,
-    0.85,
-  );
+  // The first word of the title, set as texture behind the whole plate. On the
+  // printed finishes this is replaced by shapes breaking the corners, because
+  // ghosted type on ruled paper reads as a printing error.
+  if (theme.finish === "print") {
+    drawEdgeShape(ctx, "square", { x: -70, y: -80, width: 250, height: 250 }, theme.surface, 0.9);
+    drawEdgeShape(
+      ctx,
+      "circle",
+      { x: BOARD_WIDTH - 150, y: BOARD_HEIGHT - 190, width: 320, height: 320 },
+      theme.surface,
+      0.85,
+    );
+  } else {
+    const word = options.title.split(/\s+/).filter(Boolean)[0] ?? "";
+    if (word.length > 1) {
+      drawGhostType(ctx, word, {
+        family: posterFace,
+        colour: theme.ghost,
+        at: 0.5,
+        span: 1.04,
+        time,
+        drift: 0.5,
+        progress: smootherstep(range(p, 0, 0.5)),
+      });
+    }
+    if (theme.finish === "editorial") drawFrameRule(ctx, theme, 34, range(p, 0.1, 0.55));
+  }
 
   const title = layoutDisplay(ctx, options.title, {
-    family: options.fontSans,
+    family: titleFace,
     maxWidth: CONTENT_WIDTH * 0.84,
-    maxSize: 88,
+    maxSize: 92,
     minSize: 44,
     weight: 900,
     maxLines: 3,
-    lineRatio: 1.04,
+    lineRatio: 1.02,
   });
 
   const centreY = BOARD_HEIGHT * 0.52 - title.height / 2 + title.size;
-  const push = 1 + (1 - easeOutCubic(p)) * 0.04;
+  // Still settling when it cuts away: the push runs past the end of the plate.
+  const push = 1 + (1 - easeOutCubic(p)) * 0.05;
 
   ctx.save();
   ctx.translate(BOARD_WIDTH / 2, BOARD_HEIGHT / 2);
@@ -1413,13 +2227,28 @@ export function renderModernCover(
 
   drawRule(ctx, theme, BOARD_WIDTH / 2 - 44, centreY - title.size - 58, 88, range(p, 0.02, 0.3), 5);
 
-  drawDisplay(ctx, title, {
-    x: BOARD_WIDTH / 2,
-    y: centreY,
-    align: "center",
-    theme,
-    reveal: (index) => range(p, 0.08 + index * 0.045, 0.34 + index * 0.045),
-  });
+  if (theme.finish !== "print" && theme.dark) {
+    // Metal, line by line, so a two-line title still arrives as two beats.
+    title.lines.forEach((line, index) => {
+      const text = line.words.map((word) => word.text).join(" ");
+      drawChromeLine(ctx, text, {
+        x: BOARD_WIDTH / 2,
+        y: centreY + index * title.lineHeight,
+        size: title.size,
+        family: title.family,
+        theme,
+        reveal: range(p, 0.08 + index * 0.12, 0.42 + index * 0.12),
+      });
+    });
+  } else {
+    drawDisplay(ctx, title, {
+      x: BOARD_WIDTH / 2,
+      y: centreY,
+      align: "center",
+      theme,
+      reveal: (index) => range(p, 0.08 + index * 0.045, 0.34 + index * 0.045),
+    });
+  }
 
   if (options.description) {
     drawBodyLines(
@@ -1439,8 +2268,9 @@ export function renderModernCover(
   }
   ctx.restore();
 
-  // Open from the paper, not from black: a fade up out of the ground keeps the
-  // printed illusion intact where a dip to black would announce a video player.
+  // Open from the ground, not from black: a fade up out of the paper (or out
+  // of the light) keeps the illusion intact where a dip to black would
+  // announce a video player.
   const dip = (1 - smootherstep(range(p, 0, 0.18))) * 1 + smootherstep(range(p, 0.92, 1)) * 0.9;
   if (dip > 0) {
     ctx.save();

@@ -78,15 +78,29 @@ THE ARC (map your scenes onto this; with fewer scenes merge, with more scenes sp
 Six or more scenes means splitting MECHANISM across two or three, one move each -- not padding the others. A scene that carries one move is what makes a short scene work.
 
 HOW EACH SCENE IS SHOT
-The renderer chooses a shot from what the scene contains, so give it something to work with:
-  - a scene with "stat" is cut as a full-frame counting metric;
-  - a scene with 3+ bullets is cut as a step-by-step process rail;
-  - a scene with exactly 2 bullets is cut as a two-panel contrast;
-  - a scene with 0-1 bullets is cut as a held statement.
+You are cutting the shot list. Name a "shot" on every scene, and give the scene the content that shot needs:
 
-THE BULLET COUNT IS THE SHOT LIST. Give every scene three bullets and you have made one shot repeated N
-times. Across the video: at most half the scenes may have 3, and at least two scenes must have 0 or 1 so
-the film has room to breathe on a single line. Decide this deliberately, scene by scene, before you write.
+  "bracket"    a magazine cover -- the subject framed on a plate of colour, its own word ghosted enormous
+               behind it. Needs 0-2 bullets and a photographable subject. The strongest hook in the set.
+  "statement"  one line held on screen, a marker under the words that carry it. 0-1 bullets.
+  "metric"     one number filling the frame, counting up as it is spoken. REQUIRES "stat".
+  "contrast"   two panels side by side: before and after, myth and reality. REQUIRES exactly 2 bullets.
+  "tree"       a question at the top branching down dotted routes into numbered nodes. Needs 2-4 bullets
+               and a heading written as a question.
+  "process"    a numbered rail. REQUIRES 3+ bullets. Use it once at most: it is the most template-like
+               layout in the set and two of them in one film is the repetition viewers notice.
+  "deck"       a fanning stack of cards, for "here are N of these". Needs 2+ bullets.
+  "collage"    three plates at three sizes on three baselines. Needs 1-2 bullets and a photograph.
+  "split"      media on one side, type on the other. Needs 1+ bullets.
+  "hero"       the opening title. Scene 1 only, and the renderer picks it for you.
+  "takeaway"   the closing line on a full plate of colour. Last scene only, picked for you.
+
+RULES FOR THE SHOT LIST
+- No shot may appear twice in any three consecutive scenes. Vary it deliberately, before you write.
+- The bullet count is part of the shot. Asking for "process" and giving it one bullet gets you a
+  different layout than you asked for, because the renderer refuses a shot the scene cannot carry.
+- At least two scenes across the film must have 0 or 1 bullets. A film where every frame is a list is
+  a slide deck, however good the writing is.
 
 FIELDS
 - "title": 3-7 words. Concrete and specific. No colon-subtitle, no "The Ultimate Guide To".
@@ -101,13 +115,34 @@ FIELDS
 - "image_prompt": one cinematic 16:9 frame, in English. Describe a real subject in a real space -- lens, light, depth. No text, no charts, no UI, no collage, no infographics.
 - "photo_query": 4-8 words, in English, to search the web for a real photograph of this scene. Write it the way a picture editor would: a concrete subject in a concrete place ("empty factory floor night shift", "surgeon hands operating theatre light"). Not the heading, not an abstraction, and never a brand name.
 - "support_visual": where this shot's plate comes from. "photo" for anything that exists and can be photographed -- always prefer this, it is what makes the film look real. "generated" only when the subject cannot be photographed: a metaphor, an imagined scene, an invisible mechanism. "none" ONLY for a deliberate hold on type, at most once per video.
+- "shot": the composition, from the list above.
 
 TIMING RULE, AND IT MATTERS
 Every bullet and every stat must use words that also appear in that scene's narration, close to where the narration makes that point. The renderer pins each beat to the moment its words are spoken, so a bullet phrased differently from the script animates at the wrong time.
 
 ONE LOOK FOR THE WHOLE FILM
 - "visual_style": one sentence of art direction applied to every frame -- palette, light, lens, era, texture. Every scene's image_prompt is rendered with this prefixed, so write it once and write it well.
-- "visual_theme": pick the grade that fits the subject: "studio-dark" (default, warm amber accent), "cyber-blue" (technology, data), "sunset" (human, cultural, hopeful), "clean-light" (medical, editorial, calm).
+- "visual_theme": the palette, and it decides far more than colour. Each one carries a whole drawing vocabulary, so pick the one whose *language* fits the subject, not the one whose hue you like.
+
+  EDITORIAL -- near-black, one saturated plate, crop marks, display type set enormous behind the subject.
+  Magazine cover language. For claims, culture, news, money, anything with an argument in it.
+    "obsidian"   near-black and a printing red. The default for this engine, and the strongest look in it.
+    "noir"       pure black, pure white, one alarm red. For risk, loss, gravity.
+    "ember"      charcoal and a burnt orange. Warmer; for human stakes told with weight.
+    "newsprint"  the same language on broadsheet stock: warm paper, black ink, one red. For history, policy, letters.
+
+  GLASS -- blooms of coloured light under frosted panels, brushed-metal titles, dotted routes between nodes.
+  Product-film language. For software, systems, data, anything about how a thing works.
+    "cobalt"     deep blue light, one warm orange accent. Product, launch, platform.
+    "abyss"      ink and teal. Depth, infrastructure, the unseen.
+    "daylight"   pale blue light on white frost, one strong blue. Bright, calm, consumer-facing.
+
+  PRINTED -- ruled paper, hard offset shadows, marker swipes. Handmade and warm. For teaching.
+    "clean-light"  warm paper and a yellow.   "studio-dark"  the same after dark.
+    "cyber-blue"   cool paper and a blue.     "sunset"       warm paper and a coral.
+
+  Do not default to "obsidian" for everything. A lesson about photosynthesis is printed; a film about a
+  database is glass; a film about a company collapsing is editorial.
 
 SOUND
 - "music_mood": the underscore. "calm" (explanatory, reflective), "curious" (discovery, science), "driving" (urgency, business, momentum), "warm" (human stories), "serious" (risk, loss, gravity), or "none" when music would cheapen the subject.
@@ -115,7 +150,7 @@ SOUND
 - Narration, headings, bullets and keywords MUST be in ${language}. Keep image_prompt and visual_style in English.
 
 Reply with JSON only:
-{"title":"...","description":"...","image_prompt":"...","narration":"...","visual_style":"...","visual_theme":"studio-dark","music_mood":"calm","voice_brief":{"gender":"any","qualities":["..."]},"scenes":[{"heading":"...","bullets":["..."],"image_prompt":"...","photo_query":"...","support_visual":"photo|generated|none","narration":"...","keywords":["..."],"stat":"...","stat_caption":"..."}]}`;
+{"title":"...","description":"...","image_prompt":"...","narration":"...","visual_style":"...","visual_theme":"obsidian","music_mood":"calm","voice_brief":{"gender":"any","qualities":["..."]},"scenes":[{"heading":"...","bullets":["..."],"shot":"bracket","image_prompt":"...","photo_query":"...","support_visual":"photo|generated|none","narration":"...","keywords":["..."],"stat":"...","stat_caption":"..."}]}`;
   }
 
   return `RETURN EXACTLY ${sceneCount} SCENES. Not ${sceneCount - 1}, not ${sceneCount + 1}. Count them before you reply.
@@ -152,13 +187,83 @@ SCRIPT & STORYBOARD RULES:
 - The top-level "image_prompt" is the hero title illustration for the video.
 - Narration, headings, and bullets MUST be written in ${language}.
 
+THE SURFACE
+- "board_stock": what this is drawn on. It changes the whole register of the video, so pick the surface the subject actually belongs on rather than defaulting.
+  "marker"    a warm whiteboard under a room light. The everyday choice.
+  "blueprint" navy drafting stock, white line work. Plans, systems, engineering, architecture, anything mechanical.
+  "chalk"     slate and dusty chalk. Teaching, school subjects, first principles, history of an idea.
+  "kraft"     brown card and black ink. Craft, making, food, anything handmade or physical.
+  "legal"     a yellow pad in blue biro. Working something out: money, decisions, back-of-envelope reasoning.
+
 SOUND
 - "music_mood": the underscore. "calm" (explanatory, reflective), "curious" (discovery, science), "driving" (urgency, business, momentum), "warm" (human stories), "serious" (risk, loss, gravity), or "none" when music would cheapen the subject.
 - "voice_brief": who should read this. {"gender":"feminine|masculine|any","qualities":["..."]} where qualities come from: calm, smooth, warm, professional, confident, natural, expressive, energetic, empathetic, clear, melodic, deep, casual. Pick 2-3 that suit the subject; a narrator is cast from the catalogue to match.
 
 Reply with JSON only, no code fence:
-{"title":"...","description":"...","image_prompt":"...","narration":"...","music_mood":"calm","voice_brief":{"gender":"any","qualities":["..."]},"scenes":[{"heading":"...","bullets":["..."],"image_prompt":"...","photo_query":"...","support_visual":"photo|generated|none","narration":"..."}]}`;
+{"title":"...","description":"...","image_prompt":"...","narration":"...","board_stock":"marker","music_mood":"calm","voice_brief":{"gender":"any","qualities":["..."]},"scenes":[{"heading":"...","bullets":["..."],"image_prompt":"...","photo_query":"...","support_visual":"photo|generated|none","narration":"..."}]}`;
 }
+/**
+ * Which of the two engines actually suits this idea.
+ *
+ * Whiteboard is a hand drawn under a marker: process, mechanism, "how does X
+ * work", anything better understood as a diagram than seen. Hyperframes is
+ * cut like a piece of film over real photography: numbers, product, news,
+ * a claim that lands harder shown than sketched. The choice is asked of the
+ * model rather than guessed from keywords, because "how a heart attack
+ * happens" and "how inflation happens" want opposite answers for reasons a
+ * keyword list cannot see.
+ *
+ * Kept to one word out, low temperature, tiny token budget: this is a
+ * classification, not a creative act, and it must not become the slow part
+ * of starting a video. Any failure -- timeout, bad JSON, an unrecognised
+ * word -- falls back to the heuristic below rather than failing the request.
+ */
+async function classifyVideoStyle(
+  prompt: string,
+  tone: string,
+  model: string,
+): Promise<{ style: "whiteboard" | "hyperframes"; reason: string }> {
+  try {
+    const result = await omega.generateText({
+      model,
+      temperature: 0.1,
+      maxTokens: 80,
+      json: true,
+      messages: [
+        {
+          role: "system",
+          content: `You cast one of two video engines for an idea, before a single word of script is written.
+
+WHITEBOARD -- a hand draws diagrams and icons on a board as a narrator explains. Wins when the idea is a process, a mechanism, an abstract system, a "how/why does X work", something clearer as a sketch than a photograph.
+
+HYPERFRAMES -- cut like a short film over real photography and kinetic on-screen text, built for numbers and claims. Wins when the idea is about the real world: a product, a place, a person, a statistic, business, news, culture, anything a camera would actually want to point at.
+
+The tone requested is "${tone}"; treat "advert" and most "story" prompts as a strong pull toward hyperframes unless the idea is unmistakably a mechanism.
+
+Reply with JSON only: {"style":"whiteboard"|"hyperframes","reason":"under 8 words"}`,
+        },
+        { role: "user", content: prompt.slice(0, 600) },
+      ],
+    });
+
+    const candidate = firstJsonObject(stripFence(result.text));
+    const parsed = candidate ? JSON.parse(candidate) : null;
+    if (parsed?.style === "whiteboard" || parsed?.style === "hyperframes") {
+      return { style: parsed.style, reason: String(parsed.reason ?? "").slice(0, 120) };
+    }
+  } catch {
+    // Fall through to the heuristic -- classification must never be the
+    // reason a video fails to start.
+  }
+
+  const real = /\b(stat|statistic|percent|%|revenue|market|company|startup|product|launch|news|price|cost|report|sales|brand|celebrity|country|city|war|election|sport|match|athlete)\b/i;
+  const mechanism = /\b(how does|how do|why does|why do|works?|mechanism|process|system|cycle|algorithm|explain(ed)?)\b/i;
+  if (tone === "advert" || (real.test(prompt) && !mechanism.test(prompt))) {
+    return { style: "hyperframes", reason: "real-world subject, heuristic fallback" };
+  }
+  return { style: "whiteboard", reason: "mechanism or default, heuristic fallback" };
+}
+
 function stripFence(text: string): string {
   return text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 }
@@ -261,8 +366,17 @@ export async function POST(req: Request) {
     const sceneCount = body.sceneCount ?? 6;
     const tone = body.tone ?? "explainer";
     const language = body.language ?? "en";
-    const videoStyle = body.videoStyle ?? "whiteboard";
     const model = body.model ?? (await defaultModel());
+
+    let videoStyle: "whiteboard" | "hyperframes";
+    let styleReason: string | undefined;
+    if (body.videoStyle === "auto" || !body.videoStyle) {
+      const cast = await classifyVideoStyle(body.prompt, tone, model);
+      videoStyle = cast.style;
+      styleReason = cast.reason;
+    } else {
+      videoStyle = body.videoStyle;
+    }
 
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt(sceneCount, tone, language, videoStyle) },
@@ -329,6 +443,8 @@ export async function POST(req: Request) {
       model,
       provider: "omega",
       usage: usage ?? {},
+      videoStyle,
+      styleReason,
     });
   } catch (err) {
     return err instanceof AppError ? fail(err) : failFrom(err);

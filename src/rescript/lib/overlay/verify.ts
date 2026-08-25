@@ -17,6 +17,24 @@
 
 import type { AgentOp, PositionName } from "./ops-schema";
 
+/**
+ * How many pictures each layout is actually asking for.
+ *
+ * `grid` is the exception — its region count follows its contents — so it is
+ * not checked against a fixed number.
+ */
+const SHOT_PLATES: Record<string, number> = {
+  full: 1,
+  card: 1,
+  grid: 1,
+  splitLeft: 2,
+  splitRight: 2,
+  splitTop: 2,
+  splitBottom: 2,
+  stack: 2,
+  pip: 2,
+};
+
 export interface PlanWorld {
   /** Length of the finished video, in output-clock seconds. */
   duration: number;
@@ -114,6 +132,13 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   let subtitlePosition = world.subtitlePosition;
   let cutSeen = false;
   const placed: Placed[] = [];
+  /** Shot windows the plan lays down, so overlaps between them can be caught. */
+  const shotWindows: { op: string; start: number; end: number }[] = [];
+  let autoPunches = 0;
+  /** Whole-video grades. A second one silently replaces the first. */
+  let gradeCount = 0;
+  /** Music beds the plan lays down. More than one is never meant. */
+  let beds = 0;
 
   /**
    * How long the video is by this point in the plan — as an upper bound.
@@ -324,6 +349,106 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
       case "setFrame":
         break;
 
+      case "addMusic":
+        if (op.start !== undefined && op.start >= remaining) {
+          problems.push(
+            `addMusic at ${op.start.toFixed(1)}s is past the end of the finished video.`
+          );
+          break;
+        }
+        // Two beds play at once. Nobody means that, and it is inaudible as a
+        // mistake — it sounds like one badly-mixed track rather than two.
+        if (op.kind !== "sfx") {
+          if (beds > 0) {
+            problems.push(
+              "The video already has a music bed in this plan; a second one would play over the first."
+            );
+          }
+          beds += 1;
+        }
+        break;
+
+      case "setMusicLevel":
+      case "removeMusic":
+        break;
+
+      case "setGrade":
+        // A look on a stretch with no shot on it would silently do nothing, and
+        // "I graded that cutaway" with an ungraded cutaway on screen is a plan
+        // that lied about what it did.
+        if (op.at !== undefined && op.at >= remaining) {
+          problems.push(
+            `setGrade at ${op.at.toFixed(1)}s is past the end of the finished video.`
+          );
+        }
+        if (gradeCount > 0 && op.at === undefined) {
+          problems.push(
+            "The whole video is graded more than once; only the last one would survive."
+          );
+        }
+        if (op.at === undefined) gradeCount += 1;
+        break;
+
+      case "addShot":
+      case "setCamera": {
+        // A shot placed past where the cut ends never plays. This is the same
+        // check the caption times get, and it matters more here: a caption that
+        // never appears is a missing caption, while a shot that never plays
+        // leaves the person looking at a plan that claims to have reframed
+        // something and a video that is unchanged.
+        if (op.start >= remaining) {
+          problems.push(
+            `${op.op} at ${op.start.toFixed(1)}s is past the end of the finished video (${remaining.toFixed(1)}s).`
+          );
+          break;
+        }
+        if (op.end <= op.start) {
+          problems.push(`${op.op} ends at or before it starts (${op.start}–${op.end}).`);
+          break;
+        }
+        if (op.end - op.start < 0.4) {
+          problems.push(
+            `${op.op} covers ${(op.end - op.start).toFixed(2)}s — too short to read as anything but a glitch.`
+          );
+          break;
+        }
+
+        if (op.op === "addShot") {
+          // A layout with more regions than plates would draw the footage into
+          // the empty ones, which is not what anyone asking for a split screen
+          // means — they are describing two different pictures.
+          const wanted = SHOT_PLATES[op.layout];
+          const given = op.plates?.length ?? 1;
+          if (wanted > 1 && given < wanted) {
+            problems.push(
+              `${op.layout} divides the frame into ${wanted}, but only ${given} plate${given === 1 ? " was" : "s were"} given — say what goes in each.`
+            );
+          }
+        }
+
+        shotWindows.push({ op: op.op, start: op.start, end: op.end });
+        break;
+      }
+
+      case "removeShot":
+        if (op.at >= remaining) {
+          problems.push(
+            `removeShot at ${op.at.toFixed(1)}s is past the end of the finished video.`
+          );
+        }
+        break;
+
+      case "autoPunchIns":
+        // Placement enforces its own spacing, so there is nothing here that can
+        // be wrong about the ask — only about asking for it twice.
+        if (autoPunches > 0) {
+          problems.push(
+            "autoPunchIns is in the plan more than once; the second pass would land on top of the first."
+          );
+        }
+        autoPunches += 1;
+        break;
+
       default:
         break;
     }
@@ -334,6 +459,21 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   // written for the clock they leave behind — so flagging the shape of it would
   // send the model back to undo what it was told to do. What matters is whether
   // the time is *reachable*, and `remaining` above already answers that.
+
+  // Two shots claiming the same second. The store resolves this by clipping the
+  // earlier one, so nothing breaks — but the plan said it would do two things
+  // and will only do one and a half, and that is worth saying before it runs.
+  for (let i = 0; i < shotWindows.length; i += 1) {
+    for (let j = i + 1; j < shotWindows.length; j += 1) {
+      const a = shotWindows[i];
+      const b = shotWindows[j];
+      if (a.start < b.end && b.start < a.end) {
+        problems.push(
+          `Two shots cover the same moment (${a.op} ${a.start.toFixed(1)}–${a.end.toFixed(1)}s and ${b.op} ${b.start.toFixed(1)}–${b.end.toFixed(1)}s); the later one wins and the first is cut short.`
+        );
+      }
+    }
+  }
 
   // Two things in the same band at the same moment is the single most visible
   // sign of an automatic edit, and it is cheap to catch here.

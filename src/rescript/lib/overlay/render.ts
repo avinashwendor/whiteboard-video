@@ -12,7 +12,13 @@
  * frames out of order and far faster than real time.
  */
 
-import { clamp01, drawStateAt, type DrawState } from "./animation";
+import {
+  clamp01,
+  drawStateAt,
+  tokenProgress,
+  type DrawState,
+} from "./animation";
+import { drawShapePath } from "./shapes";
 import type {
   Composition,
   ImageElement,
@@ -314,6 +320,31 @@ function drawText(
     ctx.shadowOffsetY = fontPx * 0.08;
   }
 
+  /** Draw one run of text, with the element's stroke and fill. */
+  const stamp = (run: string, x: number, y: number) => {
+    if (el.strokeColor && el.strokeWidth > 0) {
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      ctx.strokeStyle = el.strokeColor;
+      ctx.lineWidth = el.strokeWidth * fontPx;
+      ctx.strokeText(run, x, y);
+    }
+    ctx.fillStyle = el.color;
+    ctx.fillText(run, x, y);
+  };
+
+  // Tokens are counted across the whole element, not per line, so the stagger
+  // runs continuously through a wrapped caption instead of restarting — a
+  // reveal that begins again on the second line reads as two captions.
+  const tokens = state.tokens;
+  const perLine = tokens
+    ? lines.map((line) => splitTokens(line, tokens.unit))
+    : null;
+  const totalTokens = perLine
+    ? perLine.reduce((sum, parts) => sum + parts.length, 0)
+    : 0;
+  let tokenIndex = 0;
+
   lines.forEach((line, i) => {
     const metrics = ctx.measureText(line);
     let x = box.x + padPx;
@@ -321,18 +352,72 @@ function drawText(
     else if (el.align === "right") x = box.x + box.w - padPx - metrics.width;
     const y = originY + i * lineHeight;
 
-    if (el.strokeColor && el.strokeWidth > 0) {
-      ctx.lineJoin = "round";
-      ctx.miterLimit = 2;
-      ctx.strokeStyle = el.strokeColor;
-      ctx.lineWidth = el.strokeWidth * fontPx;
-      ctx.strokeText(line, x, y);
+    if (!perLine || !tokens) {
+      stamp(line, x, y);
+      return;
     }
-    ctx.fillStyle = el.color;
-    ctx.fillText(line, x, y);
+
+    // Laid out from the *undivided* line, so the tokens sit exactly where they
+    // would have without an animation. Measuring each token on its own and
+    // adding the widths drifts, because a space at the end of a run is
+    // measured differently from a space between two glyphs.
+    let cursor = x;
+    for (const token of perLine[i]) {
+      const width = ctx.measureText(token).width;
+      const p = tokenProgress(tokens.p, tokenIndex, totalTokens, tokens.stagger);
+      tokenIndex += 1;
+
+      if (token.trim() && p > 0) {
+        const own = tokenState(state, p);
+        ctx.save();
+        // The mask is per token and clips to the line, so a word rising out
+        // from behind its own baseline is hidden by the line above's space
+        // rather than by a box drawn around it.
+        if (own.rise < 1) {
+          ctx.beginPath();
+          ctx.rect(cursor - 1, y, width + 2, lineHeight * own.rise);
+          ctx.clip();
+        }
+        ctx.globalAlpha *= own.opacity;
+        stamp(
+          token,
+          cursor + own.dx * size.width,
+          y + own.dy * lineHeight
+        );
+        ctx.restore();
+      }
+      cursor += width;
+    }
   });
   ctx.restore();
   setLetterSpacing(ctx, 0);
+}
+
+/**
+ * Split a line into the units a staggered reveal moves.
+ *
+ * Trailing spaces stay attached to the word before them so the cursor advances
+ * by exactly the width the undivided line would have used — the whole point of
+ * laying out from the original measurement.
+ */
+function splitTokens(line: string, unit: "word" | "char"): string[] {
+  if (unit === "char") return Array.from(line);
+  return line.match(/\S+\s*/g) ?? [line];
+}
+
+/** One token's own progress through the element's animation. */
+function tokenState(state: DrawState, p: number): DrawState {
+  // Re-derived from the element's kind rather than scaled from the element's
+  // state: the state carries where the *whole* element is, which for a
+  // staggered reveal is nowhere in particular.
+  const eased = p;
+  return {
+    ...state,
+    opacity: state.opacity === 0 ? 0 : eased,
+    dy: state.rise < 1 ? (1 - eased) * 0.9 : state.dy * (1 - eased),
+    dx: state.dx * (1 - eased),
+    rise: state.rise < 1 ? eased : 1,
+  };
 }
 
 function drawImageElement(
@@ -391,8 +476,24 @@ function drawShape(
   ctx: CanvasRenderingContext2D,
   el: ShapeElement,
   size: FrameSize,
-  box: Px
+  box: Px,
+  state: DrawState
 ) {
+  // A named mark draws itself on, using the reveal the animation already
+  // computes — so `wipeRight` on an arrow becomes the arrow being drawn rather
+  // than a rectangle sliding over it.
+  if (el.shape === "path") {
+    const drawn = drawShapePath(ctx, el.pathName ?? "arrow", box, size, {
+      stroke: el.strokeColor,
+      fill: el.fill,
+      strokeWidth: el.strokeWidth,
+      progress: state.reveal,
+    });
+    // An unknown name falls through to a rectangle rather than drawing nothing:
+    // an element that is invisible is one nobody can select to fix.
+    if (drawn) return;
+  }
+
   const lineWidth = el.strokeWidth * size.height;
   ctx.save();
   if (el.shape === "ellipse") {
@@ -470,7 +571,7 @@ export function paintElement(
       drawImageElement(ctx, element, box);
       break;
     case "shape":
-      drawShape(ctx, element, size, box);
+      drawShape(ctx, element, size, box, state);
       break;
   }
 

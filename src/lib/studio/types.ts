@@ -2,6 +2,10 @@ import type { SceneSpec } from "@/lib/whiteboard/scene";
 import type { ImageProviderId, ImageStyle } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
+import type { ThemeName } from "@/lib/hyperframes/theme";
+import type { SceneRole } from "@/lib/hyperframes/roles";
+import type { Glyph } from "@/lib/hyperframes/glyphs";
+import type { BoardStockName } from "@/lib/whiteboard/palette";
 
 export type Mode = "write" | "image" | "voice" | "create";
 
@@ -67,7 +71,16 @@ export interface SceneAsset {
   keywords?: string[];
   stat?: string;
   statCaption?: string;
-  visualTheme?: "studio-dark" | "cyber-blue" | "sunset" | "clean-light";
+  visualTheme?: ThemeName;
+  /** The composition the director asked for, when the scene can carry it. */
+  shot?: SceneRole;
+  /**
+   * Line icons for this scene, resolved from its own words.
+   *
+   * Geometry travels with the scene because the catalogue it came from is a
+   * third of a megabyte and belongs on the server.
+   */
+  glyphs?: Glyph[];
 }
 
 export interface ProjectAsset extends Omit<Storyboard, "scenes"> {
@@ -82,6 +95,14 @@ export interface ProjectAsset extends Omit<Storyboard, "scenes"> {
   voiceDelay?: number;
   /** Underscore chosen for this video by the director. */
   musicMood?: "calm" | "curious" | "driving" | "warm" | "serious" | "none";
+  /**
+   * The surface a whiteboard video is drawn on.
+   *
+   * Ignored by the modern engine, which has its own palettes. Chosen by the
+   * director, because "explain photosynthesis" wants a chalkboard and "how a
+   * bridge is built" wants a blueprint, and no keyword list sees that.
+   */
+  boardStock?: BoardStockName;
 }
 
 export interface GenerationMeta {
@@ -125,8 +146,12 @@ export interface Settings {
   speed: number;
   sceneCount: number;
   tone: "explainer" | "story" | "advert" | "lesson";
-  /** Overall video production style: Hand-drawn Whiteboard vs Hyperframes Modern Video */
-  videoStyle: VideoStyle;
+  /**
+   * Overall video production style: Hand-drawn Whiteboard vs Hyperframes
+   * Modern Video, or "auto" to let the director read the idea and pick
+   * whichever one actually suits it before writing the script.
+   */
+  videoStyle: VideoStyle | "auto";
   /**
    * Whiteboard scene artwork. "rich" is the default: every board is drawn, and
    * the director decides per scene whether it also carries a real photograph
@@ -159,7 +184,7 @@ export const DEFAULT_SETTINGS: Settings = {
   speed: 1,
   sceneCount: 6,
   tone: "explainer",
-  videoStyle: "whiteboard",
+  videoStyle: "auto",
   sceneArt: "rich",
   modernArt: "photo",
   voiceSource: "verbatim",

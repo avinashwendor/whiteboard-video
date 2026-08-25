@@ -27,6 +27,7 @@ export const ko: Record<MessageKey, string> = {
   "model.language": "언어",
   "model.transcriptLanguage": "자막 언어",
   "model.importTranscript": "자막 가져오기",
+  "upload.continueProject": "이어서 작업하기",
   "upload.recentProjects": "최근 프로젝트",
   "upload.removeRecent": "최근 목록에서 제거",
   "upload.dropPrefix": "동영상 또는 오디오 파일을 여기에 놓거나",

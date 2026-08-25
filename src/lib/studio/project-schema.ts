@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { sceneSpecSchema } from "@/lib/whiteboard/scene";
+import { THEME_NAMES } from "@/lib/hyperframes/theme";
+import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
+import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
 import type { ProjectAsset } from "./types";
 
 /**
@@ -38,7 +41,14 @@ const audioAssetSchema = z.looseObject({
   words: z.array(wordSchema).optional(),
 });
 
-const themeSchema = z.enum(["studio-dark", "cyber-blue", "sunset", "clean-light"]);
+const themeSchema = z.enum(THEME_NAMES);
+
+/** A line icon that travelled with the scene, in Lucide's 24x24 space. */
+const glyphSchema = z.looseObject({
+  name: z.string().trim().min(1),
+  query: z.string().optional(),
+  paths: z.array(z.string()).max(24),
+});
 
 export const editableSceneSchema = z.looseObject({
   heading: z.string().trim().max(160),
@@ -57,6 +67,8 @@ export const editableSceneSchema = z.looseObject({
   stat: z.string().trim().max(24).optional(),
   statCaption: z.string().trim().max(60).optional(),
   visualTheme: themeSchema.optional(),
+  shot: z.enum(SCENE_ROLES_TUPLE).optional(),
+  glyphs: z.array(glyphSchema).max(8).optional(),
 });
 
 export const editableProjectSchema = z.looseObject({
@@ -69,6 +81,7 @@ export const editableProjectSchema = z.looseObject({
   introDuration: z.number().min(0).max(20).optional(),
   voiceDelay: z.number().min(0).max(10).optional(),
   musicMood: z.enum(["calm", "curious", "driving", "warm", "serious", "none"]).optional(),
+  boardStock: z.enum(BOARD_STOCK_NAMES_TUPLE).optional(),
 });
 
 /**

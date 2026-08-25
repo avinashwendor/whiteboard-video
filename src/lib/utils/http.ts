@@ -1,4 +1,4 @@
-import { AppError, codeFromStatus } from "./errors";
+import { AppError, codeFromStatus, looksLikeContextOverflow } from "./errors";
 
 export interface FetchOptions extends RequestInit {
   /** Milliseconds before the request is aborted. */
@@ -99,7 +99,15 @@ export async function raiseForStatus(res: Response, label: string): Promise<neve
   } catch {
     body = "<unreadable body>";
   }
-  throw new AppError(codeFromStatus(res.status), {
+  // A context overflow and a malformed body are both a 400, so the status alone
+  // cannot tell them apart — only the body can. Reading it here means every
+  // caller gets the distinction, and the person gets advice they can act on
+  // instead of being told to fix a request that was not actually malformed.
+  const code =
+    res.status === 400 && looksLikeContextOverflow(body)
+      ? "context_overflow"
+      : codeFromStatus(res.status);
+  throw new AppError(code, {
     detail: `${label} responded ${res.status}: ${body}`,
   });
 }

@@ -3,6 +3,8 @@
 import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 import { getFFmpeg } from "../ffmpeg";
 import { paintFrame } from "./frame";
+import { audibleClips, type AudioClip } from "./audio";
+import { buildMixGraph } from "./mix";
 import { preloadComposition } from "./render";
 import {
   transitionAt,
@@ -344,8 +346,12 @@ export async function composeOverlays({
       return { blob: silent, frames: frameCount };
     }
 
-    onProgress?.(0.9, "Adding the audio back");
-    const blob = await graftAudio(silent, source);
+    const clips = audibleClips(composition.audio);
+    onProgress?.(
+      0.9,
+      clips.length ? "Mixing the audio" : "Adding the audio back"
+    );
+    const blob = await graftAudio(silent, source, clips, timeline.duration);
     onProgress?.(1, "Done");
     return { blob, frames: frameCount };
   } finally {
@@ -358,36 +364,76 @@ export async function composeOverlays({
 }
 
 /**
- * Put the cut's audio track back on the composited picture.
+ * Put the audio back on the composited picture.
  *
- * Stream copy on both sides: the video was just encoded and the audio came out
- * of the cut untouched, so there is nothing to gain from decoding either.
+ * With no added clips this is a **stream copy on both sides** — the video was
+ * just encoded and the voice came out of the cut untouched, so there is nothing
+ * to gain from decoding either. That is the path this editor has always taken
+ * and the one every project without music still takes.
+ *
+ * With clips, it cannot be: two tracks have to become one. So the copy becomes
+ * a mix, and only then. Breaking the invariant conditionally is the difference
+ * between a feature and a tax on everyone who never asked for it.
  */
-async function graftAudio(silent: Blob, withSound: Blob): Promise<Blob> {
+async function graftAudio(
+  silent: Blob,
+  withSound: Blob,
+  clips: AudioClip[],
+  duration: number
+): Promise<Blob> {
   const ffmpeg = await getFFmpeg();
   const { fetchFile } = await import("@ffmpeg/util");
 
   const videoName = "composited.mp4";
   const audioName = "cut_for_audio.mp4";
   const outName = "composited_out.mp4";
+  const clipNames = clips.map((_, i) => `mixin_${i}`);
 
   await ffmpeg.writeFile(videoName, await fetchFile(silent));
   await ffmpeg.writeFile(audioName, await fetchFile(withSound));
 
+  // Written in the same order the graph numbers them. Getting these indices out
+  // of step is the one mistake that produces a file that plays and is wrong.
+  for (const [i, clip] of clips.entries()) {
+    await ffmpeg.writeFile(clipNames[i], await fetchFile(clip.src));
+  }
+
+  const graph = buildMixGraph({ clips, hasVoice: true, duration });
+
   try {
-    const code = await ffmpeg.exec([
-      "-i", videoName,
-      "-i", audioName,
-      "-map", "0:v:0",
-      "-map", "1:a:0",
-      "-c", "copy",
-      // The composited track is quantised to whole frames, so it can end a few
-      // milliseconds short of the audio. Without -shortest the file carries a
-      // sliver of audio over a frozen last frame.
-      "-shortest",
-      "-movflags", "+faststart",
-      "-y", outName,
-    ]);
+    const code = await ffmpeg.exec(
+      graph.filter
+        ? [
+            "-i", videoName,
+            "-i", audioName,
+            ...clipNames.flatMap((name) => ["-i", name]),
+            "-filter_complex", graph.filter,
+            "-map", "0:v:0",
+            "-map", graph.outputLabel,
+            "-c:v", "copy",
+            // The mix is the one thing that has to be encoded. The picture is
+            // still copied — it was encoded moments ago and re-encoding it
+            // would cost a second generation of loss for nothing.
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            "-y", outName,
+          ]
+        : [
+            "-i", videoName,
+            "-i", audioName,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c", "copy",
+            // The composited track is quantised to whole frames, so it can end
+            // a few milliseconds short of the audio. Without -shortest the file
+            // carries a sliver of audio over a frozen last frame.
+            "-shortest",
+            "-movflags", "+faststart",
+            "-y", outName,
+          ]
+    );
     if (code !== 0) {
       // A source without a usable audio stream is not worth failing the whole
       // export over — the picture is the part that was just rendered.
@@ -400,7 +446,7 @@ async function graftAudio(silent: Blob, withSound: Blob): Promise<Blob> {
     );
     return new Blob([buf as ArrayBuffer], { type: "video/mp4" });
   } finally {
-    for (const name of [videoName, audioName, outName]) {
+    for (const name of [videoName, audioName, outName, ...clipNames]) {
       await ffmpeg.deleteFile(name).catch(() => {});
     }
   }

@@ -27,6 +27,7 @@ import { detectMediaKind, MEDIA_ACCEPT } from "@/rescript/lib/media";
 import { formatTime } from "@/rescript/lib/edits";
 import {
   listProjects,
+  loadLastProjectId,
   type ProjectMeta,
 } from "@/rescript/lib/projects";
 import { isElectron } from "@/rescript/lib/platform";
@@ -92,26 +93,40 @@ function MediaCards({ dragging }: { dragging: boolean }) {
 
 function RecentProjects({
   projects,
+  lastId,
   busyId,
   onOpen,
   onRemove,
 }: {
   projects: ProjectMeta[];
+  /** The project that was open when the page last went away, if it still exists. */
+  lastId: string | null;
   busyId: string | null;
   onOpen: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
   const { locale, t } = useI18n();
   if (projects.length === 0) return null;
+
+  // The one you were in comes first and says so. Sorting by updatedAt alone
+  // usually puts it there anyway, but "usually" is not something to land on
+  // after a refresh — an autosave on another tab is enough to break the tie.
+  const ordered = lastId
+    ? [
+        ...projects.filter((p) => p.id === lastId),
+        ...projects.filter((p) => p.id !== lastId),
+      ]
+    : projects;
   return (
     <div className="mt-6">
       <p className="mb-2 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
         {t("upload.recentProjects")}
       </p>
       <ul className="divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 bg-white/80 dark:divide-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/80">
-        {projects.map((p) => {
+        {ordered.map((p) => {
           const KindIcon = p.mediaKind === "audio" ? AudioLines : Film;
           const opening = busyId === p.id;
+          const resume = p.id === lastId;
           return (
             <li key={p.id}>
               <div className="flex items-center gap-1 pr-1">
@@ -127,6 +142,12 @@ function RecentProjects({
                       {p.name}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-zinc-400 dark:text-zinc-500">
+                      {resume && (
+                        <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                          {t("upload.continueProject")}
+                          {" · "}
+                        </span>
+                      )}
                       {formatRelativeTime(locale, p.updatedAt)}
                       {p.duration > 0 ? ` · ${formatTime(p.duration)}` : ""}
                       {` · ${p.mediaKind === "audio" ? t("export.audio") : t("export.video")}`}
@@ -169,6 +190,12 @@ export default function UploadScreen({
   const inputId = useId();
   const [dragging, setDragging] = useState(false);
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  /**
+   * Read once, at mount, rather than in an effect: it is a plain localStorage
+   * value that cannot change while this screen is up, and setting it from an
+   * effect would cost a second render for something already known.
+   */
+  const [lastId] = useState<string | null>(() => loadLastProjectId());
   const [busyId, setBusyId] = useState<string | null>(null);
   // The pipeline needs SharedArrayBuffer, so don't accept a file until the page
   // is confirmed cross-origin isolated — transcription would fail immediately.
@@ -420,6 +447,7 @@ export default function UploadScreen({
           {ready && !isElectron && (
             <RecentProjects
               projects={projects}
+              lastId={lastId}
               busyId={busyId}
               onOpen={handleOpen}
               onRemove={handleRemove}

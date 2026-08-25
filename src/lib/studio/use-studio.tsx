@@ -15,11 +15,13 @@ import { castVoice } from "./casting";
 import { playReadyChime } from "@/lib/video/chime";
 import { renderThumbnail } from "@/components/whiteboard/thumbnail";
 import type { SceneSpec } from "@/lib/whiteboard/scene";
+import type { Glyph } from "@/lib/hyperframes/glyphs";
 import type { ImageStyle, ModelInfo, VoiceInfo } from "@/lib/ai/types";
 import {
   ApiError,
   createStoryboard,
   curateVisual,
+  resolveGlyphs,
   fetchCapabilities,
   fetchCatalogue,
   generateScene,
@@ -377,12 +379,57 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  /**
+   * Write every pending edit straight to localStorage, without waiting.
+   *
+   * The debounce above holds an edit for 400 ms, and the cleanup below only
+   * cleared its timer — so refreshing within 400 ms of the last keystroke
+   * dropped that edit silently. This is the synchronous half of the same
+   * write: it skips `cacheGeneration`, because copying asset bytes into
+   * IndexedDB is asynchronous and a page being torn down will not wait for it.
+   * The text edit is what was being lost, and the text edit survives; a picture
+   * generated in the same 400 ms may still need its next save to be cached,
+   * exactly as it did before the debounce elapsed.
+   */
+  const flushPendingEdits = useCallback(() => {
+    const timers = editTimers.current;
+    const drafts = editDrafts.current;
+    if (drafts.size === 0) return;
+
+    const stored = loadHistory();
+    for (const [generationId, draft] of drafts) {
+      const timer = timers.get(generationId);
+      if (timer) {
+        clearTimeout(timer);
+        timers.delete(generationId);
+      }
+      const entry = stored.find((row) => row.id === generationId);
+      if (!entry) continue;
+      saveGeneration({ ...entry, project: draft });
+    }
+    drafts.clear();
+  }, []);
+
   useEffect(() => {
     const timers = editTimers.current;
+    // `pagehide` rather than `beforeunload`: it is the one that fires when a
+    // mobile browser backgrounds the tab, which is the common way work is lost.
+    // `visibilitychange` covers the tab being hidden without being unloaded.
+    const onHide = () => flushPendingEdits();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushPendingEdits();
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      // Unmounting is also a loss of the pending write, not just a cancelled
+      // timer — flush before dropping the timers on the floor.
+      flushPendingEdits();
       for (const timer of timers.values()) clearTimeout(timer);
     };
-  }, []);
+  }, [flushPendingEdits]);
 
   /* --------------------------------- runners -------------------------------- */
 
@@ -554,13 +601,23 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               signal,
             );
 
+            // The engine actually used: whatever was asked for, or -- when
+            // the request said "auto" -- whichever one the director read the
+            // idea and picked. Everything below cuts on this, never on the
+            // setting, so an auto pick renders exactly like a manual one.
+            const videoStyle = plan.videoStyle;
+
             // One art direction, prefixed onto every frame: six shots that
             // share a palette and a lens read as one film, and six that do not
             // read as six stock pictures in a row.
             const artDirection = plan.storyboard.visual_style?.trim();
+            // The palette the director chose. Modern films default to the
+            // editorial black rather than the printed light: it is the look
+            // the engine's newest shots were composed for, and a title over
+            // paper is the one that should be asked for deliberately.
             const theme =
               plan.storyboard.visual_theme ??
-              (settings.videoStyle === "hyperframes" ? "clean-light" : "studio-dark");
+              (videoStyle === "hyperframes" ? "obsidian" : "studio-dark");
 
             /**
              * The narrator the director asked for.
@@ -578,7 +635,44 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               pinned: settings.voicePinned,
             });
 
-            const scenes: SceneAsset[] = plan.storyboard.scenes.map((scene) => ({
+            /**
+             * Line icons for the modern engine, resolved once for the film.
+             *
+             * Done before the scenes are built rather than per scene, for two
+             * reasons: it is one round trip instead of a dozen, and the server
+             * can refuse to hand the same drawing to two different frames --
+             * which is the difference between a set of icons and a set of
+             * icons that looks automatic.
+             *
+             * Whiteboard videos skip this: their icons are resolved inside the
+             * board layout, where the geometry is chosen against the drawing.
+             */
+            const glyphsByScene: Array<Glyph[]> = plan.storyboard.scenes.map(() => []);
+            if (videoStyle === "hyperframes") {
+              const wanted: Array<{ scene: number; concept: string }> = [];
+              plan.storyboard.scenes.forEach((scene, index) => {
+                const concepts = [
+                  ...(scene.bullets ?? []),
+                  ...(scene.keywords ?? []).slice(0, 1),
+                  scene.heading,
+                ]
+                  .map((value) => value?.trim())
+                  .filter((value): value is string => Boolean(value))
+                  .slice(0, 4);
+                for (const concept of concepts) wanted.push({ scene: index, concept });
+              });
+
+              const resolved = await resolveGlyphs(
+                wanted.slice(0, 48).map((entry) => entry.concept),
+                signal,
+              );
+              resolved.forEach((glyph, index) => {
+                const request = wanted[index];
+                if (glyph && request) glyphsByScene[request.scene].push(glyph);
+              });
+            }
+
+            const scenes: SceneAsset[] = plan.storyboard.scenes.map((scene, index) => ({
               heading: scene.heading,
               bullets: scene.bullets,
               narration: scene.narration,
@@ -592,18 +686,26 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               stat: scene.stat,
               statCaption: scene.stat_caption,
               visualTheme: theme,
+              shot: scene.shot,
+              glyphs: glyphsByScene[index],
             }));
 
             patch({
-              stage: settings.videoStyle === "hyperframes" ? "Synthesizing modern scenes" : "Drawing the board",
+              stage:
+                settings.videoStyle === "auto" && plan.styleReason
+                  ? `Chose ${videoStyle === "hyperframes" ? "Modern frames" : "Whiteboard"} — ${plan.styleReason}`
+                  : videoStyle === "hyperframes"
+                    ? "Synthesizing modern scenes"
+                    : "Drawing the board",
               progress: 0.15,
               project: {
                 ...plan.storyboard,
                 scenes,
-                videoStyle: settings.videoStyle,
+                videoStyle,
                 introDuration: settings.introDuration ?? 3.0,
                 voiceDelay: settings.voiceDelay ?? 0.6,
                 musicMood: plan.storyboard.music_mood ?? "calm",
+                boardStock: plan.storyboard.board_stock ?? "marker",
               },
               meta: { model: plan.model, provider: plan.provider, usage: plan.usage },
             });
@@ -628,7 +730,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                   // A modern scene is a shot, so its plate is a photograph
                   // unless the user has deliberately asked for something else.
                   style:
-                    settings.videoStyle === "hyperframes"
+                    videoStyle === "hyperframes"
                       ? settings.imageStyle === "auto"
                         ? "photorealistic"
                         : settings.imageStyle
@@ -646,7 +748,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                       width: 1280,
                       height: 720,
                       style:
-                        settings.videoStyle === "hyperframes"
+                        videoStyle === "hyperframes"
                           ? settings.imageStyle === "auto"
                             ? "photorealistic"
                             : settings.imageStyle
@@ -711,7 +813,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             const buildScene = async (
               scene: SceneAsset,
             ): Promise<{ scene?: SceneSpec; image?: ImageAsset; note?: string }> => {
-              if (settings.videoStyle === "hyperframes") {
+              if (videoStyle === "hyperframes") {
                 // Same casting as the board: the director decides whether this
                 // shot's plate is real or drawn, and a failed search falls
                 // through to generation rather than to an empty frame.
@@ -875,7 +977,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
               const hasArt = Boolean(target.scene || target.image);
               target.status =
-                settings.videoStyle === "hyperframes"
+                videoStyle === "hyperframes"
                   ? target.heading
                     ? "done"
                     : "error"
@@ -906,7 +1008,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               const thumbnail = renderThumbnail({
                 title: project.title,
                 description: project.description,
-                videoStyle: settings.videoStyle,
+                videoStyle,
+                theme,
+                boardStock: plan.storyboard.board_stock,
               });
               if (thumbnail) {
                 project.cover = {
@@ -928,7 +1032,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
               meta: {
                 ...generation.meta,
                 imageModel:
-                  settings.videoStyle === "whiteboard" && settings.sceneArt === "scene"
+                  videoStyle === "whiteboard" && settings.sceneArt === "scene"
                     ? "composed board"
                     : project.scenes.find((s) => s.image)?.image?.model,
                 voiceId,

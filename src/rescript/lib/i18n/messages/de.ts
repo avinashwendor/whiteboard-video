@@ -27,6 +27,7 @@ export const de: Record<MessageKey, string> = {
   "model.language": "Sprache",
   "model.transcriptLanguage": "Transkriptsprache",
   "model.importTranscript": "Transkript importieren",
+  "upload.continueProject": "Da weitermachen, wo du aufgehört hast",
   "upload.recentProjects": "Letzte Projekte",
   "upload.removeRecent": "Aus letzten Projekten entfernen",
   "upload.dropPrefix": "Lege hier eine Video- oder Audiodatei ab, oder",

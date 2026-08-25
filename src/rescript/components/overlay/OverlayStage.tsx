@@ -15,6 +15,7 @@ import { paintFrame } from "@/rescript/lib/overlay/frame";
 import { loadImage } from "@/rescript/lib/overlay/render";
 import { transitionAt } from "@/rescript/lib/overlay/timeline";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
+import { useAudioMix } from "@/rescript/hooks/useAudioMix";
 import { useFreezeFrames } from "@/rescript/hooks/useFreezeFrames";
 import type { OverlayElement, Rect } from "@/rescript/lib/overlay/types";
 
@@ -79,10 +80,17 @@ export default function OverlayStage({
   const selectedId = useOverlayStore((s) => s.selectedId);
   const select = useOverlayStore((s) => s.select);
   const frame = useOverlayStore((s) => s.frame);
+  const shots = useOverlayStore((s) => s.shots);
+  const grade = useOverlayStore((s) => s.grade);
+  const audio = useOverlayStore((s) => s.audio);
   const aspect = useOverlayStore((s) => s.aspect);
   const setSourceAspect = useOverlayStore((s) => s.setSourceAspect);
 
   const timeline = useOutputTimeline();
+
+  // Music and effects, heard live. Mounted here because this component already
+  // owns the preview clock and the timeline the mix is scheduled against.
+  useAudioMix(timeline);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -95,10 +103,10 @@ export default function OverlayStage({
   });
 
   // Live values for the animation frame, which must not re-subscribe per frame.
-  const live = useRef({ elements, subtitles, transitions, frame, timeline, words, duration, manualCuts });
+  const live = useRef({ elements, subtitles, transitions, frame, shots, grade, audio, timeline, words, duration, manualCuts });
   useEffect(() => {
-    live.current = { elements, subtitles, transitions, frame, timeline, words, duration, manualCuts };
-  }, [elements, subtitles, transitions, frame, timeline, words, duration, manualCuts]);
+    live.current = { elements, subtitles, transitions, frame, shots, grade, audio, timeline, words, duration, manualCuts };
+  }, [elements, subtitles, transitions, frame, shots, grade, audio, timeline, words, duration, manualCuts]);
 
   // The held frames the push transitions draw. Captured up front by seeking a
   // hidden decoder, and re-captured whenever the cut moves an out point — see
@@ -215,6 +223,9 @@ export default function OverlayStage({
             subtitles: state.subtitles,
             transitions: state.transitions,
             frame: state.frame,
+            shots: state.shots,
+            grade: state.grade,
+            audio: state.audio,
           },
           t
         );

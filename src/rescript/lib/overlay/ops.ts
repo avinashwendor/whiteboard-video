@@ -14,7 +14,14 @@ import { useEditorStore } from "../store";
 import { findFillerWordIds } from "../fillers";
 import { findSilenceRanges, MIN_SILENCE_DURATION } from "../silences";
 import { getCutRanges, originalToEdited } from "../edits";
-import { useOverlayStore } from "./store";
+import { currentComposition, useOverlayStore } from "./store";
+import { cameraFor, fitCamera } from "./camera";
+import { findBeats, placePunchIns } from "./emphasis";
+import { shotAt } from "./shots";
+import { gradePreset, NEUTRAL_GRADE } from "./grade";
+import { textTemplate } from "./templates";
+import { knownShape } from "./shapes";
+import { defaultGainFor } from "./audio";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -29,14 +36,19 @@ import {
 } from "./presets";
 import { loadImage } from "./render";
 import type { AgentOp, PositionName, SizeName } from "./ops-schema";
-import type {
-  AnimationKind,
-  OverlayElement,
-  Rect,
-  SubtitleStyle,
-  TextElement,
-  Transition,
-  TransitionKind,
+import {
+  primaryPlate,
+  regionCount,
+  SHOT_LAYOUT_LABELS,
+  type AnimationKind,
+  type AnimationSpec,
+  type OverlayElement,
+  type Plate,
+  type Rect,
+  type SubtitleStyle,
+  type TextElement,
+  type Transition,
+  type TransitionKind,
 } from "./types";
 import {
   buildTimeline,
@@ -107,6 +119,119 @@ function textWidthFor(
 /** Numbered as the model sees them: paint order, 1-based. */
 function orderedElements(): OverlayElement[] {
   return [...useOverlayStore.getState().elements].sort((a, b) => a.z - b.z);
+}
+
+/**
+ * Resolve a template into the fields that build a text element.
+ *
+ * A template supplies the look, the motion, the size and the placement; every
+ * one of those is still overridable by the operation, so a template can be
+ * nudged rather than rebuilt. Falls through to the old style-name path when no
+ * template is named, or when the name is not one we have — an invented template
+ * should produce a plain caption rather than nothing at all.
+ */
+type Placement = PositionName | { x: number; y: number } | undefined;
+
+function resolveTextLook(op: {
+  template?: string;
+  style?: Parameters<typeof textStyleFields>[0];
+  size?: SizeName;
+  position?: Placement;
+  enter?: AnimationKind;
+  exit?: AnimationKind;
+}): {
+  fields: ReturnType<typeof textStyleFields>;
+  scale: number;
+  size: SizeName;
+  position: Placement;
+  enter: AnimationSpec;
+  exit: AnimationSpec;
+} {
+  const template = op.template ? textTemplate(op.template) : null;
+
+  if (!template) {
+    const styleName = op.style ?? "plain";
+    return {
+      fields: textStyleFields(styleName),
+      scale: textStyleScale(styleName),
+      size: op.size ?? "l",
+      position: op.position,
+      enter: animation(op.enter, "slideUp"),
+      exit: animation(op.exit, "fade"),
+    };
+  }
+
+  const { sizeScale, ...look } = template.style;
+  return {
+    fields: look as ReturnType<typeof textStyleFields>,
+    scale: sizeScale ?? 1,
+    size: op.size ?? template.size,
+    position: op.position ?? template.position,
+    // An explicit kind wins, but the template's timing is kept: a template
+    // whose reveal is 0.7s per word does not become a 0.4s fade because
+    // someone named a different kind.
+    enter: op.enter ? animation(op.enter, "slideUp") : template.enter,
+    exit: op.exit ? animation(op.exit, "fade") : template.exit,
+  };
+}
+
+/* ---------------------------------- media ---------------------------------- */
+
+interface FoundMedia {
+  title: string;
+  artist: string;
+  downloadUrl: string;
+  duration?: number;
+  licence: { name: string; attributionRequired: boolean };
+  pageUrl?: string;
+}
+
+/**
+ * The first commercially-usable result for a query.
+ *
+ * "First" is the right answer here rather than a weak one: the route already
+ * ranks best-first and filters out anything that cannot be published, so the
+ * top result is the best *usable* one. Offering the model a list to choose from
+ * would mean sending it twenty titles it has no way to judge between.
+ */
+async function findMedia(
+  query: string,
+  kind: "music" | "sfx",
+  signal?: AbortSignal
+): Promise<FoundMedia | null> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, kind, limit: 5 }),
+      signal,
+    });
+    const json = (await res.json()) as { success?: boolean; results?: FoundMedia[] };
+    if (!json.success) return null;
+    return json.results?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Bring the bytes onto our origin, where the mix can read them. */
+async function proxyMedia(
+  url: string,
+  filename: string,
+  signal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "fetch", url, filename: filename.slice(0, 40) }),
+      signal,
+    });
+    const json = (await res.json()) as { success?: boolean; url?: string };
+    return json.success && json.url ? json.url : null;
+  } catch {
+    return null;
+  }
 }
 
 function elementByNumber(n: number): OverlayElement | null {
@@ -226,12 +351,11 @@ async function runOne(
   switch (op.op) {
     case "addText": {
       const { start, end } = resolveWindow(op, ctx);
-      const styleName = op.style ?? "plain";
-      const fontSize = TEXT_SIZE[op.size ?? "l"] * textStyleScale(styleName);
-      const w = textWidthFor(op.position);
+      const look = resolveTextLook(op);
+      const fontSize = TEXT_SIZE[look.size] * look.scale;
+      const w = textWidthFor(look.position);
       const h = textBoxHeight(fontSize);
-      const rect = resolveRect(op.position, w, h, "lower-third");
-      const styleFields = textStyleFields(styleName);
+      const rect = resolveRect(look.position, w, h, "lower-third");
 
       overlay.addText({
         text: op.text,
@@ -240,15 +364,16 @@ async function runOne(
         end,
         rect,
         fontSize,
-        ...styleFields,
+        ...look.fields,
         ...(op.color ? { color: op.color } : {}),
         ...(op.background !== undefined ? { background: op.background } : {}),
         ...(op.align ? { align: op.align } : {}),
         ...(op.uppercase !== undefined ? { uppercase: op.uppercase } : {}),
-        enter: animation(op.enter, "slideUp"),
-        exit: animation(op.exit, "fade"),
+        enter: look.enter,
+        exit: look.exit,
       });
-      return { ok: true, message: `Added text “${op.text.slice(0, 40)}”` };
+      const named = op.template ? ` (${op.template})` : "";
+      return { ok: true, message: `Added text “${op.text.slice(0, 40)}”${named}` };
     }
 
     case "addImage": {
@@ -292,16 +417,39 @@ async function runOne(
 
     case "addShape": {
       const { start, end } = resolveWindow(op, ctx);
+      const wantsMark = op.shape === "path" || !!op.mark;
+
+      // A name nobody has is a plan that would place an invisible element and
+      // report success. Refusing it says which name was wrong, which is the
+      // only way the next attempt is better than the last.
+      if (wantsMark && !knownShape(op.mark ?? "")) {
+        return {
+          ok: false,
+          message: op.mark
+            ? `There is no mark called “${op.mark}”.`
+            : "A path shape needs a mark name.",
+        };
+      }
+
       const { w, h } = SHAPE_SIZE[op.size ?? "l"];
+      // A mark is scaled to fit and centred, so a wide box would just centre it
+      // in empty space. Square it off from the smaller side.
+      const side = wantsMark ? Math.min(w, h) : 0;
       overlay.addShape({
         start,
         end,
-        rect: resolveRect(op.position, w, h, "bottom"),
-        shape: op.shape,
+        rect: wantsMark
+          ? resolveRect(op.position, side, side, "center")
+          : resolveRect(op.position, w, h, "bottom"),
+        shape: wantsMark ? "path" : op.shape,
+        ...(wantsMark ? { pathName: op.mark, name: op.mark } : {}),
         ...(op.fill !== undefined ? { fill: op.fill } : {}),
         ...(op.strokeColor !== undefined ? { strokeColor: op.strokeColor } : {}),
       });
-      return { ok: true, message: `Added a ${op.shape}` };
+      return {
+        ok: true,
+        message: wantsMark ? `Drew a ${op.mark}` : `Added a ${op.shape}`,
+      };
     }
 
     case "updateElement": {
@@ -688,6 +836,262 @@ async function runOne(
             ? "Frame back to the shape it was shot in"
             : `Frame is now ${op.aspect}`,
       };
+    }
+
+    /* ---------------------------------- shots ---------------------------------- */
+
+    case "addShot": {
+      const start = Math.max(0, Math.min(op.start, ctx.duration));
+      const end = Math.max(start, Math.min(op.end, ctx.duration));
+      if (end - start < 0.2) {
+        return { ok: false, message: "That shot is too short to see." };
+      }
+
+      const specs = op.plates?.length ? op.plates : [{ slot: 0 }];
+      const want = regionCount(op.layout, specs.length);
+      const plates: Plate[] = [];
+
+      for (let slot = 0; slot < want; slot += 1) {
+        const spec = specs.find((p) => p.slot === slot) ?? specs[slot] ?? { slot };
+        const base = primaryPlate();
+        // `selfCrop` is the footage again, framed tighter — the cutaway that
+        // needs no provider and no upload, and the one an editor reaches for
+        // most. It is a camera choice, not a different source.
+        const isCrop = spec.source === "selfCrop";
+        const camera = fitCamera(
+          cameraFor({
+            kind: spec.camera ?? (isCrop ? "snap" : "hold"),
+            amount: spec.amount,
+            focusX: spec.focusX,
+            focusY: spec.focusY,
+          }),
+          end - start
+        );
+
+        plates.push({
+          ...base,
+          slot,
+          source:
+            spec.source === "solid"
+              ? { kind: "solid", color: spec.color ?? "#0a0a0a" }
+              : { kind: "primary" },
+          fit: spec.fit ?? base.fit,
+          camera,
+          radius: spec.radius ?? base.radius,
+        });
+      }
+
+      overlay.addShot({ start, end, layout: op.layout, plates });
+      return {
+        ok: true,
+        message: `${SHOT_LAYOUT_LABELS[op.layout]} from ${start.toFixed(1)}s to ${end.toFixed(1)}s`,
+      };
+    }
+
+    case "setCamera": {
+      const start = Math.max(0, Math.min(op.start, ctx.duration));
+      const end = Math.max(start, Math.min(op.end, ctx.duration));
+      if (end - start < 0.2) {
+        return { ok: false, message: "That is too short a stretch to move over." };
+      }
+
+      const camera = fitCamera(
+        cameraFor({
+          kind: op.camera,
+          amount: op.amount,
+          focusX: op.focusX,
+          focusY: op.focusY,
+        }),
+        end - start
+      );
+
+      // A camera note about a stretch with no shot on it is a request for one:
+      // refusing would be technically right and useless, since "push in here"
+      // means "make this a shot that pushes in".
+      const existing = shotAt({ ...currentComposition(), shots: overlay.shots }, start);
+      if (existing) {
+        overlay.setCamera(existing.id, 0, camera);
+      } else {
+        overlay.addShot({
+          start,
+          end,
+          layout: "full",
+          plates: [{ ...primaryPlate(), camera }],
+        });
+      }
+
+      return {
+        ok: true,
+        message:
+          op.camera === "hold"
+            ? `Camera holds from ${start.toFixed(1)}s`
+            : `${op.camera} at ${start.toFixed(1)}s`,
+      };
+    }
+
+    case "removeShot": {
+      const shot = shotAt({ ...currentComposition(), shots: overlay.shots }, op.at);
+      if (!shot) {
+        return { ok: false, message: `Nothing framed at ${op.at.toFixed(1)}s.` };
+      }
+      overlay.removeShot(shot.id);
+      return { ok: true, message: `Dropped the shot at ${op.at.toFixed(1)}s` };
+    }
+
+    case "autoPunchIns": {
+      const editor = useEditorStore.getState();
+      const beats = findBeats(editor.words, editor.duration, editor.manualCuts);
+      const placed = placePunchIns(beats, {
+        perMinute: op.perMinute,
+        duration: ctx.duration,
+      });
+
+      if (placed.length === 0) {
+        return {
+          ok: false,
+          message: "Nothing in the delivery asked to be punched in on.",
+        };
+      }
+
+      for (const punch of placed) {
+        const camera = fitCamera(
+          cameraFor({ kind: "punchIn", amount: op.amount }),
+          punch.end - punch.start
+        );
+        overlay.addShot({
+          start: punch.start,
+          end: punch.end,
+          layout: "full",
+          plates: [{ ...primaryPlate(), camera }],
+        });
+      }
+
+      return {
+        ok: true,
+        message: `${placed.length} punch-in${placed.length === 1 ? "" : "s"}, on the beats in the delivery`,
+      };
+    }
+
+    case "setGrade": {
+      const base = gradePreset(op.preset) ?? NEUTRAL_GRADE;
+      const patch = {
+        ...base,
+        ...(op.exposure !== undefined ? { exposure: op.exposure } : {}),
+        ...(op.contrast !== undefined ? { contrast: op.contrast } : {}),
+        ...(op.saturation !== undefined ? { saturation: op.saturation } : {}),
+        ...(op.temperature !== undefined ? { temperature: op.temperature } : {}),
+        ...(op.vignette !== undefined ? { vignette: op.vignette } : {}),
+        ...(op.grain !== undefined ? { grain: op.grain } : {}),
+      };
+
+      if (op.at === undefined) {
+        overlay.setGrade(op.preset === "none" ? null : patch);
+        return {
+          ok: true,
+          message:
+            op.preset === "none"
+              ? "Look back to neutral"
+              : `“${op.preset}” over the whole video`,
+        };
+      }
+
+      const shot = shotAt({ ...currentComposition(), shots: overlay.shots }, op.at);
+      if (!shot) {
+        return {
+          ok: false,
+          message: `Nothing framed at ${op.at.toFixed(1)}s to grade on its own.`,
+        };
+      }
+      overlay.setGrade(op.preset === "none" ? null : patch, shot.id);
+      return {
+        ok: true,
+        message: `“${op.preset}” on the shot at ${op.at.toFixed(1)}s`,
+      };
+    }
+
+    /* ---------------------------------- sound ---------------------------------- */
+
+    case "addMusic": {
+      const isBed = op.kind === "music";
+      const start = isBed ? 0 : Math.max(0, Math.min(op.start ?? ctx.playhead, ctx.duration));
+      const end = Math.min(op.end ?? (isBed ? ctx.duration : start + 3), ctx.duration);
+      if (end - start < 0.2) {
+        return { ok: false, message: "That is too short a stretch to put sound under." };
+      }
+
+      // Searched here rather than by the model: it cannot know what is in a
+      // catalogue, and a URL it invented would fail the proxy's allowlist —
+      // correctly, but with an error nobody could act on.
+      const found = await findMedia(op.query, op.kind, signal);
+      if (!found) {
+        return {
+          ok: false,
+          message: `Nothing usable came back for “${op.query}”. A broader word usually helps.`,
+        };
+      }
+
+      const src = await proxyMedia(found.downloadUrl, found.title, signal);
+      if (!src) {
+        return { ok: false, message: `“${found.title}” could not be fetched.` };
+      }
+
+      overlay.addAudio({
+        kind: op.kind,
+        name: `${found.title} — ${found.artist}`,
+        src,
+        start,
+        end,
+        trimIn: 0,
+        gain: op.gain ?? defaultGainFor(op.kind),
+        fadeIn: isBed ? 1.5 : 0,
+        fadeOut: isBed ? 2 : 0,
+        duck: isBed,
+        loop: isBed && (found.duration ?? 0) < end - start,
+        muted: false,
+        credit: {
+          title: found.title,
+          artist: found.artist,
+          licence: found.licence.name,
+          url: found.pageUrl,
+          attributionRequired: found.licence.attributionRequired,
+        },
+      });
+
+      // The licence is named in the log, not buried: it is the thing that
+      // decides whether the person can publish what was just added.
+      const owed = found.licence.attributionRequired ? ", credit required" : "";
+      return {
+        ok: true,
+        message: `“${found.title}” by ${found.artist} (${found.licence.name}${owed})`,
+      };
+    }
+
+    case "setMusicLevel": {
+      const beds = overlay.audio.filter((clip) => clip.kind === "music");
+      if (beds.length === 0) {
+        return { ok: false, message: "There is no music to set the level of." };
+      }
+      for (const bed of beds) {
+        overlay.updateAudio(bed.id, {
+          gain: op.gain,
+          ...(op.duck !== undefined ? { duck: op.duck } : {}),
+        });
+      }
+      return {
+        ok: true,
+        message: `Music at ${Math.round(op.gain * 100)}%${
+          op.duck === false ? ", no ducking" : ""
+        }`,
+      };
+    }
+
+    case "removeMusic": {
+      const beds = overlay.audio.filter((clip) => clip.kind === "music");
+      if (beds.length === 0) {
+        return { ok: false, message: "There is no music to remove." };
+      }
+      for (const bed of beds) overlay.removeAudio(bed.id);
+      return { ok: true, message: `Removed the music` };
     }
 
     default: {

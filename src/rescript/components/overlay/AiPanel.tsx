@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CornerDownLeft,
+  Eye,
   ListChecks,
   Loader2,
   Sparkles,
@@ -18,12 +19,37 @@ import {
   useOutputTimeline,
 } from "@/rescript/hooks/useOverlayTimeline";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
+import {
+  useChatStore,
+  type LogEntry,
+  type Proposal,
+  type ProposedStep,
+} from "@/rescript/lib/chat/store";
 import { runPlan, type OpResult } from "@/rescript/lib/overlay/ops";
 import { analyseFootage } from "@/rescript/lib/overlay/analysis";
 import { buildTimeline } from "@/rescript/lib/overlay/timeline";
 import type { AgentOp } from "@/rescript/lib/overlay/ops-schema";
 import { Button, Empty, formatSeconds } from "./ui";
 import { MicButton } from "@/components/ui/mic-button";
+import { loadAgentModel, saveAgentModel } from "@/rescript/lib/agent-model";
+import {
+  listFeedback,
+  recordAll,
+  recordFeedback,
+  reviseVerdict,
+} from "@/rescript/lib/feedback/store";
+import {
+  retrieveExemplars,
+  standingPreferences,
+  type Exemplar,
+} from "@/rescript/lib/feedback/retrieve";
+import {
+  reviewTimes,
+  takeGlances,
+  takeReviewGlances,
+} from "@/rescript/lib/overlay/glance";
+import { currentComposition } from "@/rescript/lib/overlay/store";
+import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
 
 /**
  * The prompt surface.
@@ -35,26 +61,6 @@ import { MicButton } from "@/components/ui/mic-button";
  * with every step reported. Nothing is applied that the schema did not accept,
  * and a step that fails says so instead of failing silently.
  */
-
-interface LogEntry {
-  id: number;
-  kind: "you" | "summary" | "ok" | "fail" | "note" | "finding" | "look" | "warn";
-  text: string;
-}
-
-interface ProposedStep {
-  title: string;
-  detail: string;
-  ops: AgentOp[];
-}
-
-/** A proposal waiting to be accepted, in whole or in part. */
-interface Proposal {
-  summary: string;
-  steps: ProposedStep[];
-  /** Titles the person has unticked. */
-  declined: Set<number>;
-}
 
 /**
  * One click that does the whole job. Phrased as a sentence rather than wired to
@@ -89,6 +95,14 @@ const TRANSCRIPT_BUDGET = 180_000;
 /** How much of the live reasoning to keep on screen. */
 const THOUGHT_TAIL = 1_400;
 
+/**
+ * How long after applying a plan an undo still counts as a verdict on it.
+ *
+ * Short on purpose. Undoing immediately is "that was wrong"; undoing a minute
+ * later is ordinary editing that happens to walk back over the same ground.
+ */
+const UNDO_WINDOW_MS = 30_000;
+
 interface PlanReply {
   success?: boolean;
   summary?: string;
@@ -108,6 +122,7 @@ type AgentEvent =
   | { type: "verify"; problems: number }
   | { type: "repair"; problems: string[] }
   | { type: "retry"; reason: string }
+  | { type: "trim"; dropped: number; digested: number; tokens: number }
   | ({ type: "plan" } & PlanReply)
   | ({ type: "error" } & PlanReply);
 
@@ -125,6 +140,8 @@ async function consumeStream(
     onStatus: (status: string | null) => void;
     onThinking: (text: string) => void;
     onLook: (detail: string) => void;
+    /** Something the person should know, but that is not a result. */
+    onNote: (text: string) => void;
   }
 ): Promise<PlanReply | null> {
   const body = res.body;
@@ -170,9 +187,29 @@ async function consumeStream(
         handlers.onStatus("Fixing the plan…");
         break;
       case "retry":
-        handlers.onStatus("That reply couldn't be used — asking again…");
+        // The reason is written server-side and is the only thing that
+        // distinguishes an unusable reply from a conversation too long to read.
+        handlers.onStatus(
+          event.reason
+            ? `${event.reason} — asking again…`
+            : "That reply couldn't be used — asking again…"
+        );
+        break;
+      case "trim":
+        // Worth saying out loud. The alternative is an agent that quietly
+        // answers from less than it was given, which reads as forgetfulness.
+        handlers.onNote(
+          event.dropped
+            ? `The conversation got long — dropped ${event.dropped} older ${
+                event.dropped === 1 ? "message" : "messages"
+              } to fit.`
+            : "The conversation got long — shortened some older messages to fit."
+        );
         break;
       default:
+        // Anything unrecognised is the final reply. A new event type that is
+        // not handled above therefore ends the stream holding a plan-shaped
+        // object that is not a plan, which is why every case is explicit.
         final = event;
         break;
     }
@@ -195,7 +232,29 @@ async function consumeStream(
   return final;
 }
 
-let logSequence = 0;
+/**
+ * What this person's past decisions have to say about this instruction.
+ *
+ * Never throws and never blocks a plan: an empty result is the state the agent
+ * was in before any of this existed, so a failure here costs the improvement
+ * rather than the request.
+ */
+async function gatherLearned(instruction: string): Promise<{
+  exemplars: Exemplar[];
+  preferences: string[];
+}> {
+  try {
+    const events = await listFeedback();
+    if (events.length === 0) return { exemplars: [], preferences: [] };
+    const exemplars = await retrieveExemplars(instruction, { events });
+    return {
+      exemplars,
+      preferences: standingPreferences(events).map((p) => p.note),
+    };
+  } catch {
+    return { exemplars: [], preferences: [] };
+  }
+}
 
 export default function AiPanel() {
   const [prompt, setPrompt] = useState("");
@@ -203,19 +262,55 @@ export default function AiPanel() {
   /** What the agent is doing right now, and the reasoning behind it. */
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [thought, setThought] = useState("");
-  const [log, setLog] = useState<LogEntry[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  // The conversation lives in its own store so it survives a refresh with the
+  // rest of the project. See `lib/chat/store.ts`.
+  const log = useChatStore((s) => s.log);
+  const proposal = useChatStore((s) => s.proposal);
+  const append = useChatStore((s) => s.append);
+  const setProposal = useChatStore((s) => s.setProposal);
   /**
-   * What has been asked and what came of it, oldest first.
+   * Toggle one step of the open proposal.
    *
-   * A ref rather than state: nothing renders from it, and a follow-up sent
-   * while the previous answer is still landing must see the completed turn.
+   * Reads the proposal out of the store rather than closing over the rendered
+   * one: ticking two steps quickly would otherwise have the second click work
+   * from the state the first click replaced.
    */
-  const historyRef = useRef<
-    { instruction: string; summary: string; outcome?: string }[]
-  >([]);
+  const setProposalWith = useCallback(
+    (update: (prev: Proposal | null) => Proposal | null) => {
+      const store = useChatStore.getState();
+      store.setProposal(update(store.proposal));
+    },
+    []
+  );
+  const abortRef = useRef<AbortController | null>(null);
+  /**
+   * What was asked for, kept for as long as its answer is on screen.
+   *
+   * A ref rather than state because nothing renders from it: the box is cleared
+   * the moment a request is sent, and a proposal is read and accepted seconds
+   * later — so by the time a verdict is recorded, the instruction that earned
+   * it is long gone from `prompt`.
+   */
+  const instructionRef = useRef("");
+  /**
+   * What was just applied, so an undo can be read as an opinion about it.
+   *
+   * Undoing within a few seconds of accepting a plan is the strongest signal
+   * this panel can collect — the person read the step, ran it, looked at the
+   * result and took it back. It is worth more than a decline, which is a
+   * judgement made before seeing anything.
+   */
+  const appliedRef = useRef<{ ids: string[]; at: number } | null>(null);
+  /**
+   * The operations the last applied plan carried, so a review knows where to
+   * look. A review that samples evenly reviews the parts of the video nothing
+   * happened to.
+   */
+  const reviewAtRef = useRef<{ start?: number; at?: number }[]>([]);
+  /** Whether there is applied work worth watching back. Drives the button. */
+  const [reviewable, setReviewable] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+
   /**
    * The current `submitText`, so the repair round can re-enter it.
    *
@@ -227,7 +322,7 @@ export default function AiPanel() {
   const submitRef = useRef<
     | ((
         text?: string,
-        mode?: "propose" | "execute",
+        mode?: "propose" | "execute" | "review",
         options?: { repair?: boolean; silent?: boolean }
       ) => Promise<void>)
     | null
@@ -251,6 +346,9 @@ export default function AiPanel() {
   );
 
   const [can, setCan] = useState({ generateImage: true, photoSearch: false });
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  /** "" means the server picks, which is what this panel always did before. */
+  const [model, setModel] = useState<string>(() => loadAgentModel());
 
   // What this deployment can actually do decides what the model is allowed to
   // plan, so it is read once rather than guessed at per request.
@@ -278,28 +376,41 @@ export default function AiPanel() {
     };
   }, []);
 
+  // The catalogue is what the account actually exposes, so it is asked for
+  // rather than hardcoded. A failure leaves the picker empty and the panel on
+  // the server's default — which is exactly the old behaviour.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/models?provider=omega")
+      .then((r) => r.json())
+      .then((json: { models?: { id: string; label: string }[] }) => {
+        if (alive) setModels(json.models ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
     // The live reasoning grows inside the same scroller, so it has to keep the
     // view pinned to the bottom as it arrives, not only when a line is logged.
   }, [log, thought, agentStatus]);
 
-  // The conversation is about a particular video. Carrying it into the next one
-  // is the same mistake as carrying the captions: "make that bigger" would
-  // refer to an element that no longer exists, and the agent would be handed a
-  // history of edits made to something it can no longer see.
+  // The conversation is about a particular video, and carrying it into the next
+  // one is the same mistake as carrying the captions: "make that bigger" would
+  // refer to an element that no longer exists.
   //
-  // Driven by a store subscription rather than an effect on the value, so it
-  // fires on a *change* of media and not on the first render of every project.
+  // The clearing itself now belongs to the chat store, called from `loadVideo`,
+  // `openProject` and `reset` alongside the overlay store's — doing it here
+  // instead would also wipe the conversation `openProject` has just restored,
+  // since opening a project changes the media URL too. What is left here is the
+  // transient UI of a turn in flight, which is not persisted and not restored.
   useEffect(
     () =>
       useEditorStore.subscribe((state, previous) => {
         if (state.mediaUrl === previous.mediaUrl) return;
-        abortRef.current?.abort();
-        abortRef.current = null;
-        historyRef.current = [];
-        setLog([]);
-        setProposal(null);
         setBusy(false);
         setThought("");
         setAgentStatus(null);
@@ -307,9 +418,46 @@ export default function AiPanel() {
     []
   );
 
-  const append = useCallback((kind: LogEntry["kind"], text: string) => {
-    logSequence += 1;
-    setLog((prev) => [...prev.slice(-60), { id: logSequence, kind, text }]);
+  /**
+   * Watch for the plan being taken back.
+   *
+   * `past` shrinking while `future` grows is an undo, whichever way it was
+   * triggered — the button, the shortcut, or the menu. The window is short on
+   * purpose: an undo half a minute later is ordinary editing, not a verdict on
+   * anything the agent did.
+   */
+  useEffect(
+    () =>
+      useOverlayStore.subscribe((state, previous) => {
+        const undone =
+          state.past.length < previous.past.length &&
+          state.future.length > previous.future.length;
+        if (!undone) return;
+
+        const applied = appliedRef.current;
+        if (!applied) return;
+        if (Date.now() - applied.at > UNDO_WINDOW_MS) {
+          appliedRef.current = null;
+          return;
+        }
+        // Once only: a second undo is walking back further work, not a second
+        // opinion about the same steps.
+        appliedRef.current = null;
+        void reviseVerdict(applied.ids, "undone");
+      }),
+    []
+  );
+
+  // The store aborts in-flight work when it is reset, but the controller lives
+  // here. Handing it over is what makes `useChatStore.reset()` safe to call
+  // from the editor store.
+  useEffect(() => {
+    const { setAbort } = useChatStore.getState();
+    setAbort(() => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    });
+    return () => setAbort(null);
   }, []);
 
   const buildTranscript = useCallback(() => {
@@ -354,10 +502,7 @@ export default function AiPanel() {
   /** Keep the turn, so the next one can refer to it. */
   const remember = useCallback(
     (instruction: string, summary: string, outcome?: string) => {
-      historyRef.current = [
-        ...historyRef.current,
-        { instruction, summary, outcome },
-      ].slice(-12);
+      useChatStore.getState().pushTurn({ instruction, summary, outcome });
     },
     []
   );
@@ -374,7 +519,7 @@ export default function AiPanel() {
    */
   const submitText = useCallback(async (
     text?: string,
-    mode: "propose" | "execute" = "execute",
+    mode: "propose" | "execute" | "review" = "execute",
     options?: { repair?: boolean; silent?: boolean }
   ) => {
     const repair = options?.repair ?? false;
@@ -391,12 +536,45 @@ export default function AiPanel() {
       setPrompt("");
       setProposal(null);
     }
-    if (!options?.silent) append("you", instruction);
+    if (!options?.silent) {
+      append("you", instruction);
+      instructionRef.current = instruction;
+    }
     setThought("");
     setAgentStatus(null);
 
     /** Look details already put in the log by the stream, so they are not repeated. */
     const reported = new Set<string>();
+
+    // Reading the whole store costs a few milliseconds against a request that
+    // takes seconds, and it must be fresh: a verdict given thirty seconds ago
+    // should count towards the very next plan.
+    const learned = await gatherLearned(instruction);
+
+    // A few frames of the cut, so the planner is not editing blind. Skipped for
+    // audio — there is nothing to look at — and skipped on a repair, which is
+    // the same request again and has already been shown them.
+    const media = useEditorStore.getState();
+    const glances =
+      repair || media.mediaKind !== "video" || !media.mediaUrl
+        ? []
+        : mode === "review"
+          ? // Composited: a review of the raw footage would be a review of a
+            // video nobody is going to watch.
+            await takeReviewGlances(
+              media.mediaUrl,
+              timeline,
+              currentComposition(),
+              reviewTimes(reviewAtRef.current, timeline.duration)
+            )
+          : await takeGlances(media.mediaUrl, timeline);
+
+    // A review with nothing to look at is a review of nothing, and the model
+    // will fill the silence with plausible-sounding findings.
+    if (mode === "review" && glances.length === 0) {
+      setBusy(false);
+      return;
+    }
 
     try {
       const overlay = useOverlayStore.getState();
@@ -452,7 +630,19 @@ export default function AiPanel() {
           can,
         },
         mode,
-        history: historyRef.current.slice(-6),
+        history: useChatStore.getState().turns.slice(-6),
+        // Omitted rather than empty: the schema treats absent as "the server
+        // picks", which is what this panel did before there was a picker.
+        model: model || undefined,
+        // Retrieved here rather than server-side because this is where they
+        // live: the feedback store is in the browser with the media and the
+        // transcript, and shipping it somewhere to be queried would give away
+        // the one property this editor has that nothing else does.
+        ...(learned.exemplars.length ? { exemplars: learned.exemplars } : {}),
+        ...(learned.preferences.length
+          ? { preferences: learned.preferences }
+          : {}),
+        ...(glances.length ? { glances } : {}),
       };
 
       const res = await fetch("/api/rescript/agent", {
@@ -475,6 +665,7 @@ export default function AiPanel() {
           reported.add(detail);
           append("look", detail);
         },
+        onNote: (text) => append("note", text),
       });
 
       if (!res.ok || !json || !json.success) {
@@ -522,7 +713,7 @@ export default function AiPanel() {
           setProposal({
             summary: json.summary ?? "",
             steps: grouped,
-            declined: new Set(),
+            declined: [],
           });
           return;
         }
@@ -604,7 +795,9 @@ export default function AiPanel() {
   }, [
     prompt,
     busy,
+    model,
     append,
+    setProposal,
     remember,
     timeline,
     duration,
@@ -623,13 +816,38 @@ export default function AiPanel() {
   const applyProposal = useCallback(async () => {
     const current = proposal;
     if (!current || busy) return;
-    const accepted = current.steps.filter((_, i) => !current.declined.has(i));
+    const accepted = current.steps.filter(
+      (_, i) => !current.declined.includes(i)
+    );
     if (!accepted.length) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
     setBusy(true);
     setProposal(null);
+
+    // The verdict is recorded here, at the moment it is actually made: the
+    // person has read every step and decided, one at a time, which of them
+    // were right. That is a labelled preference pair per step, produced by
+    // someone looking at their own footage — and until now it was discarded
+    // the instant the panel moved on.
+    void recordAll(
+      current.steps.map((step, i) => ({
+        projectId: useEditorStore.getState().projectId,
+        instruction: instructionRef.current,
+        planSummary: current.summary,
+        stepTitle: step.title,
+        stepDetail: step.detail,
+        ops: step.ops,
+        verdict: current.declined.includes(i)
+          ? ("declined" as const)
+          : ("accepted" as const),
+        model: model || undefined,
+        promptVersion: PROMPT_VERSION,
+      }))
+    ).then((ids) => {
+      appliedRef.current = { ids, at: Date.now() };
+    });
 
     try {
       for (const step of accepted) {
@@ -644,6 +862,7 @@ export default function AiPanel() {
           editor.manualCuts,
           editor.sceneBoundaries
         );
+        let failed = 0;
         await runPlan(
           step.ops,
           {
@@ -652,10 +871,37 @@ export default function AiPanel() {
             timeline: fresh,
             aspect,
           },
-          (result) => append(result.ok ? "ok" : "fail", result.message),
+          (result) => {
+            if (!result.ok) failed += 1;
+            append(result.ok ? "ok" : "fail", result.message);
+          },
           controller.signal
         );
+
+        // A step that was accepted and then would not run is a different
+        // failure from one that was declined, and the more useful of the two:
+        // the person wanted it and the plan could not deliver it.
+        if (failed > 0) {
+          void recordFeedback({
+            projectId: useEditorStore.getState().projectId,
+            instruction: instructionRef.current,
+            planSummary: current.summary,
+            stepTitle: step.title,
+            stepDetail: step.detail,
+            ops: step.ops,
+            verdict: "failed",
+            model: model || undefined,
+            promptVersion: PROMPT_VERSION,
+          });
+        }
       }
+      reviewAtRef.current = accepted.flatMap((step) =>
+        step.ops.map((op) => ({
+          start: (op as { start?: number }).start,
+          at: (op as { at?: number }).at,
+        }))
+      );
+      setReviewable(true);
     } catch (err) {
       if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
       else append("fail", err instanceof Error ? err.message : "Something went wrong.");
@@ -663,7 +909,23 @@ export default function AiPanel() {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [proposal, busy, append, playhead, aspect]);
+  }, [proposal, busy, model, append, setProposal, playhead, aspect]);
+
+  /**
+   * Watch the cut back.
+   *
+   * Offered rather than automatic: it costs a request with three composited
+   * frames in it, and an edit somebody has just accepted step by step is
+   * usually right. Making them ask is the difference between a reviewer and a
+   * tax on every plan.
+   */
+  const review = useCallback(() => {
+    void submitRef.current?.(
+      "Watch this back and tell me what is wrong with it.",
+      "review",
+      { silent: true }
+    );
+  }, []);
 
   const ready = status === "ready";
 
@@ -743,17 +1005,17 @@ export default function AiPanel() {
 
           <ul className="mb-2.5 space-y-1">
             {proposal.steps.map((step, i) => {
-              const on = !proposal.declined.has(i);
+              const on = !proposal.declined.includes(i);
               return (
                 <li key={`${step.title}-${i}`}>
                   <button
                     type="button"
                     onClick={() =>
-                      setProposal((prev) => {
+                      setProposalWith((prev) => {
                         if (!prev) return prev;
-                        const declined = new Set(prev.declined);
-                        if (declined.has(i)) declined.delete(i);
-                        else declined.add(i);
+                        const declined = prev.declined.includes(i)
+                          ? prev.declined.filter((n) => n !== i)
+                          : [...prev.declined, i];
                         return { ...prev, declined };
                       })
                     }
@@ -795,13 +1057,13 @@ export default function AiPanel() {
             <Button
               variant="solid"
               className="flex-1"
-              disabled={busy || proposal.declined.size === proposal.steps.length}
+              disabled={busy || proposal.declined.length === proposal.steps.length}
               onClick={() => void applyProposal()}
             >
               <Check size={12} />
               Apply{" "}
-              {proposal.declined.size
-                ? `${proposal.steps.length - proposal.declined.size} of ${proposal.steps.length}`
+              {proposal.declined.length
+                ? `${proposal.steps.length - proposal.declined.length} of ${proposal.steps.length}`
                 : "all"}
             </Button>
             <Button onClick={() => setProposal(null)} disabled={busy}>
@@ -812,6 +1074,27 @@ export default function AiPanel() {
       )}
 
       <div className="border-t border-zinc-200 p-2.5 dark:border-zinc-800">
+        {reviewable && !busy && !proposal && (
+          <button
+            type="button"
+            onClick={() => {
+              setReviewable(false);
+              review();
+            }}
+            className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-left transition hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-zinc-500 dark:hover:bg-zinc-800/60"
+          >
+            <Eye size={13} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-zinc-800 dark:text-zinc-100">
+                Watch it back
+              </span>
+              <span className="block text-[10px] leading-tight text-zinc-400 dark:text-zinc-600">
+                Renders what shipped and looks at it — legibility, collisions,
+                framing
+              </span>
+            </span>
+          </button>
+        )}
         <div className="relative">
           <textarea
             value={prompt}
@@ -856,18 +1139,40 @@ export default function AiPanel() {
             )}
           </div>
         </div>
-        <p className="mt-1.5 px-1 text-[10px] text-zinc-400 dark:text-zinc-600">
-          {busy ? (
-            <span className="flex items-center gap-1.5">
-              <Loader2 size={10} className="animate-spin" />
-              {agentStatus ?? "Working…"}
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5">
-              <Sparkles size={10} /> Enter to send · Shift+Enter for a new line
-            </span>
+        <div className="mt-1.5 flex items-center justify-between gap-2 px-1">
+          <p className="min-w-0 flex-1 truncate text-[10px] text-zinc-400 dark:text-zinc-600">
+            {busy ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={10} className="animate-spin" />
+                {agentStatus ?? "Working…"}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Sparkles size={10} /> Enter to send · Shift+Enter for a new line
+              </span>
+            )}
+          </p>
+          {models.length > 0 && (
+            <select
+              value={model}
+              aria-label="Model"
+              title="Which model plans the edit"
+              disabled={busy}
+              onChange={(e) => {
+                setModel(e.target.value);
+                saveAgentModel(e.target.value);
+              }}
+              className="max-w-[45%] shrink-0 cursor-pointer truncate rounded-md border border-transparent bg-transparent py-0.5 text-[10px] text-zinc-400 outline-none transition hover:border-zinc-200 hover:text-zinc-600 focus:border-zinc-300 disabled:opacity-50 dark:text-zinc-600 dark:hover:border-zinc-700 dark:hover:text-zinc-300 dark:focus:border-zinc-600"
+            >
+              <option value="">Default model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );

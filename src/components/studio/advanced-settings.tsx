@@ -311,7 +311,9 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                   hint={
                     settings.videoStyle === "hyperframes"
                       ? "Modern kinetic typography, Ken Burns cinematic motion graphics & glass HUD."
-                      : "Hand-drawn doodle whiteboard with live chisel-tip marker animation."
+                      : settings.videoStyle === "whiteboard"
+                        ? "Hand-drawn doodle whiteboard with live chisel-tip marker animation."
+                        : "The director reads the idea and casts whichever engine actually suits it."
                   }
                 >
                   {(id) => (
@@ -322,6 +324,7 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                         updateSettings({ videoStyle: event.target.value as typeof settings.videoStyle })
                       }
                       options={[
+                        { value: "auto", label: "Auto — director's choice" },
                         { value: "whiteboard", label: "Hand-Drawn Whiteboard" },
                         { value: "hyperframes", label: "Modern Video (Hyperframes)" },
                       ]}
