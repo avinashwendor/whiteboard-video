@@ -53,6 +53,9 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-hand: var(--font-hand);
+  /* The canvas reads these off :root to address the faces by family name. */
+  --font-display: var(--font-display);
+  --font-poster: var(--font-poster);
   --radius-card: var(--radius);
   --radius-panel: var(--radius-lg);
 }

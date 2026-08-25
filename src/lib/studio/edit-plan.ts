@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { sceneSpecSchema } from "@/lib/whiteboard/scene";
+import { THEME_NAMES } from "@/lib/hyperframes/theme";
+import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
+import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
 import type { ProjectAsset } from "./types";
 
 /**
@@ -27,6 +30,7 @@ export const PROJECT_FIELDS = {
   description: { kind: "string" },
   videoStyle: { kind: "enum", values: ["whiteboard", "hyperframes"] },
   musicMood: { kind: "enum", values: ["calm", "curious", "driving", "warm", "serious", "none"] },
+  boardStock: { kind: "enum", values: [...BOARD_STOCK_NAMES_TUPLE] },
   introDuration: { kind: "number", min: 0, max: 20 },
   voiceDelay: { kind: "number", min: 0, max: 10 },
 } as const;
@@ -47,7 +51,8 @@ export const SCENE_FIELDS = {
   stat: { kind: "string" },
   statCaption: { kind: "string" },
   supportVisual: { kind: "enum", values: ["photo", "generated", "none"] },
-  visualTheme: { kind: "enum", values: ["studio-dark", "cyber-blue", "sunset", "clean-light"] },
+  visualTheme: { kind: "enum", values: [...THEME_NAMES] },
+  shot: { kind: "enum", values: [...SCENE_ROLES_TUPLE] },
   bullets: { kind: "strings" },
   keywords: { kind: "strings" },
 } as const;

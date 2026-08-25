@@ -34,7 +34,10 @@ OPERATIONS
     stat            short number as text, e.g. "85%"
     statCaption     text
     supportVisual   "photo" | "generated" | "none"
-    visualTheme     "studio-dark" | "cyber-blue" | "sunset" | "clean-light"
+    visualTheme     a palette. Editorial (near-black, one plate of colour, cover type): "obsidian" | "noir" | "ember" | "newsprint".
+                    Glass (blooms of light, frosted panels, brushed metal): "cobalt" | "abyss" | "daylight".
+                    Printed (ruled paper, hard shadows, marker): "clean-light" | "studio-dark" | "cyber-blue" | "sunset".
+    shot            the composition: "bracket" | "statement" | "metric" | "contrast" | "tree" | "process" | "deck" | "collage" | "split" | "hero" | "takeaway"
   Video fields, and nothing else:
     title           text
     description     text

@@ -373,6 +373,11 @@ function ModeOptions({ mode, disabled }: { mode: Mode; disabled: boolean }) {
         {(
           [
             {
+              value: "auto",
+              label: "Auto",
+              detail: "The director reads the idea and picks",
+            },
+            {
               value: "whiteboard",
               label: "Drawn whiteboard",
               detail: "A hand draws it as the narrator speaks",

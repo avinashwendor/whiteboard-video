@@ -1,7 +1,8 @@
 "use client";
 
 import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
-import { COLOURS } from "@/lib/whiteboard/palette";
+import { boardStock, COLOURS, type BoardStock } from "@/lib/whiteboard/palette";
+import { withAlpha } from "@/lib/video/grade";
 import { clamp01, easeOutCubic, lerp, noise1, range, smootherstep } from "@/lib/video/easing";
 import type { Cue } from "@/lib/video/timing";
 import {
@@ -24,17 +25,20 @@ export { clamp01 };
 
 /* --------------------------------- surface -------------------------------- */
 
-let grainPattern: CanvasPattern | null = null;
+/** One grain tile per stock: the strength differs, so the tile has to. */
+const grainPatterns = new Map<string, CanvasPattern | null>();
 
 /**
- * Paper grain, baked once into a small tile.
+ * Paper grain, baked once per surface into a small tile.
  *
  * Flat fills are the giveaway that a "whiteboard" is a canvas element. A little
  * noise under everything is most of the difference, and one 128px tile costs
- * nothing to repeat sixty times a second.
+ * nothing to repeat sixty times a second. Kraft carries far more of it than a
+ * whiteboard does, which is why the strength comes from the stock.
  */
-function grain(ctx: CanvasRenderingContext2D): CanvasPattern | null {
-  if (grainPattern) return grainPattern;
+function grain(ctx: CanvasRenderingContext2D, stock: BoardStock): CanvasPattern | null {
+  const cached = grainPatterns.get(stock.name);
+  if (cached !== undefined) return cached;
 
   const tile = document.createElement("canvas");
   tile.width = 128;
@@ -49,21 +53,26 @@ function grain(ctx: CanvasRenderingContext2D): CanvasPattern | null {
     image.data[i] = value;
     image.data[i + 1] = value;
     image.data[i + 2] = value;
-    image.data[i + 3] = 9;
+    image.data[i + 3] = stock.grain;
   }
   tileCtx.putImageData(image, 0, 0);
 
-  grainPattern = ctx.createPattern(tile, "repeat");
-  return grainPattern;
+  const pattern = ctx.createPattern(tile, "repeat");
+  grainPatterns.set(stock.name, pattern);
+  return pattern;
 }
 
 export function drawBoard(ctx: CanvasRenderingContext2D) {
-  ctx.fillStyle = COLOURS.paper;
+  const stock = boardStock();
+
+  ctx.fillStyle = stock.colours.paper;
   ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
 
   ctx.save();
-  // A warm centre falling off to cooler, slightly dirtier edges: the way a
-  // real board looks under a room light rather than a render.
+  // Light falling on a surface: brighter where the room light is, dirtier
+  // toward the edges. On a dark stock the same three stops read as a lamp
+  // above a board rather than as a wash over paper, which is why the values
+  // belong to the stock instead of being written here.
   const wash = ctx.createRadialGradient(
     BOARD_WIDTH * 0.46,
     BOARD_HEIGHT * 0.38,
@@ -72,26 +81,26 @@ export function drawBoard(ctx: CanvasRenderingContext2D) {
     BOARD_HEIGHT * 0.5,
     BOARD_WIDTH * 0.82,
   );
-  wash.addColorStop(0, "rgba(255, 253, 246, 0.72)");
-  wash.addColorStop(0.55, "rgba(247, 245, 239, 0.22)");
-  wash.addColorStop(1, "rgba(206, 200, 184, 0.30)");
+  wash.addColorStop(0, stock.wash[0]);
+  wash.addColorStop(0.55, stock.wash[1]);
+  wash.addColorStop(1, stock.wash[2]);
   ctx.fillStyle = wash;
   ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
 
-  const texture = grain(ctx);
+  const texture = grain(ctx, stock);
   if (texture) {
     ctx.fillStyle = texture;
     ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
   }
 
-  // Bezel: a hairline, then the shadow the frame casts onto the board.
+  // Bezel: the shadow the frame casts onto the board, then a hairline.
   const bezel = ctx.createLinearGradient(0, 0, 0, 26);
-  bezel.addColorStop(0, "rgba(0, 0, 0, 0.07)");
+  bezel.addColorStop(0, stock.bezel);
   bezel.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = bezel;
   ctx.fillRect(0, 0, BOARD_WIDTH, 26);
 
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.055)";
+  ctx.strokeStyle = stock.edge;
   ctx.lineWidth = 3;
   ctx.strokeRect(1.5, 1.5, BOARD_WIDTH - 3, BOARD_HEIGHT - 3);
   ctx.restore();
@@ -223,7 +232,7 @@ function drawPhotoCard(
   ctx.drawImage(image, fitted.x, fitted.y, fitted.width, fitted.height);
   if (typeof ctx.filter === "string") ctx.filter = "none";
 
-  ctx.strokeStyle = "rgba(23, 24, 26, 0.16)";
+  ctx.strokeStyle = withAlpha(COLOURS.ink, 0.16);
   ctx.lineWidth = 1.5;
   ctx.strokeRect(0.75, 0.75, cardW - 1.5, cardH - 1.5);
 
@@ -326,7 +335,7 @@ function drawImageScene(
 
   ctx.save();
   ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "rgba(23, 24, 26, 0.34)";
+  ctx.strokeStyle = withAlpha(COLOURS.ink, 0.34);
   ctx.lineWidth = 3;
   ctx.shadowColor = "rgba(35, 30, 20, 0.18)";
   ctx.shadowBlur = 16;
@@ -440,7 +449,7 @@ export function renderCover(
   if (caption > 0 && options.description) {
     ctx.globalAlpha = caption;
     ctx.font = `400 28px ${options.fontSans}`;
-    ctx.fillStyle = "rgba(23, 24, 26, 0.72)";
+    ctx.fillStyle = withAlpha(COLOURS.ink, 0.72);
     const captionLines = wrapText(ctx, options.description, 780, 2);
     const captionY = startY + (lines.length - 1) * lineHeight + 108 + (1 - caption) * 12;
     captionLines.forEach((line, index) => ctx.fillText(line, centreX, captionY + index * 38));
@@ -527,7 +536,7 @@ export function renderOutro(
   if (tag > 0) {
     ctx.globalAlpha = tag;
     ctx.font = `400 26px ${options.fontSans}`;
-    ctx.fillStyle = "rgba(23, 24, 26, 0.6)";
+    ctx.fillStyle = withAlpha(COLOURS.ink, 0.6);
     ctx.fillText(options.title, centreX, startY + (lines.length - 1) * lineHeight + 92);
     ctx.globalAlpha = 1;
   }

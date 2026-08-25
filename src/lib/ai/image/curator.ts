@@ -2,7 +2,8 @@ import { omega } from "../omega";
 import type { ChatMessage, ContentPart } from "../types";
 import { fetchWithTimeout } from "@/lib/utils/http";
 import { readImageSize } from "@/lib/utils/image-size";
-import { searchImages, type ImageCandidate } from "./tavily";
+import { isConfigured as tavilyConfigured, searchImages, type ImageCandidate } from "./tavily";
+import { openverse } from "@/lib/media/openverse";
 
 /**
  * Picking the photograph.
@@ -33,6 +34,70 @@ export interface CurationStats {
   downloaded: number;
   /** Why the mechanical checks dropped the rest. */
   dropped: string[];
+  /** Which catalogues actually answered, best first. */
+  sources: string[];
+}
+
+/**
+ * Where the candidates come from.
+ *
+ * Tavily first when it is configured: it searches the open web, so it finds
+ * the specific thing a script is about rather than the nearest stock concept.
+ * Openverse tops the shortlist up and, on a deployment with no keys at all, is
+ * the whole shortlist -- which is the point. A fresh clone with an empty
+ * `.env.local` used to fall straight through to generated artwork for every
+ * scene, and generated artwork is exactly what makes an explainer look like it
+ * was made by a machine. A real, openly-licensed photograph of the real thing
+ * beats a rendered impression of it every time.
+ */
+async function gatherCandidates(
+  query: string,
+  signal?: AbortSignal,
+): Promise<{ candidates: ImageCandidate[]; sources: string[] }> {
+  const sources: string[] = [];
+  const candidates: ImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  const add = (entry: ImageCandidate) => {
+    if (!entry.url || seen.has(entry.url)) return;
+    seen.add(entry.url);
+    candidates.push(entry);
+  };
+
+  if (tavilyConfigured()) {
+    try {
+      const found = await searchImages(query, { limit: 6, signal });
+      if (found.length) sources.push("tavily");
+      found.forEach(add);
+    } catch {
+      // A search that fails is a thinner shortlist, never a failed scene.
+    }
+  }
+
+  // Topped up rather than replaced: two catalogues give the model a genuine
+  // choice, and Openverse's licensing is the one that is unambiguous.
+  if (candidates.length < 5) {
+    try {
+      const found = await openverse.search({ query, kind: "image", limit: 8, signal });
+      if (found.length) sources.push("openverse");
+      for (const item of found) {
+        add({
+          url: item.downloadUrl,
+          title: item.title,
+          description: item.tags?.join(", "),
+        });
+      }
+    } catch {
+      /* same again */
+    }
+  }
+
+  return { candidates: candidates.slice(0, 8), sources };
+}
+
+/** True when at least one catalogue can be searched at all. */
+export function canCurate(): boolean {
+  return tavilyConfigured() || openverse.isConfigured();
 }
 
 export interface CuratedImage {
@@ -169,8 +234,8 @@ export async function curateImage(
   options: CurateOptions,
 ): Promise<{ image: CuratedImage | null; stats: CurationStats; reason: string }> {
   const dropped: string[] = [];
-  const candidates = await searchImages(options.query, { limit: 6, signal: options.signal });
-  const stats: CurationStats = { found: candidates.length, downloaded: 0, dropped };
+  const { candidates, sources } = await gatherCandidates(options.query, options.signal);
+  const stats: CurationStats = { found: candidates.length, downloaded: 0, dropped, sources };
 
   if (!candidates.length) return { image: null, stats, reason: "search returned nothing" };
 

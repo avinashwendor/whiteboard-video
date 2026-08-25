@@ -12,6 +12,7 @@ import { WhiteboardPlayer } from "@/components/whiteboard/whiteboard-player";
 import { AsciiInline, AsciiVeil, BlurredWhileBusy } from "@/components/ui/ascii-loader";
 import { AskPanel, type ActivityEntry } from "./ask-panel";
 import { Choice, LabelledArea, LabelledInput } from "./controls";
+import { BOARD_STOCKS, BOARD_STOCK_NAMES } from "@/lib/whiteboard/palette";
 import { JsonPanel } from "./json-panel";
 import { SceneInspector } from "./scene-inspector";
 
@@ -444,6 +445,18 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
                 ]}
                 onChange={(videoStyle) => commit({ ...project, videoStyle })}
               />
+              {project.videoStyle !== "hyperframes" ? (
+                <Choice
+                  label="Surface"
+                  value={project.boardStock ?? "marker"}
+                  columns={3}
+                  options={BOARD_STOCK_NAMES.map((name) => ({
+                    value: name,
+                    label: BOARD_STOCKS[name].label,
+                  }))}
+                  onChange={(boardStock) => commit({ ...project, boardStock })}
+                />
+              ) : null}
               <Choice
                 label="Music"
                 value={project.musicMood ?? "calm"}

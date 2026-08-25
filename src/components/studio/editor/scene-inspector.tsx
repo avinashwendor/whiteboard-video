@@ -12,6 +12,9 @@ import { useStudio } from "@/lib/studio/use-studio";
 import type { SceneSpec } from "@/lib/whiteboard/scene";
 import { BoardEditor } from "./board-editor";
 import { Choice, LabelledArea, LabelledInput, StringList } from "./controls";
+import { THEMES, THEME_NAMES, type Finish, type ThemeName } from "@/lib/hyperframes/theme";
+import { canCarry, roleFor } from "@/lib/hyperframes/modern-renderer";
+import { SCENE_ROLES_TUPLE, SHOT_BRIEFS, type SceneRole } from "@/lib/hyperframes/roles";
 
 /**
  * Every field of one scene, and the four pipelines that can refill it.
@@ -21,12 +24,218 @@ import { Choice, LabelledArea, LabelledInput, StringList } from "./controls";
  * for the board layout, and the speech route for the narration.
  */
 
-const THEMES = [
-  { value: "studio-dark" as const, label: "Dark" },
-  { value: "cyber-blue" as const, label: "Blue" },
-  { value: "sunset" as const, label: "Warm" },
-  { value: "clean-light" as const, label: "Light" },
+/**
+ * The palettes, grouped by the vocabulary they draw in.
+ *
+ * Grouped rather than listed because the finish is the real choice: picking
+ * "obsidian" over "cobalt" is choosing a magazine cover over a product film,
+ * and a flat row of eleven names hides that completely. The swatch shows the
+ * actual ground, accent and ink, so the decision is made by eye.
+ */
+const THEME_GROUPS: Array<{ finish: Finish; label: string; hint: string }> = [
+  { finish: "editorial", label: "Editorial", hint: "Cover type, crop marks, one plate of colour" },
+  { finish: "glass", label: "Glass", hint: "Light blooms, frosted panels, brushed metal" },
+  { finish: "print", label: "Printed", hint: "Ruled paper, hard shadows, marker swipes" },
 ];
+
+const THEME_LABELS: Partial<Record<ThemeName, string>> = {
+  "clean-light": "Light",
+  "studio-dark": "Dark",
+  "cyber-blue": "Blue",
+  sunset: "Warm",
+  obsidian: "Obsidian",
+  noir: "Noir",
+  newsprint: "Newsprint",
+  ember: "Ember",
+  cobalt: "Cobalt",
+  abyss: "Abyss",
+  daylight: "Daylight",
+};
+
+/** One palette, drawn as itself. */
+function Swatch({
+  name,
+  selected,
+  onSelect,
+}: {
+  name: ThemeName;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const theme = THEMES[name];
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      title={THEME_LABELS[name] ?? name}
+      className={cn(
+        "group relative h-12 overflow-hidden rounded-lg border text-left transition",
+        selected
+          ? "border-ink ring-2 ring-ink/20"
+          : "border-line hover:border-ink/40",
+      )}
+      style={{
+        background:
+          theme.finish === "glass"
+            ? `radial-gradient(120% 120% at 20% 10%, ${theme.mesh[0]}, transparent 60%), radial-gradient(120% 120% at 85% 90%, ${theme.mesh[1]}, transparent 55%), ${theme.mesh[2]}`
+            : theme.ground,
+      }}
+    >
+      <span
+        className="absolute bottom-1.5 left-1.5 h-3 w-3 rounded-full"
+        style={{ background: theme.accent }}
+      />
+      <span
+        className="absolute bottom-2 left-6 h-1.5 w-6 rounded-full"
+        style={{ background: theme.ink, opacity: 0.85 }}
+      />
+      <span
+        className="absolute right-1.5 top-1.5 text-[9px] font-semibold uppercase tracking-wide"
+        style={{ color: theme.inkMuted }}
+      >
+        {THEME_LABELS[name] ?? name}
+      </span>
+    </button>
+  );
+}
+
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: ThemeName | undefined;
+  onChange: (name: ThemeName) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Theme</p>
+      {THEME_GROUPS.map((group) => {
+        const names = THEME_NAMES.filter((name) => THEMES[name].finish === group.finish);
+        return (
+          <div key={group.finish} className="space-y-1.5">
+            <p className="text-[10px] leading-none text-faint">
+              <span className="font-semibold text-ink/70">{group.label}</span> — {group.hint}
+            </p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {names.map((name) => (
+                <Swatch
+                  key={name}
+                  name={name}
+                  selected={value === name}
+                  onSelect={() => onChange(name)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Which composition this scene is cut as.
+ *
+ * Every shot is listed, including the ones this scene cannot carry -- but
+ * those are disabled and say why. Hiding them would leave someone wondering
+ * where "contrast" went; accepting them and rendering something else is worse,
+ * because the control would appear to work and quietly not.
+ *
+ * "Auto" is first and is the honest default: it shows the shot the renderer
+ * would actually choose, so picking it deliberately is a real decision rather
+ * than a shrug.
+ */
+function ShotPicker({
+  scene,
+  index,
+  total,
+  onChange,
+}: {
+  scene: SceneAsset;
+  index: number;
+  total: number;
+  onChange: (shot: SceneRole | undefined) => void;
+}) {
+  const content = { bullets: scene.bullets, stat: scene.stat, image: scene.image };
+  const automatic = roleFor({ index, totalScenes: total, ...content, heading: scene.heading });
+  const chosen = scene.shot;
+
+  /** Why a shot is unavailable, in the words of what the scene is missing. */
+  const blocker = (role: SceneRole): string | null => {
+    if (canCarry(role, content)) return null;
+    switch (role) {
+      case "metric":
+        return "needs a stat";
+      case "process":
+        return "needs 3+ bullets";
+      case "deck":
+        return "needs 2+ bullets";
+      case "contrast":
+        return "needs exactly 2 bullets";
+      case "tree":
+        return "needs 2-4 bullets";
+      case "split":
+      case "collage":
+        return "needs a bullet";
+      case "bracket":
+        return "needs 2 bullets or fewer";
+      default:
+        return "unavailable";
+    }
+  };
+
+  return (
+    <div className="space-y-2.5">
+      <div className="grid grid-cols-3 gap-1.5">
+        <button
+          type="button"
+          onClick={() => onChange(undefined)}
+          aria-pressed={!chosen}
+          className={cn(
+            "rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
+            !chosen ? "border-ink bg-surface-raised text-ink" : "border-line text-muted hover:text-ink",
+          )}
+        >
+          Auto
+        </button>
+        {SCENE_ROLES_TUPLE.map((role) => {
+          const why = blocker(role);
+          return (
+            <button
+              key={role}
+              type="button"
+              disabled={Boolean(why)}
+              onClick={() => onChange(role)}
+              aria-pressed={chosen === role}
+              title={why ? `${SHOT_BRIEFS[role]} — ${why}` : SHOT_BRIEFS[role]}
+              className={cn(
+                "rounded-md border px-2 py-1.5 text-[11px] font-medium capitalize transition",
+                chosen === role
+                  ? "border-ink bg-surface-raised text-ink"
+                  : why
+                    ? "cursor-not-allowed border-line/60 text-faint/60"
+                    : "border-line text-muted hover:text-ink",
+              )}
+            >
+              {role}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] leading-relaxed text-faint">
+        {chosen ? (
+          SHOT_BRIEFS[chosen]
+        ) : (
+          <>
+            Chosen from what the scene carries — right now that is{" "}
+            <span className="font-medium text-ink/70">{automatic}</span>: {SHOT_BRIEFS[automatic]}.
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
 
 export function SceneInspector({
   project,
@@ -165,22 +374,20 @@ export function SceneInspector({
         />
       </div>
 
-      <Choice
-        label="Theme"
+      <ThemePicker
         value={scene.visualTheme}
-        options={THEMES}
-        columns={4}
         onChange={(visualTheme) => onPatch(index, { visualTheme })}
       />
 
       {/* ── the board ── */}
       <Section title={isModern ? "Shot" : "Board"}>
         {isModern ? (
-          <p className="text-[11px] leading-relaxed text-faint">
-            Modern frames are composed from the fields above — the shot is chosen from what the scene
-            carries: a stat makes a metric shot, three bullets a process, two a contrast. There is no
-            drawn board to edit.
-          </p>
+          <ShotPicker
+            scene={scene}
+            index={index}
+            total={project.scenes.length}
+            onChange={(shot) => onPatch(index, { shot })}
+          />
         ) : scene.scene ? (
           <>
             <p className="text-[11px] leading-relaxed text-faint">

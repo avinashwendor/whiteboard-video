@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { IMAGE_STYLES } from "@/lib/ai/prompt-engineering";
+import { THEME_NAMES } from "@/lib/hyperframes/theme";
+import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
+import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
 
 /**
  * Every request body crosses this boundary. Limits here are the first line of
@@ -281,7 +284,7 @@ export const createRequestSchema = z.object({
     .regex(/^[a-zA-Z-]+$/)
     .optional(),
   tone: z.enum(["explainer", "story", "advert", "lesson"]).optional(),
-  videoStyle: z.enum(["whiteboard", "hyperframes"]).optional(),
+  videoStyle: z.enum(["whiteboard", "hyperframes", "auto"]).optional(),
 });
 export type CreateRequest = z.infer<typeof createRequestSchema>;
 
@@ -306,6 +309,14 @@ export const sceneSchema = z.object({
    * treatment five times.
    */
   support_visual: z.enum(["photo", "generated", "none"]).optional(),
+  /**
+   * The composition the director wants this beat cut as.
+   *
+   * A request, not an instruction: the renderer refuses any shot the scene
+   * cannot actually carry, because a step rail with one item on it is worse
+   * than the layout the content would have chosen for itself.
+   */
+  shot: z.enum(SCENE_ROLES_TUPLE).optional(),
 });
 
 export const storyboardSchema = z.object({
@@ -321,9 +332,11 @@ export const storyboardSchema = z.object({
    */
   visual_style: z.string().trim().max(300).optional(),
   /** Palette the renderer should grade the video in. */
-  visual_theme: z.enum(["studio-dark", "cyber-blue", "sunset", "clean-light"]).optional(),
+  visual_theme: z.enum(THEME_NAMES).optional(),
   /** Underscore for the whole video. */
   music_mood: z.enum(["calm", "curious", "driving", "warm", "serious", "none"]).optional(),
+  /** The surface a whiteboard video is drawn on. Ignored by the modern engine. */
+  board_stock: z.enum(BOARD_STOCK_NAMES_TUPLE).optional(),
   /**
    * The qualities the narrator should have. Matched against the voice
    * catalogue rather than naming a voice, so it survives a provider swap.

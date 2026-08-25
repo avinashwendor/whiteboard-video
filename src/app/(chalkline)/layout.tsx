@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Permanent_Marker } from "next/font/google";
+import { Anton, Geist, Geist_Mono, Inter_Tight, Permanent_Marker } from "next/font/google";
 import { TopBar } from "@/components/site/top-bar";
 import { StudioProvider } from "@/lib/studio/use-studio";
 import { AuthProvider } from "@/components/site/auth";
@@ -10,6 +10,26 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 /** Used only inside the whiteboard canvas -- chunky marker lettering is the look. */
 const marker = Permanent_Marker({ variable: "--font-hand", subsets: ["latin"], weight: "400" });
+
+/**
+ * The two faces the modern engine composes with.
+ *
+ * Geist is a fine interface face and a poor headline: its default tracking is
+ * built to be read at 14px, so a 100px title set in it drifts apart. Inter
+ * Tight is drawn for exactly this -- large, heavy, negative tracking, tight
+ * apertures -- and it is what the editorial and product films this engine is
+ * imitating are actually set in.
+ *
+ * Anton is the poster voice: ultra-condensed, one weight, no alternative. Used
+ * for a single word at a time, filling the frame, and never for anything a
+ * viewer has to read as a sentence.
+ */
+const display = Inter_Tight({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800", "900"],
+});
+const poster = Anton({ variable: "--font-poster", subsets: ["latin"], weight: "400" });
 
 export const metadata: Metadata = {
   title: "Motionhouse — create, edit and enhance video",
@@ -29,7 +49,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${marker.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${marker.variable} ${display.variable} ${poster.variable} h-full antialiased`}
     >
       {/*
         The standing footer that used to sit here has moved into the landing

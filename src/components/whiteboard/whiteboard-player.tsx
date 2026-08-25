@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import type { ProjectAsset, SceneAsset } from "@/lib/studio/types";
 import { clamp01, range, smootherstep } from "@/lib/video/easing";
+import { boardStock, setBoardStock } from "@/lib/whiteboard/palette";
 import { resolveWordTimings, type WordTiming } from "@/lib/video/timing";
 import { BOARD_HEIGHT, BOARD_WIDTH, renderCover, renderFrame, renderOutro } from "./renderer";
 import {
@@ -39,7 +40,7 @@ import {
 } from "@/lib/video/export";
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
-import { scheduleSfx } from "@/lib/video/sfx";
+import { createSfxBus, scheduleSfx } from "@/lib/video/sfx";
 
 /**
  * The player.
@@ -68,15 +69,42 @@ function formatTime(seconds: number): string {
   return `${minutes}:${String(Math.floor(safe % 60)).padStart(2, "0")}`;
 }
 
-/** Resolves the CSS font tokens into families the canvas can address. */
-function readFonts(): { hand: string; sans: string } {
-  if (typeof document === "undefined") return { hand: "cursive", sans: "sans-serif" };
+export interface CanvasFonts {
+  hand: string;
+  sans: string;
+  /** Tight heavy grotesque, for headlines and anything set large. */
+  display: string;
+  /** Ultra-condensed poster face, for one word filling the frame. */
+  poster: string;
+}
+
+/**
+ * Resolves the CSS font tokens into families the canvas can address.
+ *
+ * The canvas cannot use a CSS custom property in a `font` string, so the
+ * variables are read off the root element once the faces have loaded and
+ * handed to the renderer as plain family names.
+ */
+function readFonts(): CanvasFonts {
+  const fallbackSans = "sans-serif";
+  if (typeof document === "undefined") {
+    return { hand: "cursive", sans: fallbackSans, display: fallbackSans, poster: fallbackSans };
+  }
   const styles = getComputedStyle(document.documentElement);
-  const hand = styles.getPropertyValue("--font-hand").trim();
-  const sans = styles.getPropertyValue("--font-geist-sans").trim();
+  const read = (token: string) => styles.getPropertyValue(token).trim();
+  const hand = read("--font-hand");
+  const sans = read("--font-geist-sans");
+  const display = read("--font-display");
+  const poster = read("--font-poster");
+  const sansStack = sans ? `${sans}, sans-serif` : fallbackSans;
   return {
     hand: hand ? `${hand}, cursive` : "cursive",
-    sans: sans ? `${sans}, sans-serif` : "sans-serif",
+    sans: sansStack,
+    // Each falls back to the next-best face rather than to a system default:
+    // a headline in Times because one variable was missing is far worse than
+    // a headline in the interface face.
+    display: display ? `${display}, ${sansStack}` : sansStack,
+    poster: poster ? `${poster}, ${display || sans}, sans-serif` : sansStack,
   };
 }
 
@@ -87,10 +115,16 @@ const TAIL_SECONDS = 0.62;
 /** Past this much drift the clock snaps instead of easing. */
 const HARD_RESYNC = 0.28;
 /**
- * Drift between the score and the picture that is worth rebuilding the graph
- * for. Below this nobody hears it; above it, effects land on the wrong stroke.
+ * How far ahead of the picture the effects are committed to the audio clock.
+ *
+ * Long enough for the approach voices -- a riser opens most of a second before
+ * the number it lands on -- and short enough that a clock correction inside the
+ * window is inaudible. This replaces the old arrangement, where the whole score
+ * was scheduled at once and a drifting picture left every effect behind.
  */
-const SCORE_RESYNC = 0.22;
+const SFX_LOOKAHEAD = 1.3;
+/** How often the rolling window is refilled. Cheap; almost every pass is a no-op. */
+const SFX_TICK_MS = 90;
 /**
  * The closing card, restating the point in one sentence.
  *
@@ -106,6 +140,22 @@ const OUTRO_SECONDS = 4.2;
  * frames of 60 buy very little that a viewer would notice.
  */
 const EXPORT_FPS = 30;
+
+/**
+ * The transport, written out once.
+ *
+ * Shown on the stage itself rather than behind a help button, because a
+ * shortcut nobody discovers is a shortcut nobody has.
+ */
+const SHORTCUT_HINT = [
+  "Space  play / pause",
+  "J L  ten seconds",
+  "← →  five seconds  (⇧ one)",
+  ", .  one frame",
+  "[ ]  scene",
+  "0-9  jump",
+  "M  mute    S  score    F  fullscreen",
+].join("\n");
 
 interface SceneSchedule {
   /** Silence before the voice starts. */
@@ -142,20 +192,46 @@ export function WhiteboardPlayer({
   const audioRefs = useRef<Array<HTMLAudioElement | null>>([]);
   const clockRef = useRef({ index: -1, time: 0, last: 0 });
   const exportAbortRef = useRef<AbortController | null>(null);
-  const scoreRef = useRef<{
+  /**
+   * The live sound graph.
+   *
+   * Music and effects are deliberately on separate buses. The bed is written
+   * once for the whole film and tolerates drift -- nobody can hear a pad a
+   * tenth of a second late. Effects cannot tolerate any, and the only way to
+   * move a scheduled oscillator is to throw it away, so keeping the two apart
+   * is what lets the effects be re-laid mid-play without the music restarting
+   * underneath them.
+   */
+  const soundRef = useRef<{
     context: AudioContext;
-    bus: GainNode;
-    /** Context time that represented the start position when scheduled. */
-    base: number;
-    /** Timeline position the graph was scheduled from. */
-    from: number;
+    /** Everything lands here; this is what mute pulls down. */
+    master: GainNode;
+    music: GainNode;
+    /** Input to the effects chain, replaced whenever the picture clock snaps. */
+    sfx: GainNode;
+    /** Timeline position the rolling scheduler has committed effects up to. */
+    cursor: number;
     rate: number;
   } | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  /** Set when the picture clock snaps, so the pending effects are re-laid. */
+  const sfxDirtyRef = useRef(false);
   const exportGraphRef = useRef<{
     context: AudioContext;
     destination: MediaStreamAudioDestinationNode;
     sources: WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>;
   } | null>(null);
+
+  /**
+   * The surface this video is drawn on.
+   *
+   * Set before anything else in the component body, because scene layouts bake
+   * their colours in when they are composed -- a stock chosen later would give
+   * a video drawn in one palette on paper from another. Assigning during
+   * render rather than in an effect is deliberate for the same reason: the
+   * schedule below is built in this same pass.
+   */
+  setBoardStock(project.boardStock);
 
   const coverDuration = project.introDuration ?? DEFAULT_COVER_SECONDS;
   const voiceDelay = project.voiceDelay ?? DEFAULT_VOICE_DELAY;
@@ -241,6 +317,8 @@ export function WhiteboardPlayer({
             stat: scene.stat,
             statCaption: scene.statCaption,
             visualTheme: scene.visualTheme,
+            shot: scene.shot,
+            glyphs: scene.glyphs,
           },
           entry.words,
           { lead: entry.lead, speech: entry.speech, tail: entry.tail },
@@ -353,6 +431,10 @@ export function WhiteboardPlayer({
         cues: entry.modern ? entry.modern.beats : entry.cues,
         statAt: entry.modern?.stat?.at ?? null,
         hasNarration: Boolean(scenes[index]?.audio?.url),
+        // Sound follows picture: the shot the renderer chose decides which
+        // voice a beat gets, so a glass panel and a marker stroke never share
+        // a mark.
+        role: entry.modern?.role,
       };
     });
 
@@ -361,8 +443,9 @@ export function WhiteboardPlayer({
       scenes: scored,
       style: isHyperframes ? "hyperframes" : "whiteboard",
       intensity: soundOn ? 1 : 0,
+      mood: musicMood,
     });
-  }, [coverDuration, isHyperframes, schedule, scenes, soundOn]);
+  }, [coverDuration, isHyperframes, musicMood, schedule, scenes, soundOn]);
 
 
   /* --------------------------------- fonts --------------------------------- */
@@ -397,6 +480,8 @@ export function WhiteboardPlayer({
             title: project.title,
             description: project.description,
             fontSans: fonts.sans,
+            fontDisplay: fonts.display,
+            fontPoster: fonts.poster,
             progress,
             image: images[0] ?? null,
             theme: scenes[0]?.visualTheme,
@@ -445,12 +530,16 @@ export function WhiteboardPlayer({
             stat: scene.stat,
             statCaption: scene.statCaption,
             visualTheme: scene.visualTheme,
+            shot: scene.shot,
+            glyphs: scene.glyphs,
           },
           entry.modern,
           {
             time,
             duration: entry.duration,
             fontSans: fonts.sans,
+            fontDisplay: fonts.display,
+            fontPoster: fonts.poster,
             globalProgress: clamp01((before + time) / total),
           },
         );
@@ -475,8 +564,10 @@ export function WhiteboardPlayer({
         },
       );
 
-      // A whiteboard cuts through white rather than through black -- the same
-      // flash you get when a real board is wiped between shots.
+      // A board cuts through its own surface rather than through black -- the
+      // same flash you get when a real board is wiped between shots. On a
+      // chalkboard or a blueprint that flash is dark, which is exactly right
+      // and exactly what a hardcoded white would have got wrong.
       const veil =
         Math.max(
           1 - smootherstep(range(time, 0, 0.3)),
@@ -484,7 +575,8 @@ export function WhiteboardPlayer({
         ) * 0.9;
       if (veil > 0.001) {
         ctx.save();
-        ctx.fillStyle = `rgba(247, 246, 243, ${veil})`;
+        ctx.globalAlpha = veil;
+        ctx.fillStyle = boardStock().colours.paper;
         ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
         ctx.restore();
       }
@@ -546,22 +638,32 @@ export function WhiteboardPlayer({
 
   /* ---------------------------------- audio --------------------------------- */
 
-  /** Disconnects the whole score graph; scheduled nodes die with the bus. */
-  const stopScore = useCallback(() => {
-    const live = scoreRef.current;
+  /**
+   * Where playback is on the finished timeline, right now.
+   *
+   * The transport clock is scene-relative -- it has to be, the narration it
+   * chases is a per-scene clip -- while the score is written against the whole
+   * film. Every number that crosses between the two goes through here.
+   */
+  const timelineNow = useCallback(() => {
+    const clock = clockRef.current;
+    const cap =
+      clock.index < 0
+        ? coverDuration
+        : (schedule[clock.index]?.duration ?? outroDuration);
+    return offsetOf(clock.index, durations, coverDuration) + Math.min(clock.time, cap);
+  }, [coverDuration, durations, outroDuration, schedule]);
+
+  /** Tears the graph down. Scheduled nodes die with the bus they feed. */
+  const stopSound = useCallback(() => {
+    const live = soundRef.current;
     if (!live) return;
     try {
-      live.bus.disconnect();
+      live.master.disconnect();
     } catch {
       /* already gone */
     }
-    scoreRef.current = {
-      context: live.context,
-      bus: live.context.createGain(),
-      base: 0,
-      from: 0,
-      rate: 1,
-    };
+    soundRef.current = null;
   }, []);
 
   const audioAt = useCallback((index: number) => {
@@ -570,16 +672,18 @@ export function WhiteboardPlayer({
   }, []);
 
   /**
-   * Starts music and effects from a given point on the timeline.
+   * Starts the bed, and opens the effects scheduler at a point on the timeline.
    *
-   * The graph is rebuilt from scratch each time rather than paused, because a
-   * scheduled oscillator cannot be rescheduled -- and a scrub has to be able
-   * to join the bed mid-phrase.
+   * The music is committed here in full: it is furniture, it is allowed to run
+   * on the audio clock alone, and re-laying it mid-phrase is audible. The
+   * effects are not committed at all -- `pumpSfx` feeds them in a rolling
+   * window a beat ahead of the picture, which is the only arrangement where a
+   * hit cannot land on the wrong frame.
    */
-  const startScore = useCallback(
+  const startSound = useCallback(
     (fromSeconds: number) => {
-      stopScore();
-      if (!soundOn || (!score.sfx.length && !musicMood)) return;
+      stopSound();
+      if (!soundOn || (!score.sfx.length && musicMood === "none")) return;
 
       try {
         const AudioCtor =
@@ -587,36 +691,91 @@ export function WhiteboardPlayer({
           (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AudioCtor) return;
 
-        const context = scoreRef.current?.context ?? new AudioCtor();
-        const bus = context.createGain();
-        bus.gain.value = muted ? 0 : 1;
-        bus.connect(context.destination);
+        const context = audioCtxRef.current ?? new AudioCtor();
+        audioCtxRef.current = context;
         void context.resume();
 
-        const base = context.currentTime + 0.06;
+        const master = context.createGain();
+        master.gain.value = muted ? 0 : 1;
+        master.connect(context.destination);
+
+        const music = context.createGain();
+        music.connect(master);
+
         const rate = playbackSpeed;
         if (musicMood !== "none") {
-          scheduleMusic(context, bus, {
+          scheduleMusic(context, music, {
             mood: musicMood,
             duration: total,
             duck: score.duck,
-            base,
+            base: context.currentTime + 0.06,
             from: fromSeconds,
             rate,
           });
         }
-        scheduleSfx(context, bus, score.sfx, 1, { base, from: fromSeconds, rate });
 
-        // Remembered so drift against the picture can be measured: the score
-        // runs on the audio clock once scheduled, while the video clock is
-        // pulled toward the narration every frame.
-        scoreRef.current = { context, bus, base, from: fromSeconds, rate };
+        soundRef.current = {
+          context,
+          master,
+          music,
+          sfx: createSfxBus(context, master),
+          cursor: fromSeconds,
+          rate,
+        };
+        sfxDirtyRef.current = false;
       } catch {
         // A blocked audio context costs the score, never the video.
       }
     },
-    [muted, musicMood, playbackSpeed, score, soundOn, stopScore, total],
+    [muted, musicMood, playbackSpeed, score, soundOn, stopSound, total],
   );
+
+  /**
+   * Feeds the next window of effects to the audio clock.
+   *
+   * Called far more often than it schedules anything. Each pass asks the
+   * picture where it is *now* and commits only the events inside the next
+   * `SFX_LOOKAHEAD` seconds, so a clock that has just been dragged back toward
+   * the narration takes the effects with it. Nothing is ever placed more than
+   * a beat in advance, which is why nothing can be left stranded on the wrong
+   * frame -- the failure the old schedule-it-all-at-once graph had by design.
+   */
+  const pumpSfx = useCallback(() => {
+    const live = soundRef.current;
+    if (!live || !soundOn || !score.sfx.length) return;
+
+    const now = timelineNow();
+
+    // The picture snapped. Anything already committed is now on the wrong
+    // frame, so the effects bus is thrown away and refilled from here. The bed
+    // hanging off `master` never notices.
+    if (sfxDirtyRef.current) {
+      try {
+        live.sfx.disconnect();
+      } catch {
+        /* already gone */
+      }
+      live.sfx = createSfxBus(live.context, live.master);
+      live.cursor = now;
+      sfxDirtyRef.current = false;
+    }
+
+    // Behind after a stall: skip the gap rather than dumping every effect that
+    // was missed as one burst.
+    if (live.cursor < now) live.cursor = now;
+
+    const until = now + SFX_LOOKAHEAD;
+    if (until <= live.cursor) return;
+
+    scheduleSfx(live.context, live.sfx, score.sfx, 1, {
+      base: live.context.currentTime + (live.cursor - now) / live.rate,
+      from: live.cursor,
+      until,
+      rate: live.rate,
+      key: score.key,
+    });
+    live.cursor = until;
+  }, [score, soundOn, timelineNow]);
 
   const silence = useCallback(
     (except?: number) => {
@@ -650,8 +809,8 @@ export function WhiteboardPlayer({
   const stopPlayback = useCallback(() => {
     setPlaying(false);
     silence();
-    stopScore();
-  }, [silence, stopScore]);
+    stopSound();
+  }, [silence, stopSound]);
 
   /**
    * Stops rather than stalls when the tab goes away.
@@ -705,7 +864,14 @@ export function WhiteboardPlayer({
         const live = !audio.paused && !audio.ended && audio.readyState >= 2 && audio.currentTime > 0.02;
         if (live) {
           const drift = audio.currentTime + entry.lead - clock.time;
-          clock.time += Math.abs(drift) > HARD_RESYNC ? drift : drift * 0.06;
+          if (Math.abs(drift) > HARD_RESYNC) {
+            clock.time += drift;
+            // The picture just moved without the effects. Whatever is already
+            // committed to the audio clock is now on the wrong frame.
+            sfxDirtyRef.current = true;
+          } else {
+            clock.time += drift * 0.06;
+          }
         }
       }
 
@@ -749,43 +915,58 @@ export function WhiteboardPlayer({
   }, [advance, playbackSpeed, playing, stopPlayback]);
 
   /**
-   * Keeps music and effects on the picture.
+   * The rolling effects scheduler.
    *
-   * Once scheduled, the score runs on the audio clock and nothing can move it.
-   * The video clock is a different animal — it is pulled toward the narration
-   * every frame and jumps outright past `HARD_RESYNC` — so after a stall, a
-   * speed change or a long scene the two separate, and an effect meant to land
-   * on a stroke arrives somewhere else entirely. Rebuilding the graph is the
-   * only way to move a scheduled oscillator, so that is what a big drift does.
+   * A 90ms tick against a 1.3s window: every effect is handed to the audio
+   * clock shortly before it is due, measured from where the picture actually
+   * is at that moment. Nothing is committed far enough ahead to be stranded by
+   * a clock correction, which is what makes the effects land on the frame they
+   * were written for rather than somewhere near it.
    */
   useEffect(() => {
     if (!playing) return;
-    const id = setInterval(() => {
-      const live = scoreRef.current;
-      if (!live || !soundOn) return;
-      const scoreAt = live.from + (live.context.currentTime - live.base) * live.rate;
-      if (Math.abs(scoreAt - clockRef.current.time) > SCORE_RESYNC) {
-        startScore(clockRef.current.time);
-      }
-    }, 1_000);
+    pumpSfx();
+    const id = setInterval(pumpSfx, SFX_TICK_MS);
     return () => clearInterval(id);
-  }, [playing, soundOn, startScore]);
+  }, [playing, pumpSfx]);
 
-  /** A speed change moves the picture immediately; the score has to be re-laid. */
+  /**
+   * A speed change re-lays the bed.
+   *
+   * The effects need no help -- the next window is measured against the new
+   * rate on its own -- but a pad written for 1x plays a third too long at
+   * 0.75x and drifts away from the picture over a minute.
+   */
+  const relayNonce = useRef(playbackSpeed);
   useEffect(() => {
-    if (!playing) return;
-    startScore(clockRef.current.time);
-    // Only the rate change should re-lay the score — `startScore` itself is
-    // rebuilt whenever any of its inputs move, and following that would
-    // restart the bed every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playbackSpeed]);
+    if (!playing || relayNonce.current === playbackSpeed) return;
+    relayNonce.current = playbackSpeed;
+    startSound(timelineNow());
+  }, [playbackSpeed, playing, startSound, timelineNow]);
 
   useEffect(() => {
     for (const audio of audioRefs.current) if (audio) audio.muted = muted;
-    const live = scoreRef.current;
-    if (live) live.bus.gain.value = muted ? 0 : 1;
+    const live = soundRef.current;
+    if (live) live.master.gain.value = muted ? 0 : 1;
   }, [muted, scenes.length]);
+
+  /**
+   * Hands the audio hardware back when the player goes away.
+   *
+   * The context is deliberately kept alive across stops and scrubs -- creating
+   * one costs a device round trip and the first sound after it is late -- but
+   * a browser only allows a handful of them per document, and navigating
+   * between six projects without this leaves a tab that can no longer make a
+   * sound at all.
+   */
+  useEffect(() => {
+    return () => {
+      const context = audioCtxRef.current;
+      audioCtxRef.current = null;
+      soundRef.current = null;
+      void context?.close().catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     for (const audio of audioRefs.current) if (audio) audio.playbackRate = playbackSpeed;
@@ -801,8 +982,8 @@ export function WhiteboardPlayer({
       startScene(sceneIndex, elapsedInScene(elapsed, sceneIndex, durations, coverDuration));
     }
     setPlaying(true);
-    startScore(elapsed >= total - 0.05 ? 0 : elapsed);
-  }, [coverDuration, durations, elapsed, ready, sceneIndex, scenes.length, startScene, startScore, total]);
+    startSound(elapsed >= total - 0.05 ? 0 : elapsed);
+  }, [coverDuration, durations, elapsed, ready, sceneIndex, scenes.length, startScene, startSound, total]);
 
   const toggle = useCallback(() => {
     if (playing) stopPlayback();
@@ -817,13 +998,13 @@ export function WhiteboardPlayer({
       // `startScene` already parks every other clip; the seeked one keeps the
       // position it was just given so pressing play resumes from the scrub.
       startScene(index, offset);
-      if (playing) startScore(target);
+      if (playing) startSound(target);
       else {
-        stopScore();
+        stopSound();
         draw(index, offset);
       }
     },
-    [coverDuration, draw, durations, playing, startScene, startScore, stopScore, total],
+    [coverDuration, draw, durations, playing, startScene, startSound, stopSound, total],
   );
 
   const restart = useCallback(() => {
@@ -903,6 +1084,7 @@ export function WhiteboardPlayer({
               sfx: score.sfx,
               mood: musicMood,
               duck: score.duck,
+              key: score.key,
             },
             onProgress: (fraction, stage) => {
               setExportProgress(fraction);
@@ -1019,16 +1201,102 @@ export function WhiteboardPlayer({
 
   /* ------------------------------- interaction ------------------------------ */
 
+  /**
+   * The transport, on the keyboard.
+   *
+   * Modelled on an NLE rather than on a web video player, because that is what
+   * this is: someone reviewing a cut watches the same eight seconds twenty
+   * times, and reaching for a mouse to do it is the difference between
+   * reviewing and fighting the tool. J/K/L and comma/period are the two
+   * shortcuts every editor already has in their hands.
+   *
+   * Bound to the stage rather than to the document: a shortcut that fires
+   * while someone is typing a heading into the inspector is worse than no
+   * shortcut at all.
+   */
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === " " || event.key === "k") {
+    // A modifier means the browser's own shortcut, not ours.
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    const frame = 1 / EXPORT_FPS;
+    const jump = (seconds: number) => {
       event.preventDefault();
-      toggle();
-    } else if (event.key === "ArrowRight") {
+      seekTo(elapsed + seconds);
+    };
+    /** The boundary of the scene before or after the playhead. */
+    const step = (direction: -1 | 1) => {
       event.preventDefault();
-      seekTo(elapsed + 5);
-    } else if (event.key === "ArrowLeft") {
+      const { index } = locate(elapsed, durations, coverDuration);
+      const here = offsetOf(index, durations, coverDuration);
+      // Going back inside the first second of a scene means the previous one,
+      // the way a track skip does. Later than that, back means this scene.
+      const target =
+        direction < 0 && elapsed - here > 1
+          ? here
+          : offsetOf(Math.max(-1, Math.min(durations.length, index + direction)), durations, coverDuration);
+      seekTo(target);
+    };
+
+    switch (event.key) {
+      case " ":
+      case "k":
+        event.preventDefault();
+        toggle();
+        return;
+      case "ArrowRight":
+        jump(event.shiftKey ? 1 : 5);
+        return;
+      case "ArrowLeft":
+        jump(event.shiftKey ? -1 : -5);
+        return;
+      case "l":
+        jump(10);
+        return;
+      case "j":
+        jump(-10);
+        return;
+      // One frame at a time, for checking a beat lands where it should.
+      case ".":
+        jump(frame);
+        return;
+      case ",":
+        jump(-frame);
+        return;
+      case "]":
+        step(1);
+        return;
+      case "[":
+        step(-1);
+        return;
+      case "Home":
+        event.preventDefault();
+        seekTo(0);
+        return;
+      case "End":
+        event.preventDefault();
+        seekTo(total - 0.1);
+        return;
+      case "m":
+        event.preventDefault();
+        setMuted((value) => !value);
+        return;
+      case "s":
+        event.preventDefault();
+        setSoundOn((value) => !value);
+        return;
+      case "f":
+        event.preventDefault();
+        goFullscreen();
+        return;
+      default:
+        break;
+    }
+
+    // 0-9 jump to that tenth of the video, as every player has done since
+    // YouTube taught everyone the habit.
+    if (/^[0-9]$/.test(event.key)) {
       event.preventDefault();
-      seekTo(elapsed - 5);
+      seekTo((Number(event.key) / 10) * total);
     }
   };
 
@@ -1134,6 +1402,9 @@ export function WhiteboardPlayer({
         tabIndex={0}
         role="application"
         aria-label={`${isHyperframes ? "Modern" : "Whiteboard"} video: ${project.title}`}
+        // Discoverability without a help overlay nobody opens: the one place a
+        // person already hovers when they are trying to work out the controls.
+        title={SHORTCUT_HINT}
         onKeyDown={onKeyDown}
       >
         <canvas
@@ -1295,10 +1566,22 @@ export function WhiteboardPlayer({
 
       {/* -------------------------------- controls ------------------------------- */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="icon" variant="secondary" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
+        <Button
+          size="icon"
+          variant="secondary"
+          onClick={toggle}
+          aria-label={playing ? "Pause" : "Play"}
+          title={playing ? "Pause  ·  Space" : "Play  ·  Space"}
+        >
           {playing ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
         </Button>
-        <Button size="icon" variant="ghost" onClick={restart} aria-label="Restart">
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={restart}
+          aria-label="Restart"
+          title="Back to the start  ·  Home"
+        >
           <RotateCcw className="size-4" />
         </Button>
         <Button
@@ -1306,6 +1589,7 @@ export function WhiteboardPlayer({
           variant="ghost"
           onClick={() => setMuted((value) => !value)}
           aria-label={muted ? "Unmute" : "Mute"}
+          title={`${muted ? "Unmute" : "Mute"} the narration  ·  M`}
           disabled={!hasNarration}
         >
           {muted || !hasNarration ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
@@ -1316,7 +1600,7 @@ export function WhiteboardPlayer({
           variant="ghost"
           onClick={() => setSoundOn((value) => !value)}
           aria-label={soundOn ? "Turn off music and effects" : "Turn on music and effects"}
-          title={soundOn ? "Music and effects on" : "Music and effects off"}
+          title={`Music and effects ${soundOn ? "on" : "off"}  ·  S`}
         >
           {soundOn ? <Music className="size-4" /> : <Music2 className="size-4 opacity-40" />}
         </Button>
@@ -1342,7 +1626,13 @@ export function WhiteboardPlayer({
           </span>
         </div>
 
-        <Button size="icon" variant="ghost" onClick={goFullscreen} aria-label="Fullscreen">
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={goFullscreen}
+          aria-label="Fullscreen"
+          title="Fullscreen  ·  F"
+        >
           <Maximize2 className="size-4" />
         </Button>
         <Button

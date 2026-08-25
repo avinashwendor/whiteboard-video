@@ -2,7 +2,7 @@
 
 import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 import { scheduleMusic, type MusicMood } from "./music";
-import { scheduleSfx, type SfxEvent } from "./sfx";
+import { createSfxBus, scheduleSfx, type SfxEvent } from "./sfx";
 
 /**
  * Offline export.
@@ -32,6 +32,8 @@ export interface AudioPlacement {
 export interface SoundRequest {
   /** Effects, already placed on the finished timeline. */
   sfx?: SfxEvent[];
+  /** Musical root the effects were scored against, so they render in key. */
+  key?: number;
   mood?: MusicMood;
   /** Spans where narration plays, so the bed ducks beneath it. */
   duck?: Array<{ from: number; to: number }>;
@@ -235,7 +237,11 @@ async function renderAudioBed(
         duck: sound.duck,
       });
     }
-    if (sound.sfx?.length) scheduleSfx(context, score, sound.sfx);
+    // Through the same bus the preview uses, so the exported mix has the same
+    // compression and the same balance as the thing that was watched.
+    if (sound.sfx?.length) {
+      scheduleSfx(context, createSfxBus(context, score), sound.sfx, 1, { key: sound.key });
+    }
   }
 
   return context.startRendering();

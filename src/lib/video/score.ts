@@ -1,5 +1,6 @@
 import type { Cue } from "./timing";
-import type { SfxEvent } from "./sfx";
+import { SFX_LEAD, SFX_TAIL, type SfxEvent, type SfxName } from "./sfx";
+import { moodRoot, type MusicMood } from "./music";
 
 /**
  * Scoring the video.
@@ -7,12 +8,44 @@ import type { SfxEvent } from "./sfx";
  * The renderer already knows, to the frame, when every drawing lands and when
  * every word is spoken. That schedule is exactly what a sound editor would ask
  * for, so the effects are derived from it rather than sprinkled on top: a
- * whoosh sits on the cut, a beat lands with the thing it draws, a riser leads
- * into the number the script is about to say.
+ * whoosh crests on the cut, a beat lands with the thing it draws, a riser
+ * leads into the number the script is about to say.
  *
- * The vocabulary is kept deliberately small. Cueing every stroke would be
- * technically easy and would sound like a typewriter.
+ * Three rules keep it from sounding like a sound-effects library:
+ *
+ * 1. **Every `at` is a landing time.** The scheduler subtracts each voice's
+ *    own approach, so nothing here has to carry a hand-tuned offset -- and
+ *    nothing arrives late because somebody forgot one.
+ * 2. **The palette answers to the picture.** A glass panel resolving gets a
+ *    glass voice; a hard modern cut gets weight under it; a marker stroke gets
+ *    a marker. The same event list over a different engine sounds different.
+ * 3. **The last pass is a mixdown, not a list.** Cues collide -- two beats
+ *    inside a tenth of a second, a chime under an impact -- and a schedule
+ *    that plays all of them is the thing people mean by "the sound effects are
+ *    a mess". `declutter` keeps the important hit and drops the one nobody
+ *    would have missed.
  */
+
+/** How loud a voice is allowed to be relative to the others when they collide. */
+const PRIORITY: Record<SfxName, number> = {
+  impact: 100,
+  chime: 90,
+  riser: 85,
+  glass: 80,
+  thud: 70,
+  sub: 68,
+  whoosh: 60,
+  reverse: 58,
+  latch: 50,
+  pop: 40,
+  swish: 35,
+  tick: 30,
+  key: 20,
+  stroke: 10,
+};
+
+/** Two transients closer than this are heard as one muddled hit. */
+const CROWD = 0.085;
 
 export interface ScoredScene {
   /** Where the scene starts on the finished timeline. */
@@ -27,6 +60,14 @@ export interface ScoredScene {
   /** When the scene's statistic is spoken, in scene time. */
   statAt?: number | null;
   hasNarration: boolean;
+  /**
+   * The shot this scene is cut as, when the modern engine is driving.
+   *
+   * Sound follows picture: a fanned deck of cards wants a different mark from
+   * a counting statistic, and a scene of glass panels wants the one voice in
+   * the palette that sounds like glass.
+   */
+  role?: string;
 }
 
 export interface ScoreInput {
@@ -35,62 +76,135 @@ export interface ScoreInput {
   style: "whiteboard" | "hyperframes";
   /** 0 silences effects, 1 is the designed level. */
   intensity?: number;
+  /** The bed, so every tonal effect is written in its key. */
+  mood?: MusicMood;
 }
 
 export interface Score {
   sfx: SfxEvent[];
   /** Spans where speech plays, so the music can duck beneath it. */
   duck: Array<{ from: number; to: number }>;
+  /** Musical root the effects were written against. */
+  key: number;
 }
 
+/**
+ * The mixdown pass.
+ *
+ * Sorted by time, then walked once: an event that lands on top of a louder
+ * neighbour is dropped, and one that lands on top of a quieter neighbour takes
+ * its place. The result is a schedule where every hit is audible as itself,
+ * which is the whole difference between scored and noisy.
+ */
+function declutter(events: SfxEvent[]): SfxEvent[] {
+  const sorted = [...events].filter((event) => (event.gain ?? 1) > 0.001).sort((a, b) => a.at - b.at);
+  const kept: SfxEvent[] = [];
+
+  for (const event of sorted) {
+    const previous = kept[kept.length - 1];
+    // Layers of one designed sound always pass together.
+    if (previous && event.group && event.group === previous.group) {
+      kept.push(event);
+      continue;
+    }
+    if (previous && event.at - previous.at < CROWD) {
+      if (PRIORITY[event.name] > PRIORITY[previous.name]) kept[kept.length - 1] = event;
+      continue;
+    }
+    // A long-ringing voice masks a small one that lands inside its tail. Only
+    // worth suppressing when the newcomer is genuinely quieter than the ring.
+    if (
+      previous &&
+      event.at - previous.at < SFX_TAIL[previous.name] * 0.5 &&
+      PRIORITY[event.name] < PRIORITY[previous.name] - 40
+    ) {
+      continue;
+    }
+    kept.push(event);
+  }
+
+  return kept;
+}
+
+/** Shots whose subject is a surface rather than a mark. */
+const GLASSY = new Set(["glass", "panel", "deck", "tree", "bracket", "quote"]);
+
 export function buildScore(input: ScoreInput): Score {
-  const sfx: SfxEvent[] = [];
+  const key = moodRoot(input.mood ?? "calm");
+  const events: SfxEvent[] = [];
   const duck: Array<{ from: number; to: number }> = [];
   const level = input.intensity ?? 1;
-  if (level <= 0) return { sfx, duck };
+  if (level <= 0) return { sfx: events, duck, key };
 
   const modern = input.style === "hyperframes";
+  let seed = 1;
+  const push = (name: SfxName, at: number, gain: number, group: string, pan = 0) => {
+    if (!(at >= 0) || gain <= 0) return;
+    events.push({ name, at, gain: gain * level, key, pan, group, seed: (seed += 7) });
+  };
 
-  // The title card resolving into the first scene.
-  sfx.push({ name: "chime", at: Math.max(0, input.coverDuration - 1.9), gain: 0.5 * level });
+  /* -------------------------------- the title ------------------------------- */
+
+  // The title resolving is the first thing anyone hears, so it is given the
+  // one full-band hit in the palette. Everything after it is smaller by
+  // design: a film that opens at its loudest has somewhere to go.
+  const titleLands = Math.max(SFX_LEAD.reverse, input.coverDuration * 0.42);
+  push("reverse", titleLands, 0.7, "title");
+  push(modern ? "impact" : "thud", titleLands, 0.85, "title");
+  push("glass", titleLands + 0.12, modern ? 0.5 : 0.3, "title");
 
   input.scenes.forEach((scene, index) => {
     const { start } = scene;
+    const glassy = modern && GLASSY.has(scene.role ?? "");
 
-    // The cut itself. A modern cut has weight under it; a board is wiped.
-    sfx.push({ name: "whoosh", at: Math.max(0, start - 0.18), gain: (modern ? 0.9 : 0.6) * level });
-    if (modern && index > 0) {
-      sfx.push({ name: "thud", at: start, gain: 0.55 * level });
-    }
+    /* --------------------------------- the cut -------------------------------- */
+
+    // The whoosh crests on the cut rather than starting there. Weight goes
+    // underneath a modern cut; a board is only wiped.
+    push("whoosh", start, modern ? 0.95 : 0.6, `cut:${index}`);
+    if (modern && index > 0) push(index % 3 === 0 ? "thud" : "sub", start, 0.6, `cut:${index}`);
 
     if (scene.hasNarration) {
       duck.push({ from: start + scene.lead, to: start + scene.lead + scene.speech });
     }
 
+    /* --------------------------------- beats ---------------------------------- */
+
     scene.cues.forEach((cue, beat) => {
       const at = start + cue.at;
-      if (at >= start + scene.duration) return;
-      // The heading is a tick; everything the heading introduces is a pop.
-      sfx.push({
-        name: beat === 0 ? "tick" : "pop",
-        at,
-        gain: (beat === 0 ? 0.5 : 0.75) * level,
-      });
+      if (at >= start + scene.duration - 0.15) return;
+
+      if (beat === 0) {
+        // A heading that lands on the cut is already announced by the cut. Two
+        // marks a frame apart is not emphasis, it is a stumble.
+        if (cue.at < 0.12) return;
+        // Otherwise the shot locking into position, not an item arriving.
+        push(glassy ? "glass" : "latch", at, glassy ? 0.6 : 0.55, `beat:${index}:0`);
+        return;
+      }
+
+      // Items alternate side to side so a rail of four does not stack in the
+      // middle of the image, and step up the triad as they accumulate.
+      const pan = modern ? (beat % 2 === 0 ? 0.22 : -0.22) : 0;
+      push(modern ? "pop" : "stroke", at, modern ? 0.7 : 0.85, `beat:${index}:${beat}`, pan);
+      // A little air on the entrance of anything that slides in from an edge.
+      if (modern && beat > 0) push("swish", at, 0.35, `beat:${index}:${beat}`, pan);
     });
 
-    // A number gets led into and then landed on.
+    /* -------------------------------- the number ------------------------------ */
+
     if (scene.statAt != null) {
       const at = start + scene.statAt;
-      sfx.push({ name: "riser", at: Math.max(start, at - 0.95), gain: 0.8 * level });
-      sfx.push({ name: "chime", at, gain: 0.7 * level });
+      push("riser", at, 0.8, `stat:${index}`);
+      push(index === input.scenes.length - 1 ? "impact" : "chime", at, 0.75, `stat:${index}`);
     }
   });
 
+  /* --------------------------------- the end -------------------------------- */
+
   // The last thing heard is the end of the last scene, not another effect.
   const last = input.scenes[input.scenes.length - 1];
-  if (last) {
-    sfx.push({ name: "chime", at: last.start + last.duration - 1.2, gain: 0.45 * level });
-  }
+  if (last) push("chime", last.start + last.duration - 1.2, 0.45, "close");
 
-  return { sfx, duck };
+  return { sfx: declutter(events), duck, key };
 }

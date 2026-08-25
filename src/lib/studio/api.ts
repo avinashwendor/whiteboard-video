@@ -5,6 +5,7 @@ import type { EditOp } from "./edit-plan";
 import type { ModelInfo, VoiceInfo } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
+import type { Glyph } from "@/lib/hyperframes/glyphs";
 
 /**
  * One error type for everything the browser gets back from our routes.
@@ -257,6 +258,34 @@ export function resolveBoard(
   return post<{ scene: SceneSpec }>("/api/board", body, signal);
 }
 
+/* ---------------------------------- icons ---------------------------------- */
+
+/**
+ * Line icons for a whole video, in one call.
+ *
+ * The concepts are the words already on the scene -- keywords and bullets --
+ * so nothing here asks a model for anything: the mapping from "settlement
+ * latency" to a drawing of a clock is a lookup table on the server, and a
+ * lookup table gets it right more often than a model does.
+ *
+ * Never throws. A film with emoji where it wanted icons is a slightly warmer
+ * film; a film that failed to generate because an icon route was down is not
+ * a film.
+ */
+export async function resolveGlyphs(
+  names: string[],
+  signal?: AbortSignal,
+): Promise<Array<Glyph | null>> {
+  const wanted = names.map((name) => name.trim()).filter(Boolean);
+  if (!wanted.length) return [];
+  try {
+    const result = await post<{ icons: Array<Glyph | null> }>("/api/icon", { names: wanted }, signal);
+    return result.icons ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /* ---------------------------------- visual --------------------------------- */
 
 export interface VisualResponse {
@@ -311,6 +340,10 @@ export interface CreateResponse {
   model: string;
   provider: string;
   usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+  /** The engine actually used -- resolved server-side when the request asked for "auto". */
+  videoStyle: "whiteboard" | "hyperframes";
+  /** Why the director picked it, only present when the choice was automatic. */
+  styleReason?: string;
 }
 
 export function createStoryboard(

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { curateImage } from "@/lib/ai/image/curator";
-import { isConfigured as tavilyConfigured } from "@/lib/ai/image/tavily";
+import { canCurate, curateImage } from "@/lib/ai/image/curator";
 import { assetUrl, putAsset } from "@/lib/utils/asset-store";
 import { AppError } from "@/lib/utils/errors";
 import { acquire, clientKey } from "@/lib/utils/rate-limit";
@@ -27,10 +26,14 @@ export async function POST(req: Request) {
     const body = await parseBody(req, visualRequestSchema);
     lease = acquire(clientKey(req, "visual"), LIMITS, req.signal);
 
-    if (!tavilyConfigured()) {
+    // Only a genuine dead end is an error. Tavily searches the open web and
+    // finds the specific thing; Openverse needs no key and always answers. A
+    // deployment with neither is the only case where a scene truly cannot have
+    // a photograph.
+    if (!canCurate()) {
       throw new AppError("missing_key", {
-        userMessage: "Photo search isn't configured. Add TAVILY_API_KEY to .env.local.",
-        detail: "TAVILY_API_KEY missing",
+        userMessage: "Photo search isn't available. Add TAVILY_API_KEY to .env.local.",
+        detail: "no image catalogue is reachable",
       });
     }
 
@@ -56,7 +59,9 @@ export async function POST(req: Request) {
       image: {
         url: assetUrl(asset),
         provider: "tavily" as const,
-        model: "web photography, verified",
+        model: stats.sources.includes("tavily")
+          ? "web photography, verified"
+          : "openly-licensed photography, verified",
         width: curated.width,
         height: curated.height,
         canvasSafe: true,

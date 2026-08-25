@@ -1,7 +1,7 @@
 "use client";
 
 import { composeScene, type Beat, type Prim, type SceneSpec } from "@/lib/whiteboard/scene";
-import { COLOURS } from "@/lib/whiteboard/palette";
+import { boardStock, COLOURS } from "@/lib/whiteboard/palette";
 import {
   clamp,
   clamp01,
@@ -769,8 +769,12 @@ export function drawTitleHighlight(
   const lineHeight = title.size * 1.12;
   const baseline = title.y + ((lines.length - 1) * lineHeight) / 2;
 
-  ctx.globalCompositeOperation = "multiply";
-  ctx.globalAlpha = 0.28;
+  // A highlighter adds ink on paper and adds light on a board. Multiplying a
+  // pale yellow into slate produces a dark smudge under light lettering, which
+  // is the opposite of a highlight -- so the blend follows the surface.
+  const stock = boardStock();
+  ctx.globalCompositeOperation = stock.dark ? "screen" : "multiply";
+  ctx.globalAlpha = stock.dark ? 0.22 : 0.28;
   ctx.fillStyle = COLOURS.yellow;
 
   // A marker stroke under the words, not a block behind them: it sits low,
