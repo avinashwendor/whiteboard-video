@@ -17,23 +17,45 @@ import {
   planCues,
   readingTime,
   type Cue,
-  type SubtitlePhrase,
   type WordTiming,
 } from "@/lib/video/timing";
 import { themeOf, type Theme, type ThemeName } from "./theme";
 import type { SceneRole } from "./roles";
-import type { Glyph } from "./glyphs";
+import { panelAt, planPanels, type Panel } from "./casting";
+import { EXTRA_SHOTS } from "./screens";
+import {
+  CONTENT_WIDTH,
+  MARGIN,
+  SAFE_BOTTOM,
+  display,
+  drawChromeLine,
+  drawMark,
+  drawRule,
+  eyebrowFor,
+  pictureOf,
+  poster,
+  staggered,
+  type ModernPlan,
+  type ModernRenderOptions,
+  type ModernRenderScene,
+  type SceneTiming,
+} from "./stage";
+
+/**
+ * The shared shot vocabulary lives in `./stage`: the two type faces, the safe
+ * area, the entrance timing and the one accent object. Re-exported because
+ * every consumer of the renderer wants the types alongside it.
+ */
+export type { ModernPlan, ModernRenderOptions, ModernRenderScene, SceneTiming } from "./stage";
 import {
   drawArrow,
   drawEdgeShape,
-  drawEmoji,
   drawFramedPhoto,
   drawMarker,
   drawOutlineNumeral,
   drawWashedPhoto,
 } from "./paper";
 import {
-  chromeFill,
   drawBloom,
   drawBrackets,
   drawCardStack,
@@ -42,7 +64,6 @@ import {
   drawFrameRule,
   drawGhostNumeral,
   drawGhostType,
-  drawGlyph,
   drawNode,
   drawPlate,
   drawSectionMark,
@@ -86,175 +107,15 @@ import {
 export type { SceneRole } from "./roles";
 export { SCENE_ROLES_TUPLE, SHOT_BRIEFS } from "./roles";
 
-export interface ModernRenderScene {
-  heading: string;
-  bullets: string[];
-  narration: string;
-  image?: HTMLImageElement | null;
-  index: number;
-  totalScenes: number;
-  keywords?: string[];
-  stat?: string;
-  statCaption?: string;
-  visualTheme?: ThemeName;
-  /**
-   * The shot the director asked for.
-   *
-   * Honoured whenever the scene can actually carry it. The renderer keeps the
-   * veto because a layout that draws four items cannot be handed one, and an
-   * empty rail is worse than the wrong-but-full alternative.
-   */
-  shot?: SceneRole;
-  /** Line icons resolved from this scene's own words, in bullet order. */
-  glyphs?: Glyph[];
-}
-
-export interface SceneTiming {
-  lead: number;
-  speech: number;
-  tail: number;
-}
-
-export interface ModernPlan {
-  role: SceneRole;
-  /** The accent glyph for this scene, picked from what it is about. */
-  glyph: string;
-  /** One per drawn item, where a shot places several. */
-  itemGlyphs: string[];
-  /** Heading entrance. */
-  heading: Cue;
-  /** One cue per bullet, step or chip, aligned to the narration. */
-  beats: Cue[];
-  /** When the statistic is actually said, so the counter lands on it. */
-  stat: Cue | null;
-  phrases: SubtitlePhrase[];
-  words: WordTiming[];
-  timing: SceneTiming;
-}
-
-export interface ModernRenderOptions {
-  /** Seconds into this scene. */
-  time: number;
-  /** Total length of this scene. */
-  duration: number;
-  /** The interface face. Captions, body copy, subtitles. */
-  fontSans: string;
-  /**
-   * The display face: tight, heavy, drawn to be set large.
-   *
-   * Optional so an older caller still renders; every headline falls back to
-   * the interface face rather than to a system default, which would be worse
-   * than the thing being replaced.
-   */
-  fontDisplay?: string;
-  /** Ultra-condensed poster face, for one word filling the frame. */
-  fontPoster?: string;
-  /** 0..1 through the whole video, for the chapter rail. */
-  globalProgress?: number;
-}
-
 /* ---------------------------------- plan ---------------------------------- */
 
 /**
- * What a shot needs before it can be asked to carry a scene.
- *
- * Consulted for both the director's request and the variety fallback, so
- * neither can put three bullets into a layout that draws one, or ask for a
- * spread of photographs when the scene has none. Exported so the editor can
- * grey out a shot rather than accepting it and quietly rendering another --
- * a control that silently does nothing is the worst kind there is.
+ * Casting -- which screen a piece of content becomes, and how a scene is dealt
+ * out across several of them -- lives in `./casting`. It is pure scheduling
+ * with no canvas in it, which is what makes the arithmetic testable.
  */
-export function canCarry(
-  role: SceneRole,
-  scene: { bullets: string[]; stat?: string; image?: unknown },
-): boolean {
-  switch (role) {
-    case "metric":
-      return Boolean(scene.stat?.trim());
-    case "process":
-      return scene.bullets.length >= 3;
-    case "deck":
-      return scene.bullets.length >= 2;
-    case "contrast":
-      return scene.bullets.length === 2;
-    case "tree":
-      return scene.bullets.length >= 2 && scene.bullets.length <= 4;
-    case "split":
-      return scene.bullets.length > 0;
-    case "collage":
-      return scene.bullets.length >= 1;
-    case "bracket":
-      return scene.bullets.length <= 2;
-    default:
-      return true;
-  }
-}
-
-/**
- * Picks the shot type.
- *
- * Three inputs, in order of authority. The director may name a shot, and if
- * the scene can carry it that is the end of the discussion -- a human deciding
- * that this beat is a magazine cover knows something the content does not say.
- * Failing that the shot is read off what the scene actually contains. Failing
- * both, anything that would repeat a shot used in the last two scenes is
- * swapped for the nearest alternative the scene can carry.
- *
- * The alternation is not fussiness. Two process rails in a row is the single
- * repetition a viewer notices, and an A-B-A-B alternation across six scenes
- * reads as a template just as clearly as a straight repeat does.
- */
-export function roleFor(scene: {
-  index: number;
-  totalScenes: number;
-  bullets: string[];
-  heading?: string;
-  stat?: string;
-  image?: unknown;
-  /** The shot the director asked for, if any. */
-  requested?: SceneRole;
-  /** The shots already used, most recent last, so the film keeps varying. */
-  recentRoles?: SceneRole[];
-}): SceneRole {
-  const pick = (): SceneRole => {
-    if (scene.index === 0) return "hero";
-    if (scene.totalScenes > 2 && scene.index === scene.totalScenes - 1) return "takeaway";
-    if (scene.requested && canCarry(scene.requested, scene)) return scene.requested;
-    if (scene.stat?.trim()) return "metric";
-    // A question is a branch. Anything else with the same bullet count is not.
-    if (/\?\s*$/.test(scene.heading ?? "") && canCarry("tree", scene)) return "tree";
-    if (scene.image && scene.bullets.length >= 1 && scene.bullets.length <= 2) return "collage";
-    if (scene.bullets.length >= 4) return "deck";
-    if (scene.bullets.length === 3) return "process";
-    if (scene.bullets.length === 2) return "contrast";
-    return scene.image ? "bracket" : "statement";
-  };
-
-  const role = pick();
-  const recent = (scene.recentRoles ?? []).slice(-2);
-  if (!recent.includes(role)) return role;
-
-  const alternatives: Record<SceneRole, SceneRole[]> = {
-    hero: ["bracket", "statement"],
-    statement: ["bracket", "split", "contrast"],
-    split: ["collage", "statement", "contrast"],
-    metric: ["statement", "split"],
-    process: ["deck", "tree", "split"],
-    contrast: ["tree", "split", "deck"],
-    takeaway: ["statement", "bracket"],
-    bracket: ["statement", "collage"],
-    deck: ["process", "tree", "collage"],
-    tree: ["process", "deck", "contrast"],
-    collage: ["split", "bracket", "deck"],
-  };
-
-  for (const candidate of alternatives[role]) {
-    if (recent.includes(candidate)) continue;
-    if (!canCarry(candidate, scene)) continue;
-    return candidate;
-  }
-  return role;
-}
+export { canCarry, roleFor, planPanels, panelAt, panelCountFor, KIND } from "./casting";
+export type { Panel } from "./casting";
 
 export function planModernScene(
   scene: ModernRenderScene,
@@ -264,8 +125,32 @@ export function planModernScene(
   /** Glyphs already used in this video, so no two frames wear the same one. */
   usedGlyphs?: Set<string>,
 ): ModernPlan {
-  const role = roleFor({ ...scene, requested: scene.shot, recentRoles });
   const { lead, speech, tail } = timing;
+
+  /**
+   * The screens this scene becomes.
+   *
+   * A scene used to be one composition held for however long its narration
+   * ran. Now its content is dealt across two, three or four panels that cut on
+   * words the narrator actually says -- so a fifteen-second scene is four
+   * seconds of a claim, four of a number, four of what follows. The single
+   * biggest reason a generated film feels static is that nothing in the frame
+   * ever changes; this is the fix.
+   */
+  const panels = planPanels({
+    bullets: scene.bullets,
+    heading: scene.heading,
+    stat: scene.stat,
+    image: scene.image,
+    duration: lead + speech + tail,
+    lead,
+    words,
+    requested: scene.shot,
+    recentRoles,
+    index: scene.index,
+    totalScenes: scene.totalScenes,
+  });
+  const role = panels[0].role;
 
   const [heading] = planCues(
     [{ minSpan: 0.7, maxSpan: 1.6 }],
@@ -307,6 +192,7 @@ export function planModernScene(
 
   return {
     role,
+    panels,
     glyph,
     itemGlyphs,
     heading: heading ?? { at: 0, span: 1, anchored: false },
@@ -328,108 +214,6 @@ export function planModernScene(
 }
 
 /* ---------------------------------- shots --------------------------------- */
-
-/**
- * The face a shot sets its display type in.
- *
- * Headlines, statistics and numerals go here; captions and subtitles stay on
- * the interface face. Pairing a tight display cut with a neutral text face is
- * the oldest trick in editorial typography and the reason a headline can be
- * enormous without the frame feeling shouty.
- */
-function display(options: ModernRenderOptions): string {
-  return options.fontDisplay ?? options.fontSans;
-}
-
-/** The poster face, for a single word at frame scale. */
-function poster(options: ModernRenderOptions): string {
-  return options.fontPoster ?? display(options);
-}
-
-const MARGIN = 96;
-const CONTENT_WIDTH = BOARD_WIDTH - MARGIN * 2;
-/**
- * Nothing a shot composes may cross this line: below it lives the subtitle
- * band, and type over type is the fastest way to make a video look unfinished.
- */
-const SAFE_BOTTOM = 552;
-
-/** Word-by-word entrance timing, in reading order. */
-function staggered(cue: Cue, count: number, time: number, per = 0.075) {
-  const total = Math.max(0.0001, cue.span);
-  return (index: number) => {
-    const start = cue.at + Math.min(index * per, total * 0.55);
-    return range(time, start, start + Math.max(0.28, total * 0.55));
-  };
-}
-
-/** The small line above a heading: where you are, and what this one is about. */
-function eyebrowFor(scene: ModernRenderScene): string {
-  const number = String(scene.index + 1).padStart(2, "0");
-  const keyword = scene.keywords?.[0]?.trim();
-  return keyword ? `${number} — ${keyword.toUpperCase()}` : `${number} / ${String(scene.totalScenes).padStart(2, "0")}`;
-}
-
-/** A short accent rule. Flat, no glow -- this is printed work. */
-function drawRule(
-  ctx: CanvasRenderingContext2D,
-  theme: Theme,
-  x: number,
-  y: number,
-  width: number,
-  progress: number,
-  height = 5,
-) {
-  const t = easeOutQuint(clamp01(progress));
-  if (t <= 0) return;
-  ctx.save();
-  // A rule is hairline work: it uses the mark weight, not the plate colour.
-  ctx.fillStyle = theme.mark;
-  ctx.fillRect(x, y, width * t, height);
-  ctx.restore();
-}
-
-/**
- * The one object in the frame that is not a word.
- *
- * Which kind of object depends on the finish, and the rule is not arbitrary.
- * Printed frames get an emoji: full colour, warm, handmade, and it sits on
- * paper the way a sticker does. Editorial and glass frames get line work in
- * the frame's own accent, because a full-colour cartoon on a magazine cover or
- * a frosted panel is the one mark that will make the whole composition look
- * like a school project.
- *
- * Falls back to the emoji whenever no icon resolved, so a frame is never left
- * with an empty space where its subject was meant to be.
- */
-function drawMark(
-  ctx: CanvasRenderingContext2D,
-  scene: ModernRenderScene,
-  plan: ModernPlan,
-  index: number,
-  x: number,
-  y: number,
-  size: number,
-  theme: Theme,
-  options: { enter?: number; time?: number; tilt?: number; seed?: number; colour?: string } = {},
-) {
-  const glyph = scene.glyphs?.[index];
-  if (theme.finish !== "print" && glyph) {
-    drawGlyph(ctx, glyph, x, y, size * 0.84, {
-      colour: options.colour ?? theme.accent,
-      enter: options.enter,
-      width: 2.4,
-    });
-    return;
-  }
-  drawEmoji(ctx, plan.itemGlyphs[index] ?? plan.glyph, x, y, size, options);
-}
-
-/** The picture a shot was given, if it is actually usable. */
-function pictureOf(scene: ModernRenderScene): HTMLImageElement | null {
-  const image = scene.image;
-  return image && image.complete && image.naturalWidth > 0 ? image : null;
-}
 
 /* --------------------------------- 1. hero -------------------------------- */
 
@@ -1367,57 +1151,6 @@ function drawChapterRail(
   ctx.restore();
 }
 
-/* ------------------------- brushed-metal display -------------------------- */
-
-/**
- * One line of display type filled with brushed metal.
- *
- * Kept separate from `drawDisplay` because a gradient fill is a different
- * animal from an ink one: it has to be built in frame coordinates for the
- * highlight to stay put as the type rises, and it only reads at scale. Used
- * for a count or a title, never for a sentence.
- */
-function drawChromeLine(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  options: {
-    x: number;
-    y: number;
-    size: number;
-    family: string;
-    theme: Theme;
-    align?: CanvasTextAlign;
-    reveal: number;
-    weight?: number;
-  },
-) {
-  const t = clamp01(options.reveal);
-  if (t <= 0.001) return;
-  const { size } = options;
-
-  ctx.save();
-  ctx.font = `${options.weight ?? 900} ${size}px ${options.family}`;
-  ctx.textAlign = options.align ?? "center";
-  ctx.textBaseline = "alphabetic";
-  // Display type wants negative tracking; the same face at 14px would not.
-  ctx.letterSpacing = `${-size * 0.03}px`;
-
-  const width = ctx.measureText(text).width;
-  const left = options.align === "left" ? options.x : options.x - width / 2;
-
-  // Rises out from behind its own cap height, as the ink type does.
-  const rise = easeOutQuint(t);
-  ctx.beginPath();
-  ctx.rect(left - size * 0.2, options.y - size * 1.1, width + size * 0.4, size * 1.45);
-  ctx.clip();
-
-  ctx.globalAlpha = easeOutCubic(t);
-  ctx.fillStyle = chromeFill(ctx, options.theme, options.y - size * 0.88, size * 1.08);
-  ctx.fillText(text, options.x, options.y + (1 - rise) * size * 0.9);
-  ctx.letterSpacing = "0px";
-  ctx.restore();
-}
-
 /* -------------------------------- 8. bracket ------------------------------- */
 
 /**
@@ -1937,16 +1670,24 @@ export function transitionFor(index: number, time: number, duration: number): Tr
 
 /* ------------------------------- public api ------------------------------- */
 
-const SHOTS: Record<
-  SceneRole,
-  (
-    ctx: CanvasRenderingContext2D,
-    scene: ModernRenderScene,
-    plan: ModernPlan,
-    theme: Theme,
-    options: ModernRenderOptions,
-  ) => void
-> = {
+type Shot = (
+  ctx: CanvasRenderingContext2D,
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  theme: Theme,
+  options: ModernRenderOptions,
+) => void;
+
+/**
+ * Every screen in the library, by name.
+ *
+ * The eleven originals live in this file; the rest are in `./screens`. The
+ * `Record` is exhaustive over `SceneRole` on purpose -- adding a name to the
+ * director's vocabulary without a composition behind it stops the build here,
+ * rather than at three in the morning when a video renders an empty frame.
+ */
+const SHOTS: Record<SceneRole, Shot> = {
+  ...(EXTRA_SHOTS as Record<SceneRole, Shot>),
   hero: shotHero,
   statement: shotStatement,
   split: shotSplit,
@@ -1961,40 +1702,27 @@ const SHOTS: Record<
 };
 
 /**
- * Shots whose picture belongs behind the whole frame rather than in a frame.
- * Kept to the two compositions with room for it -- a washed photograph under a
+ * Screens whose picture belongs behind the whole frame rather than in a frame.
+ * Kept to the compositions with room for it -- a washed photograph under a
  * card layout just makes the cards look like they are floating.
  */
-const WASHED: Record<SceneRole, boolean> = {
-  hero: false,
-  statement: true,
-  split: false,
-  metric: false,
-  process: false,
-  contrast: false,
-  takeaway: true,
-  // These four compose with the picture themselves -- washing it behind them
-  // as well would put the same photograph in the frame twice.
-  bracket: false,
-  deck: false,
-  tree: false,
-  collage: false,
-};
+const WASHED = new Set<SceneRole>(["statement", "takeaway", "quote", "bigWord"]);
 
 /** Ruled paper by default; dotted where the frame is mostly empty. */
-const DOTTED: Record<SceneRole, boolean> = {
-  hero: false,
-  statement: true,
-  split: false,
-  metric: true,
-  process: false,
-  contrast: true,
-  takeaway: false,
-  bracket: false,
-  deck: true,
-  tree: true,
-  collage: false,
-};
+const DOTTED = new Set<SceneRole>([
+  "statement",
+  "metric",
+  "contrast",
+  "deck",
+  "tree",
+  "gauge",
+  "bigWord",
+  "quote",
+  "chapter",
+  "venn",
+  "orbit",
+  "cycle",
+]);
 
 /**
  * Shots that set their own display type behind themselves. The frame must not
@@ -2052,6 +1780,45 @@ function drawFurniture(
   }
 }
 
+/**
+ * The scene, scoped to one panel.
+ *
+ * A screen is written as though its content is the whole scene: `bullets[0]`
+ * is its first item and `beats[0]` is when that item arrives. A panel holds a
+ * *slice* of the scene, so the slice is re-presented here as a scene of its
+ * own, with every cue rebased to panel-relative time.
+ *
+ * Doing it this way is what let thirty-five screens be written without any of
+ * them knowing panels exist.
+ */
+function viewFor(
+  scene: ModernRenderScene,
+  plan: ModernPlan,
+  panel: Panel,
+): { scene: ModernRenderScene; plan: ModernPlan } {
+  const rebase = (cue: Cue): Cue => ({ ...cue, at: Math.max(0, cue.at - panel.from) });
+
+  return {
+    scene: {
+      ...scene,
+      bullets: panel.items.map((index) => scene.bullets[index]).filter(Boolean),
+      stat: panel.carriesStat ? scene.stat : undefined,
+      statCaption: panel.carriesStat ? scene.statCaption : undefined,
+      glyphs: panel.items.map((index) => scene.glyphs?.[index]).filter(Boolean) as typeof scene.glyphs,
+    },
+    plan: {
+      ...plan,
+      role: panel.role,
+      // The opening panel keeps the heading's own cue; a later panel has
+      // already had the heading established, so its type arrives with it.
+      heading: panel.opens ? rebase(plan.heading) : { at: 0, span: 0.8, anchored: false },
+      beats: panel.items.map((index) => rebase(plan.beats[index] ?? plan.heading)),
+      stat: panel.carriesStat && plan.stat ? rebase(plan.stat) : null,
+      itemGlyphs: panel.items.map((index) => plan.itemGlyphs[index] ?? plan.glyph),
+    },
+  };
+}
+
 export function renderModernScene(
   ctx: CanvasRenderingContext2D,
   scene: ModernRenderScene,
@@ -2059,26 +1826,39 @@ export function renderModernScene(
   options: ModernRenderOptions,
 ) {
   const theme = themeOf(scene.visualTheme);
-  const transition = transitionFor(scene.index, options.time, options.duration);
+  const { panel, index: panelIndex } = panelAt(plan.panels, options.time);
+  const view = viewFor(scene, plan, panel);
+
+  // Each panel is cut like a scene of its own: its own clock, its own length,
+  // its own handover. That is what makes an internal cut feel like an edit
+  // rather than like content appearing.
+  const panelTime = options.time - panel.from;
+  const panelDuration = Math.max(0.5, panel.to - panel.from);
+  const inner: ModernRenderOptions = {
+    ...options,
+    time: panelTime,
+    duration: panelDuration,
+  };
+  // Scene index and panel index together, so consecutive cuts never repeat a
+  // flavour even across a scene boundary.
+  const transition = transitionFor(scene.index * 4 + panelIndex, panelTime, panelDuration);
 
   /**
    * The camera.
    *
-   * A slow push across the whole scene, plus a few pixels of drift on noise.
-   * Two per cent over ten seconds is far too little to see as movement and
-   * exactly enough that no two frames of the finished file are identical --
-   * which is the difference between a video and a slideshow with a soundtrack.
-   * Alternates direction by scene so the film does not creep in one direction
-   * for two minutes.
+   * A slow push across the panel, plus a few pixels of drift on noise. Two per
+   * cent over four seconds is far too little to see as movement and exactly
+   * enough that no two frames of the finished file are identical -- which is
+   * the difference between a video and a slideshow with a soundtrack.
    */
-  const through = clamp01(options.time / Math.max(0.5, options.duration));
-  const towards = scene.index % 2 === 0 ? 1 : -1;
+  const through = clamp01(panelTime / panelDuration);
+  const towards = (scene.index + panelIndex) % 2 === 0 ? 1 : -1;
   const push = 1 + (towards > 0 ? through * 0.022 : 0.022 - through * 0.022);
   const driftX = noise1(options.time * 0.08, scene.index * 3 + 1) * 5;
   const driftY = noise1(options.time * 0.07, scene.index * 3 + 2) * 4;
 
   ctx.save();
-  // Applied to the whole scene rather than to a copy of it: every draw inside
+  // Applied to the whole panel rather than to a copy of it: every draw inside
   // the save is filtered, which costs nothing at blur 0 and is only ever
   // non-zero for the two hundred milliseconds either side of a cut.
   if (transition.blur > 0.2 && supportsFilter(ctx)) {
@@ -2088,12 +1868,12 @@ export function renderModernScene(
   ctx.scale(transition.scale * push, transition.scale * push);
   ctx.translate(-BOARD_WIDTH / 2 + driftX, -BOARD_HEIGHT / 2 + driftY);
 
-  // The ground is whatever the palette's finish is made of. A shot that wants
-  // its picture behind the type washes it over the ground itself; the rest
-  // mount the picture in a frame.
-  drawFinishGround(ctx, theme, options.time, { dots: DOTTED[plan.role] });
+  // The ground is whatever the palette's finish is made of. A screen that
+  // wants its picture behind the type washes it over the ground itself; the
+  // rest mount the picture in a frame.
+  drawFinishGround(ctx, theme, options.time, { dots: DOTTED.has(panel.role) });
 
-  const behind = WASHED[plan.role] ? scene.image : null;
+  const behind = WASHED.has(panel.role) ? scene.image : null;
   if (behind && behind.complete && behind.naturalWidth > 0) {
     drawWashedPhoto(ctx, behind, theme, {
       time: options.time,
@@ -2103,16 +1883,17 @@ export function renderModernScene(
     });
   }
 
-  drawFurniture(ctx, scene, plan, theme, options);
+  drawFurniture(ctx, view.scene, view.plan, theme, inner);
 
-  SHOTS[plan.role](ctx, scene, plan, theme, options);
+  SHOTS[panel.role](ctx, view.scene, view.plan, theme, inner);
 
+  // Subtitles run on the *scene's* clock, not the panel's: the narration does
+  // not restart at an internal cut, and a caption that did would be the most
+  // obvious possible tell that the frame is assembled from pieces.
   if (plan.phrases.length) {
-    // The band is whatever ground this shot laid down, so a full-bleed accent
-    // plate does not get a strip of paper pasted across its foot.
     drawSubtitles(ctx, plan, theme, options.time, options.fontSans, {
-      ground: plan.role === "takeaway" ? theme.accent : theme.ground,
-      ink: plan.role === "takeaway" ? theme.accentInk : theme.ink,
+      ground: panel.role === "takeaway" ? theme.accent : theme.ground,
+      ink: panel.role === "takeaway" ? theme.accentInk : theme.ink,
     });
   }
 

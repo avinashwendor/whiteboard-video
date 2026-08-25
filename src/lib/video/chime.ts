@@ -4,10 +4,10 @@
  * The "it's ready" sound.
  *
  * Synthesised for the same reason everything else here is: nothing to license,
- * nothing to download, and it can be tuned by editing two numbers. A rising
- * perfect fifth on soft sines — short, quiet, and nothing like a notification
- * from an operating system, because you will hear it every time a video lands
- * and an abrasive one gets muted within the hour.
+ * nothing to download, and it can be tuned by editing two numbers. Two low
+ * knocks — short, quiet, and well under the register a voice occupies, because
+ * you will hear it every time a video lands and anything that rings gets muted
+ * within the hour.
  *
  * Only plays when the tab is hidden. If you are watching the screen you have
  * already seen it finish, and a sound you did not need is noise.
@@ -38,24 +38,32 @@ export function playReadyChime() {
     const ctx = new Ctor();
     const now = ctx.currentTime + 0.02;
 
-    // D5, then A5 a beat later. Consonant, so it reads as "done" rather than
-    // as an alarm.
-    for (const [index, frequency] of [587.33, 880].entries()) {
-      const at = now + index * 0.14;
+    // Two low knocks rather than a rising fifth on sines.
+    //
+    // The bell version was the right shape and the wrong register: a bright
+    // tone with half a second of decay is a notification, and a notification
+    // you hear every time a video lands is a notification you mute. This sits
+    // under the voice register, is over in a fifth of a second, and reads as
+    // "done" because of its rhythm rather than its pitch.
+    for (const [index, frequency] of [196, 146.83].entries()) {
+      const at = now + index * 0.11;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
+      const low = ctx.createBiquadFilter();
 
       osc.type = "sine";
-      osc.frequency.value = frequency;
+      osc.frequency.setValueAtTime(frequency, at);
+      osc.frequency.exponentialRampToValueAtTime(frequency * 0.6, at + 0.12);
+      low.type = "lowpass";
+      low.frequency.value = 700;
 
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.16, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+      gain.gain.exponentialRampToValueAtTime(index === 0 ? 0.1 : 0.13, at + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      osc.connect(low).connect(gain).connect(ctx.destination);
       osc.start(at);
-      osc.stop(at + 0.55);
+      osc.stop(at + 0.24);
     }
 
     // Let the tail finish, then release the hardware.

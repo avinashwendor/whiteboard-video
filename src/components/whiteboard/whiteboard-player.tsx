@@ -438,9 +438,11 @@ export function WhiteboardPlayer({
         statAt: entry.modern?.stat?.at ?? null,
         hasNarration: Boolean(scenes[index]?.audio?.url),
         // Sound follows picture: the shot the renderer chose decides which
-        // voice a beat gets, so a glass panel and a marker stroke never share
-        // a mark.
+        // voice a beat gets.
         role: entry.modern?.role,
+        // A scene is several screens; each internal cut gets air under it so
+        // the picture never changes in silence.
+        panelCuts: entry.modern?.panels.slice(1).map((panel) => panel.from),
       };
     });
 

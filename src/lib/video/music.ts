@@ -118,7 +118,7 @@ const semitone = (root: number, steps: number) => root * Math.pow(2, steps / 12)
 /**
  * The root the bed is written on.
  *
- * Exported so the effects can be tuned to it. A chime a semitone off the pad
+ * Exported so the effects can be tuned to it. A mark a semitone off the pad
  * underneath it is the single clearest tell that a video's sound was assembled
  * rather than scored, and it costs one number to avoid.
  */

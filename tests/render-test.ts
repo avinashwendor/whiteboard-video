@@ -202,20 +202,51 @@ const PHOTO = {
  */
 const BULLETS: Record<SceneRole, number> = {
   hero: 1,
-  statement: 0,
-  split: 2,
-  metric: 1,
-  process: 3,
-  contrast: 2,
   takeaway: 1,
+  statement: 0,
+  quote: 1,
+  bigWord: 1,
+  chapter: 0,
   bracket: 1,
-  deck: 4,
+
+  metric: 1,
+  metricTrio: 2,
+  gauge: 0,
+  progress: 2,
+  bars: 4,
+  donut: 3,
+
+  process: 3,
+  timeline: 4,
+  cycle: 4,
+  funnel: 4,
+  pyramid: 3,
+  roadmap: 4,
+
+  contrast: 2,
+  versus: 2,
+  matrix: 4,
+  venn: 2,
+  prosCons: 4,
+
   tree: 3,
+  stack: 3,
+  orbit: 4,
+  flow: 3,
+  list: 3,
+
+  split: 2,
   collage: 2,
+  fullBleed: 0,
+  deck: 4,
+  grid: 4,
 };
 
+/** Screens that need a statistic before they can draw anything. */
+const NEEDS_STAT = new Set<SceneRole>(["metric", "metricTrio", "gauge", "progress"]);
+
 /** Shots that compose around a photograph. */
-const NEEDS_PHOTO = new Set<SceneRole>(["bracket", "collage", "split", "hero"]);
+const NEEDS_PHOTO = new Set<SceneRole>(["bracket", "collage", "split", "hero", "fullBleed"]);
 
 function sceneFor(role: SceneRole, index: number): ModernRenderScene {
   const pool = ["Chunking strategy", "Reranking pass", "Freshness window", "Eval harness"];
@@ -226,8 +257,8 @@ function sceneFor(role: SceneRole, index: number): ModernRenderScene {
     index,
     totalScenes: 6,
     keywords: ["retrieval", "quality"],
-    stat: role === "metric" ? "84%" : undefined,
-    statCaption: role === "metric" ? "of failures" : undefined,
+    stat: NEEDS_STAT.has(role) ? "84%" : undefined,
+    statCaption: NEEDS_STAT.has(role) ? "of failures" : undefined,
     shot: role,
     image: NEEDS_PHOTO.has(role) ? PHOTO : null,
     // Real Lucide geometry, so the icon path is exercised rather than skipped.
@@ -240,8 +271,8 @@ function sceneFor(role: SceneRole, index: number): ModernRenderScene {
   };
 }
 
-const TIMES = [0, 0.35, 1.2, 3.4, 6.8, 9.4];
-const DURATION = 10;
+const TIMES = [0, 0.3, 1.1, 2.4, 3.8, 5.2];
+const DURATION = 5.4;
 
 /* --------------------------------- the sweep -------------------------------- */
 
@@ -253,11 +284,15 @@ for (const themeName of THEME_NAMES) {
     // `hero` and `takeaway` are position-locked; give them their positions.
     const index = role === "hero" ? 0 : role === "takeaway" ? 5 : 2;
     const scene = { ...sceneFor(role, index), visualTheme: themeName };
-    const words = estimateWordTimings(NARRATION, 8);
-    const plan = planModernScene(scene, words, { lead: 0.5, speech: 8, tail: 0.6 });
+    const words = estimateWordTimings(NARRATION, 4.5);
+    // Deliberately short, so the scene is a single panel and the screen under
+    // test is the one that renders. Multi-panel behaviour is asserted in
+    // `tests/panels-test.ts`, where it can be checked properly.
+    const plan = planModernScene(scene, words, { lead: 0.4, speech: 4.5, tail: 0.5 });
 
-    // The fixture is shaped for this shot, so the renderer must actually pick
-    // it. If it does not, this sweep is silently testing something else.
+    assert(plan.panels.length === 1, `${role}: a short scene is one panel, got ${plan.panels.length}`);
+    // The fixture is shaped for this screen, so the renderer must actually
+    // pick it. If it does not, this sweep is silently testing something else.
     assert(plan.role === role, `${themeName}: a scene shaped for ${role} is cut as ${plan.role}`);
     covered.add(plan.role);
 
@@ -291,7 +326,7 @@ for (const themeName of THEME_NAMES) {
       const marks = (recording as unknown as { marksSeen: number }).marksSeen;
       // A settled frame that made fewer than a handful of marks has lost its
       // composition somewhere, which no exception would have told us about.
-      if (time > 3 && marks < 8) {
+      if (time > 2 && marks < 8) {
         failures += 1;
         console.error(`FAIL: ${themeName}/${plan.role} at ${time}s drew only ${marks} marks`);
       }
@@ -359,7 +394,7 @@ for (const themeName of THEME_NAMES) {
   }
 }
 
-assert(rendered > 700, `the sweep actually rendered something: ${rendered} frames`);
+assert(rendered > 2_000, `the sweep actually rendered something: ${rendered} frames`);
 assert(
   covered.size === SCENE_ROLES_TUPLE.length,
   `every shot was rendered: ${covered.size}/${SCENE_ROLES_TUPLE.length} (missing ${SCENE_ROLES_TUPLE.filter((role) => !covered.has(role)).join(", ")})`,
