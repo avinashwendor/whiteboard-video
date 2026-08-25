@@ -749,7 +749,7 @@ const world: PlanWorld = {
     grade: { ...NEUTRAL_GRADE, contrast: 0.3 },
     frame: { ...DEFAULT_FRAME, aspect: "16:9", zoom: 1.2, focusX: 0.3 },
   };
-  const vertical = compositionFor(source, "9:16");
+  const vertical = compositionFor(source, "9:16", 16 / 9);
 
   assert(vertical.frame.aspect === "9:16", "the shape changed");
   assert(vertical.frame.zoom === 1.2, "the framing did not");
@@ -758,6 +758,12 @@ const world: PlanWorld = {
   assert(vertical.shots === source.shots, "nor the shots");
   assert(vertical.elements === source.elements, "nor what is on screen");
   assert(source.frame.aspect === "16:9", "and the original is untouched");
+
+  // Captions are the exception, and deliberately: line length is a function of
+  // the frame, so carrying widescreen breaks into a vertical file puts text off
+  // both edges. With no cues there is nothing to re-break and the track comes
+  // back as-is rather than as a new empty object.
+  assert(vertical.subtitles === source.subtitles, "no cues, nothing to re-break");
 }
 
 {

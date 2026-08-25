@@ -376,7 +376,7 @@ export default function ExportDialog() {
           setProgress(i / alsoMake.length);
           const shaped = await composeOverlays({
             source: cutOnly,
-            composition: compositionFor(composition, aspect),
+            composition: compositionFor(composition, aspect, sourceAspect),
             timeline,
             withAudio: hasAudioTrack,
             onProgress: (fraction) =>

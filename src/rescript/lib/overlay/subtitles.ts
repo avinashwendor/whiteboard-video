@@ -10,7 +10,12 @@
 
 import { isWordCutOut, originalToEdited } from "../edits";
 import type { TimeRange, Word } from "../types";
-import type { SubtitleCue, SubtitleStyle, SubtitleWord } from "./types";
+import type {
+  SubtitleCue,
+  SubtitleStyle,
+  SubtitleTrack,
+  SubtitleWord,
+} from "./types";
 
 /** A pause at least this long starts a new cue, whatever the line length. */
 const GAP_BREAK_S = 0.7;
@@ -73,7 +78,20 @@ export function buildCues(
     kept.push({ text, start, end: Math.max(end, start) });
   }
   if (!kept.length) return [];
+  return groupIntoCues(kept, budget);
+}
 
+/**
+ * Group already-cut, already-translated words into cues.
+ *
+ * Split out of `buildCues` so re-wrapping for a different frame shape runs the
+ * *same* break rules — sentence ends, clause ends once a cue is substantial,
+ * gaps, and the length budget. A second implementation of those would drift,
+ * and the drift would show up as captions that break differently in the
+ * vertical cut than in the master, which is exactly what re-wrapping is
+ * supposed to prevent.
+ */
+function groupIntoCues(kept: SubtitleWord[], budget: number): SubtitleCue[] {
   const cues: SubtitleCue[] = [];
   let group: SubtitleWord[] = [];
 
@@ -157,6 +175,45 @@ export function cuesFromStyle(
     maxCharsPerLine: fittedCharsPerLine(style, aspect),
     maxLines: style.maxLines,
   });
+}
+
+/**
+ * Re-break existing cues for a different frame shape.
+ *
+ * Line length is a function of the frame — `fittedCharsPerLine` caps the taste
+ * setting by the geometry — so a vertical delivery of a widescreen project
+ * keeps captions cut three words too long for it, every one of them. The
+ * renderer then wraps them itself and produces more lines than `maxLines`
+ * allows, which it resolves by running text off both edges.
+ *
+ * This needs no transcript, which is the point: cues carry their own per-word
+ * timings, already on the output clock and already past the cut. So a
+ * deliverable in another shape can be re-broken without reaching across into
+ * the store that owns the words — the coupling the two stores exist to avoid.
+ *
+ * Returns the track untouched when there is nothing to re-break, or when any
+ * cue is missing its word timings — an imported SRT has none, and re-flowing
+ * those by splitting text would move captions off the beats they were written
+ * for. Slightly-too-long lines beat captions that no longer match the speech.
+ */
+export function rewrapCues(
+  track: SubtitleTrack,
+  aspect: number
+): SubtitleTrack {
+  if (!track.enabled || track.cues.length === 0) return track;
+  if (track.cues.some((cue) => !cue.words?.length)) return track;
+
+  const style = track.style;
+  const budget = Math.max(
+    8,
+    fittedCharsPerLine(style, aspect) * Math.max(1, style.maxLines)
+  );
+
+  const words = track.cues.flatMap((cue) => cue.words ?? []);
+  if (words.length === 0) return track;
+
+  const cues = groupIntoCues(words, budget);
+  return cues.length ? { ...track, cues } : track;
 }
 
 /* ------------------------------ style presets ------------------------------ */

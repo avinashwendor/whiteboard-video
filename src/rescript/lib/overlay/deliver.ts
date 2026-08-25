@@ -13,6 +13,7 @@
  * and the composite is the fast half.
  */
 
+import { rewrapCues } from "./subtitles";
 import {
   FRAME_ASPECTS,
   frameRatio,
@@ -79,22 +80,30 @@ function sizeFor(
 /**
  * The composition to composite a given target with.
  *
- * Only the frame's aspect changes. Everything else — the elements, the shots,
- * the look, the caption *style* — is the edit, and the edit is the same edit in
- * every shape.
+ * Only the frame's aspect changes, and the captions are re-broken to fit it.
+ * Everything else — the elements, the shots, the look, the caption *style* — is
+ * the edit, and the edit is the same edit in every shape.
  *
- * ⚠️ What this does **not** do is re-wrap the subtitle cues. Line length is a
- * function of the frame, so a vertical cut of a widescreen project keeps
- * captions broken three words too long for it. Re-breaking them needs the
- * transcript, which lives in the other store, so the caller does it — see
- * `regenerateCues`. Doing it here would mean this module reaching across into
- * the cut, which is the coupling the two stores exist to avoid.
+ * The re-break matters more than it sounds. Line length is a function of the
+ * frame, so a vertical delivery of a widescreen project would otherwise carry
+ * captions cut three words too long for it, every one of them, and the renderer
+ * resolves the overflow by running text off both edges.
+ *
+ * It needs no transcript: cues carry their own per-word timings, already on the
+ * output clock and already past the cut. So this can be done here without
+ * reaching across into the store that owns the words.
  */
 export function compositionFor(
   composition: Composition,
-  aspect: FrameAspectId
+  aspect: FrameAspectId,
+  sourceAspect: number
 ): Composition {
-  return { ...composition, frame: { ...composition.frame, aspect } };
+  const frame = { ...composition.frame, aspect };
+  return {
+    ...composition,
+    frame,
+    subtitles: rewrapCues(composition.subtitles, ratioFor(aspect, sourceAspect)),
+  };
 }
 
 /** A filename that says which shape it is, so three downloads are tellable apart. */
