@@ -1,0 +1,12 @@
+{
+  "name": "vertical-short",
+  "instruction": "make this a 30 second vertical short, keep only the best bit",
+  "duration": 180,
+  "boundaryCount": 2,
+  "transcript": "[00:00] So um I wanted to talk about why most teams get onboarding wrong.\n[00:14] The mistake is treating it as paperwork instead of as the first week of work.\n[00:31] We changed ours last year and retention went up 40% in two quarters.\n[00:58] Anyway that's the short version, there's a longer writeup on the blog.",
+  "expect": {
+    "ops": ["keepOnly", "setFrame"],
+    "forbid": [],
+    "maxSteps": 6
+  }
+}

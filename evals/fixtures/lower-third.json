@@ -1,0 +1,12 @@
+{
+  "name": "lower-third",
+  "instruction": "add a lower third with my name, Alex Rivera, for the first five seconds",
+  "duration": 60,
+  "boundaryCount": 0,
+  "transcript": "[00:00] Hi, I'm Alex and this is how we rebuilt the pipeline.\n[00:20] It took about six weeks and most of that was the migration.",
+  "expect": {
+    "ops": ["addText"],
+    "forbid": ["removeFillers", "keepOnly", "subtitles"],
+    "maxSteps": 2
+  }
+}

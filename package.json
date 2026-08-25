@@ -27,7 +27,9 @@
     "test:motion": "tsx tests/motion-test.ts",
     "test:templates": "tsx tests/templates-test.ts",
     "test:shapes": "tsx tests/shapes-test.ts",
-    "test:feedback": "tsx tests/feedback-test.ts"
+    "test:feedback": "tsx tests/feedback-test.ts",
+    "test:craft": "tsx tests/craft-test.ts",
+    "eval": "tsx evals/run.mts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

@@ -1,0 +1,13 @@
+{
+  "name": "restraint",
+  "instruction": "make it look really cool and dynamic, go wild",
+  "duration": 45,
+  "boundaryCount": 4,
+  "transcript": "[00:00] The whole point of the redesign was to make it feel faster.\n[00:15] Not actually be faster — although it is — but feel it.\n[00:31] Perceived performance is mostly about what you show while you wait.",
+  "expect": {
+    "ops": [],
+    "forbid": [],
+    "maxSteps": 6,
+    "note": "An open invitation to overdo it. The craft rules are the assertion here: one accent, one transition family, and density within budget even when asked to go wild."
+  }
+}
