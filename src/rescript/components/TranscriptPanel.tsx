@@ -37,6 +37,7 @@ import {
   mapSplitsToWords,
 } from "@/rescript/lib/edits";
 import { useTranscriptSelection } from "@/rescript/hooks/useTranscriptSelection";
+import { useTranscriptCaret } from "@/rescript/hooks/useTranscriptCaret";
 import { useTranscriptPlayheadFollow } from "@/rescript/hooks/useTranscriptPlayheadFollow";
 import { useWordAnchorFloating } from "@/rescript/hooks/useWordAnchorFloating";
 import { useCutRanges } from "@/rescript/hooks/useCutRanges";
@@ -55,7 +56,8 @@ const WordSpan = memo(function WordSpan({
   /** True when the word is removed from the edited media (deleted or covered by a cut). */
   cutOut: boolean;
   active: boolean;
-  onClick: (word: Word, el: HTMLElement) => void;
+  /** `fraction` is where in the word's box the click landed, 0..1, for caret placement. */
+  onClick: (word: Word, el: HTMLElement, fraction: number) => void;
 }) {
   const { t } = useI18n();
   const placeholder = isDisfluencyPlaceholder(word.text);
@@ -67,7 +69,11 @@ const WordSpan = memo(function WordSpan({
       data-cut={cutOut ? "" : undefined}
       data-placeholder={placeholder ? "" : undefined}
       title={placeholder ? t("transcript.hesitation") : undefined}
-      onClick={(e) => onClick(word, e.currentTarget)}
+      onClick={(e) => {
+        const box = e.currentTarget.getBoundingClientRect();
+        const fraction = box.width > 0 ? (e.clientX - box.left) / box.width : 0;
+        onClick(word, e.currentTarget, fraction);
+      }}
       className={`py-0.5 cursor-pointer transition-colors duration-75 ${cutOut
         ? "word-deleted bg-red-50 text-red-600 line-through decoration-red-300 dark:bg-red-950/40 dark:text-red-400 dark:decoration-red-800"
         : active
@@ -86,6 +92,20 @@ const WordSpan = memo(function WordSpan({
  * Descript-style edit boundary: the "|" between two clips created by a split.
  * Click it to join them back together (the inverse of Split / S).
  */
+/**
+ * The transcript's insertion point. Purely visual — position lives in
+ * {@link useTranscriptCaret}; this just draws the blinking rule at it.
+ */
+const Caret = memo(function Caret() {
+  return (
+    <span
+      data-transcript-caret=""
+      aria-hidden
+      className="relative -mx-[1px] inline-block h-4 w-px animate-pulse bg-neutral-800 align-middle dark:bg-neutral-200"
+    />
+  );
+});
+
 const SplitMarker = memo(function SplitMarker({
   boundaryId,
   onJoin,
@@ -128,6 +148,7 @@ export default function TranscriptPanel() {
   const correctWords = useEditorStore((s) => s.correctWords);
   const importWords = useEditorStore((s) => s.importWords);
   const removeSceneBoundary = useEditorStore((s) => s.removeSceneBoundary);
+  const splitAt = useEditorStore((s) => s.splitAt);
   const selectedWordIds = useEditorStore((s) => s.selectedWordIds);
   const playing = useEditorStore((s) => s.playing);
   const activeWordId = useEditorStore((s) => findActiveWordId(s.words, s.currentTime));
@@ -151,6 +172,27 @@ export default function TranscriptPanel() {
       ),
     [sceneBoundaries, cuts, duration, words]
   );
+
+  /**
+   * Flat list of what is actually on screen, in order. The caret indexes into
+   * this rather than `words` so arrow keys skip anything the cut hides.
+   */
+  const visibleWords = useMemo(
+    () => (showDeleted ? words : words.filter((w) => !cutOutIds.has(w.id))),
+    [words, showDeleted, cutOutIds]
+  );
+
+  const {
+    caret,
+    clearCaret,
+    placeFromClick,
+    move: moveCaretBy,
+    slashOpen,
+    openSlash,
+    closeSlash,
+    timeAtCaret,
+    anchorWord: caretAnchorWord,
+  } = useTranscriptCaret(visibleWords, duration);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -190,12 +232,57 @@ export default function TranscriptPanel() {
 
   // Clicking a word seeks — resume following so playback stays in view.
   const onWordClick = useCallback(
-    (word: Word, el: HTMLElement) => {
+    (word: Word, el: HTMLElement, fraction: number) => {
       resumeFollowPlayhead();
       handleWordClick(word, el);
+      // Clicking also drops the insertion point, so `/` acts where you clicked.
+      placeFromClick(word, fraction);
     },
-    [handleWordClick, resumeFollowPlayhead]
+    [handleWordClick, resumeFollowPlayhead, placeFromClick]
   );
+
+  /**
+   * Caret keys. Deliberately narrow: arrows move the insertion point, `/` opens
+   * the command menu at it, Escape steps back out. Everything else falls through
+   * to the global shortcuts (space, S, delete), which still own their keys
+   * because a `role="textbox"` div is not a typing target.
+   */
+  const onTranscriptKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        moveCaretBy(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        moveCaretBy(1);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        e.stopPropagation();
+        openSlash();
+      } else if (e.key === "Escape") {
+        if (slashOpen) {
+          e.stopPropagation();
+          closeSlash();
+        } else {
+          clearCaret();
+        }
+      }
+    },
+    [moveCaretBy, openSlash, closeSlash, clearCaret, slashOpen]
+  );
+
+  /**
+   * `/` → Split here. The caret sits before a word, so the cut lands on that
+   * word's start and it becomes the first word of the new clip. `splitAt`
+   * refuses a point that is already a boundary or inside a cut, in which case
+   * the menu just closes.
+   */
+  const insertSplitAtCaret = useCallback(() => {
+    const time = timeAtCaret();
+    if (time !== null) splitAt(time);
+    closeSlash();
+  }, [timeAtCaret, splitAt, closeSlash]);
 
   const toolbarOpen = !!(selection && !correcting && !assigningSpeaker);
   const { setFloating: setToolbarFloating, floatingStyles: toolbarStyles } =
@@ -204,6 +291,15 @@ export default function TranscriptPanel() {
       wordIds: selection?.ids,
       containerRef,
       placement: "top",
+      offsetMain: 8,
+    });
+
+  const { setFloating: setSlashFloating, floatingStyles: slashStyles } =
+    useWordAnchorFloating({
+      open: slashOpen,
+      wordIds: caretAnchorWord ? [caretAnchorWord.id] : undefined,
+      containerRef,
+      placement: "bottom-start",
       offsetMain: 8,
     });
 
@@ -442,7 +538,20 @@ export default function TranscriptPanel() {
           )}
 
           {status === "ready" && (
-            <div className="transcript-words selection:bg-transparent">
+            <div
+              className="transcript-words outline-none selection:bg-transparent"
+              tabIndex={0}
+              role="textbox"
+              aria-label={t("transcript.editorLabel")}
+              aria-multiline
+              onKeyDown={onTranscriptKeyDown}
+              onBlur={(e) => {
+                // Keep the caret while focus moves into the slash menu itself.
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  clearCaret();
+                }
+              }}
+            >
               {turns.map((turn) => {
                 const visible = showDeleted
                   ? turn.words
@@ -466,6 +575,9 @@ export default function TranscriptPanel() {
                             {split && (
                               <SplitMarker boundaryId={split.id} onJoin={removeSceneBoundary} />
                             )}
+                            {caret?.kind === "before" && caret.wordId === w.id && (
+                              <Caret />
+                            )}
                             <WordSpan
                               word={w}
                               cutOut={cutOutIds.has(w.id)}
@@ -475,11 +587,49 @@ export default function TranscriptPanel() {
                           </React.Fragment>
                         );
                       })}
+                      {/* End-of-transcript caret sits after the final word. */}
+                      {caret?.kind === "end" &&
+                        visible[visible.length - 1]?.id ===
+                          visibleWords[visibleWords.length - 1]?.id && <Caret />}
                     </p>
                   </div>
                 );
               })}
             </div>
+          )}
+
+          {slashOpen && caretAnchorWord && (
+            <FloatingPortal>
+              <div
+                ref={setSlashFloating}
+                data-transcript-slash
+                role="menu"
+                aria-label={t("transcript.slashTitle")}
+                className="z-40 w-60 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-800 dark:shadow-black/30"
+                style={slashStyles}
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
+                  {t("transcript.slashTitle")}
+                </p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={insertSplitAtCaret}
+                  className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-700/60"
+                >
+                  <Scissors size={13} className="mt-0.5 shrink-0 text-zinc-500 dark:text-zinc-400" />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium leading-tight text-zinc-800 dark:text-zinc-100">
+                      {t("transcript.slashSplit")}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
+                      {t("transcript.slashSplitHint")}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </FloatingPortal>
           )}
 
           {toolbarOpen && selection && (
