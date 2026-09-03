@@ -73,6 +73,7 @@ import {
   type CtcVocab,
 } from "@/rescript/lib/forcedAlign";
 import type { TranscriptLanguage } from "@/rescript/lib/languages";
+import { isIndicLanguage } from "@/rescript/lib/indic";
 import {
   VAD_FRAME_SIZE,
   VAD_SAMPLE_RATE,
@@ -1432,8 +1433,18 @@ async function runWhisper(
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const { audio, duration, model, language } = event.data;
   try {
-    const choice: ModelId = model ?? "base";
+    let choice: ModelId = model ?? "base";
     const transcriptLanguage: TranscriptLanguage = language ?? "en";
+
+    // Parakeet TDT covers 25 European languages only — it has no Indic support,
+    // so on an Indic transcript it would auto-detect the wrong language and emit
+    // garbage. Route those runs to Whisper (multilingual) instead.
+    if (isParakeetModel(choice) && isIndicLanguage(transcriptLanguage)) {
+      console.warn(
+        `[asr] Parakeet cannot transcribe ${transcriptLanguage}; using Whisper small instead.`
+      );
+      choice = "small";
+    }
 
     let words: Word[];
     if (isParakeetModel(choice)) {

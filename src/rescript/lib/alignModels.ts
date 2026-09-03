@@ -14,8 +14,10 @@ export interface AlignModelInfo {
  *
  * English keeps the small Librispeech wav2vec2. European languages share the
  * multilingual MMS forced-aligner (Latin a–z after accent folding). Chinese
- * uses an XLS-R CTC model whose vocab includes Han characters. Languages with
- * no entry skip CTC and keep the VAD/envelope heuristic only.
+ * uses an XLS-R CTC model whose vocab includes Han characters. Indic languages
+ * reuse the MMS aligner via `indic-roman` (native script romanized to Latin
+ * before encoding). Languages with no entry skip CTC and keep the VAD/envelope
+ * heuristic only.
  */
 export const ALIGN_MODELS: Partial<
   Record<TranscriptLanguage, AlignModelInfo>
@@ -39,6 +41,15 @@ export const ALIGN_MODELS: Partial<
   zh: {
     id: "onnx-community/wav2vec2-large-xlsr-53-chinese-zh-cn-ONNX",
     normalize: "cjk",
+  },
+  // Telugu shares the multilingual MMS forced-aligner. Its vocabulary is
+  // Latin-only, so `indic-roman` transliterates the native script to Latin
+  // (uroman-style) before encoding — see forcedAlign.ts / indic.ts. A weak
+  // alignment is caught by the same sanity check as every other language and
+  // falls back to the envelope heuristic.
+  te: {
+    id: "onnx-community/mms-300m-1130-forced-aligner-ONNX",
+    normalize: "indic-roman",
   },
 };
 

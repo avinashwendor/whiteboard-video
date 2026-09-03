@@ -26,9 +26,11 @@ import {
   SignalBarsMedium,
 } from "./SignalBars";
 import {
+  isRomanizableLanguage,
   TRANSCRIPT_LANGUAGE_ORDER,
   TRANSCRIPT_LANGUAGES,
   type TranscriptLanguage,
+  type TranscriptScript,
 } from "@/rescript/lib/languages";
 import {
   MODEL_ORDER,
@@ -40,6 +42,7 @@ import type { TranscriptSource } from "@/rescript/lib/source";
 import {
   hydrateModelPreference,
   hydrateTranscriptLanguagePreference,
+  hydrateTranscriptScriptPreference,
   useEditorStore,
 } from "@/rescript/lib/store";
 import Popover, { PopoverContent, PopoverTrigger } from "./Popover";
@@ -149,6 +152,7 @@ export default function ModelSelector({
   useEffect(() => {
     hydrateModelPreference();
     hydrateTranscriptLanguagePreference();
+    hydrateTranscriptScriptPreference();
   }, []);
 
   const closeMenu = useCallback(() => {
@@ -511,6 +515,49 @@ export function LanguageSection() {
           </PopoverContent>
         </div>
       </Popover>
+      {isRomanizableLanguage(language) && <ScriptToggle />}
+    </div>
+  );
+}
+
+/**
+ * Native/roman output toggle, shown only for a language with a non-Latin script
+ * (e.g. Telugu). Flips the transcript in place when nothing has been edited yet.
+ */
+function ScriptToggle() {
+  const script = useEditorStore((s) => s.transcriptScript);
+  const setScript = useEditorStore((s) => s.setTranscriptScript);
+  const { t } = useI18n();
+  const options: Array<{ id: TranscriptScript; label: string }> = [
+    { id: "native", label: t("model.scriptNative") },
+    { id: "roman", label: t("model.scriptRoman") },
+  ];
+  return (
+    <div className="mt-1 px-2.5 pb-1.5">
+      <div
+        role="radiogroup"
+        aria-label={t("model.script")}
+        className="flex rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800"
+      >
+        {options.map((option) => {
+          const selected = option.id === script;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => setScript(option.id)}
+              className={`flex-1 cursor-pointer rounded-md px-2 py-1 text-[12px] font-medium transition ${selected
+                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-50"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

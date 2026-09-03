@@ -18,6 +18,7 @@
  */
 import type { Word } from "./types";
 import type { SpeechEnvelope } from "./align";
+import { romanizeForAlign } from "./indic";
 
 /** Per-frame log-probabilities from a CTC model, row-major `[frames][vocab]`. */
 export interface CtcEmission {
@@ -32,8 +33,14 @@ export interface CtcEmission {
  * - `latin-upper` — English wav2vec2 (A–Z, `'`)
  * - `latin-lower` — MMS forced-aligner (a–z, `'`); accents are stripped
  * - `cjk` — Chinese XLS-R (Han + A–Z, `'`)
+ * - `indic-roman` — MMS forced-aligner fed Indic scripts romanized to Latin
+ *   (a–z, `'`); see {@link romanizeForAlign}
  */
-export type CtcNormalizeMode = "latin-upper" | "latin-lower" | "cjk";
+export type CtcNormalizeMode =
+  | "latin-upper"
+  | "latin-lower"
+  | "cjk"
+  | "indic-roman";
 
 /** The pieces of a CTC tokenizer this module needs. */
 export interface CtcVocab {
@@ -132,6 +139,11 @@ export function normalizeForCtc(
       })
       .join("")
       .toUpperCase();
+  }
+  if (mode === "indic-roman") {
+    // Transliterate the native script to Latin, then fold like `latin-lower`.
+    // English tokens contain no Indic characters and pass through unchanged.
+    return romanizeForAlign(text);
   }
   const folded = text.normalize("NFD").replace(/\p{M}/gu, "");
   const letters = folded.replace(/[^A-Za-z']/g, "");
