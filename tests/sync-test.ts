@@ -22,7 +22,14 @@
  */
 
 import { buildScore } from "../src/lib/video/score";
-import { scheduleSfx, SFX_LEAD, type SfxEvent, type SfxName } from "../src/lib/video/sfx";
+import {
+  scheduleSfx,
+  SFX_LEAD,
+  SFX_REGISTER,
+  SFX_TAIL,
+  type SfxEvent,
+  type SfxName,
+} from "../src/lib/video/sfx";
 import type { Cue } from "../src/lib/video/timing";
 import { scheduleMusic } from "../src/lib/video/music";
 
@@ -96,7 +103,7 @@ function heardAt(name: SfxName, starts: number[]): number {
 /* ---------------------- 1. an effect lands where it says --------------------- */
 
 {
-  const names: SfxName[] = ["whoosh", "riser", "reverse", "swish", "pop", "impact", "chime"];
+  const names: SfxName[] = ["whoosh", "riser", "reverse", "swish", "pop", "impact", "sub"];
   for (const name of names) {
     const { ctx, starts } = recordingContext(0);
     const out = ctx.createGain();
@@ -266,6 +273,32 @@ function heardAt(name: SfxName, starts: number[]): number {
   // The number is led into and landed on, in that order.
   const riser = score.sfx.find((event) => event.name === "riser");
   assert(riser != null && Math.abs(riser.at - 18.2) < 0.001, "the riser resolves on the statistic");
+
+  /**
+   * Nothing rings.
+   *
+   * A long tonal tail arrives after the picture has moved on, stacks with the
+   * next one, and sits in the same register as the voice. It is the single
+   * most distracting thing a soundtrack can put over a talking video, and it
+   * is also the most tempting mark to reach for -- which is exactly why it is
+   * asserted against rather than left to taste.
+   */
+  const RINGING = 0.55;
+  for (const event of score.sfx) {
+    // A sub is allowed to hang: nothing about a 40Hz tail competes with a
+    // voice. Anything in the register speech occupies must be over quickly.
+    if (SFX_REGISTER[event.name] === "sub") continue;
+    assert(
+      SFX_TAIL[event.name] <= RINGING,
+      `${event.name} rings for ${SFX_TAIL[event.name]}s in the ${SFX_REGISTER[event.name]} register`,
+    );
+  }
+
+  // And the whole palette, not merely the marks this fixture happened to use.
+  for (const [name, tail] of Object.entries(SFX_TAIL)) {
+    if (SFX_REGISTER[name as SfxName] === "sub") continue;
+    assert(tail <= RINGING, `the palette itself contains a ringing voice: ${name} (${tail}s)`);
+  }
 
   // Ducking covers every narration span so the bed never fights the voice.
   assert(score.duck.length === 3, "every narrated scene ducks the bed");

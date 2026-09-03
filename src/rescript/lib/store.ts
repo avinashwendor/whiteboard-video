@@ -31,11 +31,17 @@ import { isTranscriptSource, type TranscriptSource } from "./source";
 import { trackEvent } from "./telemetry";
 import {
   DEFAULT_TRANSCRIPT_LANGUAGE,
+  DEFAULT_TRANSCRIPT_SCRIPT,
+  isRomanizableLanguage,
   isTranscriptLanguage,
   loadTranscriptLanguagePreference,
+  loadTranscriptScriptPreference,
   saveTranscriptLanguagePreference,
+  saveTranscriptScriptPreference,
   type TranscriptLanguage,
+  type TranscriptScript,
 } from "./languages";
+import { romanizeWords } from "./romanize";
 import { en } from "@/rescript/lib/i18n/messages/en";
 import { detectMediaKind, type MediaKind } from "./media";
 import { buildWaveformPeaks, type WaveformPeaks } from "./waveform";
@@ -67,6 +73,31 @@ interface PendingTranscript {
   speakers?: SpeakerInfo[];
 }
 
+/**
+ * The transcript exactly as the model produced it (native script), kept in
+ * memory so flipping native↔roman is lossless within a session. Not persisted:
+ * a reloaded project keeps whatever script was saved, and toggling then works
+ * from that. Set whenever {@link EditorState.words} is populated from ASR,
+ * import, or a restored record.
+ */
+let nativeWordsSnapshot: Word[] = [];
+
+/**
+ * Apply the chosen output script to a native-script transcript. Romanization
+ * only fires for a romanizable language in "roman" mode; every other case
+ * returns the words untouched (English, Chinese, native mode).
+ */
+function applyScript(
+  words: Word[],
+  script: TranscriptScript,
+  language: TranscriptLanguage
+): Word[] {
+  if (script === "roman" && isRomanizableLanguage(language)) {
+    return romanizeWords(words, language);
+  }
+  return words;
+}
+
 interface EditorState {
   // Media
   videoFile: File | null;
@@ -88,6 +119,12 @@ interface EditorState {
   source: TranscriptSource;
   /** Language hint sent to Whisper when transcribing (Parakeet auto-detects). */
   transcriptLanguage: TranscriptLanguage;
+  /**
+   * Output script for a non-Latin language: "native" keeps Whisper's script,
+   * "roman" transliterates it for display. Ignored for languages that are
+   * already Latin. See {@link isRomanizableLanguage}.
+   */
+  transcriptScript: TranscriptScript;
   /**
    * Caption file parsed on the upload screen when source is "import".
    * Cleared when switching back to a speech model or after media loads.
@@ -158,6 +195,8 @@ interface EditorState {
   removeProject: (id: string) => Promise<void>;
   setSource: (s: TranscriptSource) => void;
   setTranscriptLanguage: (language: TranscriptLanguage) => void;
+  /** Switch native/roman output; re-applies to the current transcript in place. */
+  setTranscriptScript: (script: TranscriptScript) => void;
   setPendingTranscript: (t: PendingTranscript | null) => void;
   setDuration: (d: number) => void;
   /**
@@ -390,6 +429,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   hasAudio: false,
   source: "base",
   transcriptLanguage: DEFAULT_TRANSCRIPT_LANGUAGE,
+  transcriptScript: DEFAULT_TRANSCRIPT_SCRIPT,
   pendingTranscript: null,
   projectId: null,
   skipTranscription: false,
@@ -505,6 +545,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const manualCuts = record.manualCuts ?? [];
     const sceneBoundaries = record.sceneBoundaries ?? [];
     const speakers = speakersFromWords(record.words, record.speakers ?? []);
+    // Saved transcripts are canonical as-is; treat them as the native snapshot
+    // so a later native↔roman toggle derives from them.
+    nativeWordsSnapshot = record.words;
     set({
       videoFile: file,
       mediaUrl: URL.createObjectURL(file),
@@ -514,6 +557,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       transcriptLanguage: isTranscriptLanguage(record.transcriptLanguage)
         ? record.transcriptLanguage
         : DEFAULT_TRANSCRIPT_LANGUAGE,
+      transcriptScript: DEFAULT_TRANSCRIPT_SCRIPT,
       projectId: record.id,
       skipTranscription: true,
       pendingTranscript: null,
@@ -562,6 +606,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveTranscriptLanguagePreference(transcriptLanguage);
     set({ transcriptLanguage });
   },
+  setTranscriptScript: (transcriptScript) => {
+    saveTranscriptScriptPreference(transcriptScript);
+    const { transcriptLanguage, past } = get();
+    // Re-derive in place from the native snapshot only before any edit (no undo
+    // history), so a toggle right after transcription is lossless and one made
+    // mid-edit never clobbers work — it just changes the choice going forward.
+    if (past.length === 0 && nativeWordsSnapshot.length > 0) {
+      set({
+        transcriptScript,
+        words: applyScript(nativeWordsSnapshot, transcriptScript, transcriptLanguage),
+      });
+      if (get().status === "ready") bumpAutosave();
+    } else {
+      set({ transcriptScript });
+    }
+  },
   setPendingTranscript: (pendingTranscript) => set({ pendingTranscript }),
   setDuration: (duration) => {
     set({ duration });
@@ -580,9 +640,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPartialText: (partialText) => set({ partialText }),
   setError: (message) => set({ status: "error", error: message }),
   setWords: (words, speakers) => {
+    // `words` arrive from ASR in native script; keep them as the toggle source
+    // and show the user's chosen script.
+    nativeWordsSnapshot = words;
+    const displayed = applyScript(words, get().transcriptScript, get().transcriptLanguage);
     set({
-      words,
-      speakers: speakersFromWords(words, speakers ?? []),
+      words: displayed,
+      speakers: speakersFromWords(displayed, speakers ?? []),
       manualCuts: [],
       sceneBoundaries: [],
       past: [],
@@ -605,9 +669,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     // Stop Whisper if it was still running.
     void import("@/rescript/hooks/useTranscriber").then((m) => m.cancelTranscription());
+    nativeWordsSnapshot = words;
+    const displayed = applyScript(words, get().transcriptScript, get().transcriptLanguage);
     set({
-      words,
-      speakers: speakersFromWords(words, speakers ?? []),
+      words: displayed,
+      speakers: speakersFromWords(displayed, speakers ?? []),
       manualCuts: [],
       sceneBoundaries: [],
       past: [],
@@ -1054,6 +1120,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { mediaUrl, exportUrl } = get();
     if (mediaUrl) URL.revokeObjectURL(mediaUrl);
     if (exportUrl) URL.revokeObjectURL(exportUrl);
+    nativeWordsSnapshot = [];
     set({
       videoFile: null,
       mediaUrl: null,
@@ -1063,6 +1130,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       hasAudio: false,
       source: loadModelPreference(),
       transcriptLanguage: loadTranscriptLanguagePreference(),
+      transcriptScript: loadTranscriptScriptPreference(),
       pendingTranscript: null,
       projectId: null,
       skipTranscription: false,
@@ -1104,6 +1172,14 @@ export function hydrateTranscriptLanguagePreference() {
   const stored = loadTranscriptLanguagePreference();
   if (stored !== useEditorStore.getState().transcriptLanguage) {
     useEditorStore.setState({ transcriptLanguage: stored });
+  }
+}
+
+/** Apply the stored output script after mount (avoids SSR/localStorage mismatch). */
+export function hydrateTranscriptScriptPreference() {
+  const stored = loadTranscriptScriptPreference();
+  if (stored !== useEditorStore.getState().transcriptScript) {
+    useEditorStore.setState({ transcriptScript: stored });
   }
 }
 

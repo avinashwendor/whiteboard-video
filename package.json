@@ -34,6 +34,9 @@
     "test:sync": "tsx tests/sync-test.ts",
     "test:frames": "tsx tests/frames-test.ts",
     "test:render": "tsx tests/render-test.ts",
+    "test:pipeline": "tsx tests/pipeline-test.ts",
+    "test:limits": "tsx tests/limits-test.ts",
+    "test:panels": "tsx tests/panels-test.ts",
     "test:media": "tsx tests/media-test.ts",
     "eval": "tsx evals/run.mts"
   },
@@ -45,6 +48,7 @@
     "@ffmpeg/util": "^0.12.2",
     "@floating-ui/react": "^0.27.20",
     "@huggingface/transformers": "4.2.0",
+    "@indic-transliteration/sanscript": "^1.3.3",
     "@react-three/fiber": "^9.7.0",
     "@react-three/postprocessing": "^3.0.5",
     "@sentry/react": "^10.69.0",

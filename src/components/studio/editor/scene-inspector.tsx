@@ -13,7 +13,7 @@ import type { SceneSpec } from "@/lib/whiteboard/scene";
 import { BoardEditor } from "./board-editor";
 import { Choice, LabelledArea, LabelledInput, StringList } from "./controls";
 import { THEMES, THEME_NAMES, type Finish, type ThemeName } from "@/lib/hyperframes/theme";
-import { canCarry, roleFor } from "@/lib/hyperframes/modern-renderer";
+import { canCarry, KIND, roleFor } from "@/lib/hyperframes/modern-renderer";
 import { SCENE_ROLES_TUPLE, SHOT_BRIEFS, type SceneRole } from "@/lib/hyperframes/roles";
 
 /**
@@ -134,6 +134,15 @@ function ThemePicker({
   );
 }
 
+const SHOT_FAMILIES: Array<{ kind: (typeof KIND)[SceneRole]; label: string }> = [
+  { kind: "title", label: "Type — a claim, held" },
+  { kind: "number", label: "Numbers — a figure made the subject" },
+  { kind: "sequence", label: "Sequences — things in an order" },
+  { kind: "compare", label: "Comparisons — things weighed against each other" },
+  { kind: "structure", label: "Structure — how parts relate" },
+  { kind: "media", label: "Pictures — photography carrying the frame" },
+];
+
 /**
  * Which composition this scene is cut as.
  *
@@ -187,42 +196,59 @@ function ShotPicker({
 
   return (
     <div className="space-y-2.5">
-      <div className="grid grid-cols-3 gap-1.5">
-        <button
-          type="button"
-          onClick={() => onChange(undefined)}
-          aria-pressed={!chosen}
-          className={cn(
-            "rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
-            !chosen ? "border-ink bg-surface-raised text-ink" : "border-line text-muted hover:text-ink",
-          )}
-        >
-          Auto
-        </button>
-        {SCENE_ROLES_TUPLE.map((role) => {
-          const why = blocker(role);
-          return (
-            <button
-              key={role}
-              type="button"
-              disabled={Boolean(why)}
-              onClick={() => onChange(role)}
-              aria-pressed={chosen === role}
-              title={why ? `${SHOT_BRIEFS[role]} — ${why}` : SHOT_BRIEFS[role]}
-              className={cn(
-                "rounded-md border px-2 py-1.5 text-[11px] font-medium capitalize transition",
-                chosen === role
-                  ? "border-ink bg-surface-raised text-ink"
-                  : why
-                    ? "cursor-not-allowed border-line/60 text-faint/60"
-                    : "border-line text-muted hover:text-ink",
-              )}
-            >
-              {role}
-            </button>
-          );
-        })}
-      </div>
+      <button
+        type="button"
+        onClick={() => onChange(undefined)}
+        aria-pressed={!chosen}
+        className={cn(
+          "w-full rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
+          !chosen ? "border-ink bg-surface-raised text-ink" : "border-line text-muted hover:text-ink",
+        )}
+      >
+        Auto — chosen from the content
+      </button>
+
+      {/*
+        Grouped by what a screen is *for*, because that is the decision being
+        made. Thirty-four names in one grid is a wall; six short families is a
+        menu, and it puts the alternatives to a step rail next to the step rail.
+      */}
+      {SHOT_FAMILIES.map((family) => {
+        const roles = SCENE_ROLES_TUPLE.filter(
+          (role) => KIND[role] === family.kind && role !== "hero" && role !== "takeaway",
+        );
+        if (!roles.length) return null;
+        return (
+          <div key={family.kind} className="space-y-1.5">
+            <p className="text-[10px] leading-none text-faint">{family.label}</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {roles.map((role) => {
+                const why = blocker(role);
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    disabled={Boolean(why)}
+                    onClick={() => onChange(role)}
+                    aria-pressed={chosen === role}
+                    title={why ? `${SHOT_BRIEFS[role]} — ${why}` : SHOT_BRIEFS[role]}
+                    className={cn(
+                      "rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
+                      chosen === role
+                        ? "border-ink bg-surface-raised text-ink"
+                        : why
+                          ? "cursor-not-allowed border-line/60 text-faint/60"
+                          : "border-line text-muted hover:text-ink",
+                    )}
+                  >
+                    {role}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
       <p className="text-[11px] leading-relaxed text-faint">
         {chosen ? (
           SHOT_BRIEFS[chosen]
@@ -232,6 +258,11 @@ function ShotPicker({
             <span className="font-medium text-ink/70">{automatic}</span>: {SHOT_BRIEFS[automatic]}.
           </>
         )}
+      </p>
+      <p className="text-[11px] leading-relaxed text-faint">
+        This is the scene’s <em>opening</em> screen. A scene of ten seconds or more is cut into two to
+        four screens and the rest are chosen from what is left — give it more short bullets and it
+        moves more.
       </p>
     </div>
   );
@@ -300,8 +331,50 @@ export function SceneInspector({
       ? ((settings.imageStyle === "auto" ? "photorealistic" : settings.imageStyle) as ImageStyle)
       : ("whiteboard" as ImageStyle);
 
+  /**
+   * What went wrong with this scene, and the one thing that fixes it.
+   *
+   * The runner records a scene's failure and nothing has ever shown it, so a
+   * request that fell over halfway leaves a video with a silent shot in the
+   * middle and no trace of why. The button is the point: an explanation with
+   * no action beside it just moves the problem to the reader.
+   */
+  const silent = Boolean(scene.narration.trim()) && !scene.audio;
+  const trouble = scene.status === "error" || silent || scene.error;
+
   return (
     <div className="space-y-5 pb-6">
+      {trouble ? (
+        <div className="border border-danger/30 bg-danger/[0.06] px-3 py-2.5">
+          <p className="text-[12.5px] leading-relaxed text-danger">
+            {silent
+              ? "This scene has no recorded narration — it will play silent."
+              : (scene.error ?? "This scene didn't finish generating.")}
+          </p>
+          {scene.error && silent ? (
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted">{scene.error}</p>
+          ) : null}
+          {silent ? (
+            <button
+              type="button"
+              disabled={busy || task === "voice" || !scene.narration.trim()}
+              onClick={() =>
+                run("voice", "Recorded the narration", async (draft) => {
+                  const target = draft.scenes[index];
+                  await speakScene(target, settings, undefined, {
+                    voiceId: prevailingVoice(draft.scenes, settings.voiceId),
+                  });
+                  return `Scene ${index + 1}: recorded the narration`;
+                })
+              }
+              className="mt-2 border border-line-strong px-2.5 py-1 text-[12px] text-ink transition-colors hover:bg-surface-hover disabled:opacity-40"
+            >
+              {task === "voice" ? "Recording…" : "Record it now"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <LabelledArea
         label="Heading"
         rows={2}

@@ -9,6 +9,16 @@ interface Bucket {
   tokens: number;
   updatedAt: number;
   leases: Map<string, ActiveLease>;
+  /**
+   * The window and lease TTL this bucket was configured with.
+   *
+   * Carried on the bucket because the sweeper runs across *every* bucket and
+   * has no idea which route each one belongs to. Without them it fell back to
+   * a global default, which quietly expired the long leases that the slow
+   * routes had deliberately asked for.
+   */
+  windowMs: number;
+  ttl: number;
 }
 
 const buckets = new Map<string, Bucket>();
@@ -21,13 +31,20 @@ function sweep(now: number) {
   if (now - lastSweep < SWEEP_INTERVAL_MS) return;
   lastSweep = now;
   for (const [key, bucket] of buckets) {
-    // Purge expired in-flight leases
+    // Purge expired in-flight leases, at the TTL the route actually asked for.
+    // Generation routes run for well over a minute and set a longer lease to
+    // say so; expiring those on a global default hands their concurrency slot
+    // back while the work is still running, and the guard stops guarding.
     for (const [leaseId, lease] of bucket.leases) {
-      if (now - lease.createdAt > DEFAULT_LEASE_TTL_MS) {
+      if (now - lease.createdAt > bucket.ttl) {
         bucket.leases.delete(leaseId);
       }
     }
-    if (bucket.leases.size === 0 && now - bucket.updatedAt > SWEEP_INTERVAL_MS) {
+    // Only forget a bucket once it would have refilled anyway. Dropping one
+    // earlier is not memory hygiene, it is handing back a full allowance --
+    // the difference between "we stopped tracking you" and "you may start
+    // again", which are the same thing to a caller.
+    if (bucket.leases.size === 0 && now - bucket.updatedAt > bucket.windowMs) {
       buckets.delete(key);
     }
   }
@@ -60,14 +77,25 @@ export function acquire(
   const now = Date.now();
   sweep(now);
 
+  const ttl = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
+
   let bucket = buckets.get(key);
   if (!bucket) {
-    bucket = { tokens: options.capacity, updatedAt: now, leases: new Map() };
+    bucket = {
+      tokens: options.capacity,
+      updatedAt: now,
+      leases: new Map(),
+      windowMs: options.windowMs,
+      ttl,
+    };
     buckets.set(key, bucket);
+  } else {
+    // A route's limits can change on a deploy; the live bucket follows.
+    bucket.windowMs = options.windowMs;
+    bucket.ttl = ttl;
   }
 
   // Prune any stale leases in this bucket
-  const ttl = options.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
   for (const [leaseId, lease] of bucket.leases) {
     if (now - lease.createdAt > ttl) {
       bucket.leases.delete(leaseId);

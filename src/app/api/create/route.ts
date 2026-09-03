@@ -5,12 +5,48 @@ import { AppError } from "@/lib/utils/errors";
 import { acquire, clientKey } from "@/lib/utils/rate-limit";
 import { fail, failFrom, parseBody } from "@/lib/utils/route-helpers";
 import { createRequestSchema, storyboardSchema, type Storyboard } from "@/lib/validation/schemas";
+import { SCENE_ROLES_TUPLE, SHOT_BRIEFS } from "@/lib/hyperframes/roles";
+import { KIND } from "@/lib/hyperframes/casting";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const LIMITS = { capacity: 12, windowMs: 60_000, maxConcurrent: 2, leaseTtlMs: 75_000 };
+
+/**
+ * The screen menu, written out of the engine's own library.
+ *
+ * Generated rather than typed, because a hand-written list of thirty-five
+ * layouts drifts the first time one is added and there is no way to notice:
+ * the director keeps asking for a screen that no longer exists, the renderer
+ * quietly substitutes another, and the films get worse for a reason nobody can
+ * see in a diff.
+ */
+const SHOT_MENU = [
+  "HOW EACH SCENE IS SHOT",
+  "You are cutting the shot list. Every screen below is a real composition; pick the one whose *job*",
+  "matches what the scene is doing, and give the scene the content that screen needs.",
+  "",
+  ...(
+    [
+      ["title", "TYPE — a claim, held"],
+      ["number", "NUMBERS — a figure, made the subject"],
+      ["sequence", "SEQUENCES — things in an order"],
+      ["compare", "COMPARISONS — two or more things weighed"],
+      ["structure", "STRUCTURE — how parts relate"],
+      ["media", "PICTURES — photography carrying the frame"],
+    ] as const
+  ).flatMap(([kind, heading]) => [
+    `  ${heading}`,
+    ...SCENE_ROLES_TUPLE.filter((role) => KIND[role] === kind).map(
+      (role) => `    ${role.padEnd(12)} ${SHOT_BRIEFS[role]}`,
+    ),
+    "",
+  ]),
+  '  "hero" and "takeaway" are positional -- the renderer uses them for the first and last scene and',
+  "  you should not ask for them.",
+].join("\n");
 
 const TONE_GUIDANCE: Record<string, string> = {
   explainer: "Deep, high-information explanation for an intelligent, curious audience. Build first-principles understanding step by step with concrete analogies and real mechanisms.",
@@ -77,30 +113,23 @@ THE ARC (map your scenes onto this; with fewer scenes merge, with more scenes sp
 
 Six or more scenes means splitting MECHANISM across two or three, one move each -- not padding the others. A scene that carries one move is what makes a short scene work.
 
-HOW EACH SCENE IS SHOT
-You are cutting the shot list. Name a "shot" on every scene, and give the scene the content that shot needs:
-
-  "bracket"    a magazine cover -- the subject framed on a plate of colour, its own word ghosted enormous
-               behind it. Needs 0-2 bullets and a photographable subject. The strongest hook in the set.
-  "statement"  one line held on screen, a marker under the words that carry it. 0-1 bullets.
-  "metric"     one number filling the frame, counting up as it is spoken. REQUIRES "stat".
-  "contrast"   two panels side by side: before and after, myth and reality. REQUIRES exactly 2 bullets.
-  "tree"       a question at the top branching down dotted routes into numbered nodes. Needs 2-4 bullets
-               and a heading written as a question.
-  "process"    a numbered rail. REQUIRES 3+ bullets. Use it once at most: it is the most template-like
-               layout in the set and two of them in one film is the repetition viewers notice.
-  "deck"       a fanning stack of cards, for "here are N of these". Needs 2+ bullets.
-  "collage"    three plates at three sizes on three baselines. Needs 1-2 bullets and a photograph.
-  "split"      media on one side, type on the other. Needs 1+ bullets.
-  "hero"       the opening title. Scene 1 only, and the renderer picks it for you.
-  "takeaway"   the closing line on a full plate of colour. Last scene only, picked for you.
+${SHOT_MENU}
 
 RULES FOR THE SHOT LIST
+- Name a "shot" on every scene. It is the *opening* screen of that scene, and the renderer picks the rest.
 - No shot may appear twice in any three consecutive scenes. Vary it deliberately, before you write.
-- The bullet count is part of the shot. Asking for "process" and giving it one bullet gets you a
+- The bullet count is part of the shot. Asking for a step rail and giving it one bullet gets you a
   different layout than you asked for, because the renderer refuses a shot the scene cannot carry.
 - At least two scenes across the film must have 0 or 1 bullets. A film where every frame is a list is
   a slide deck, however good the writing is.
+
+EVERY SCENE IS SEVERAL SCREENS
+A scene of ten seconds or more is cut into two, three or four screens, and its bullets and its
+statistic are dealt out across them -- so the picture changes three or four times while one paragraph
+of narration is spoken. You do not schedule this and cannot control it directly. What you control is
+whether there is anything to cut *to*: a scene with one bullet and no number holds one screen for its
+whole length however long it runs. Give a long scene three or four short bullets and it becomes a
+sequence of screens; give it one and it is a held frame.
 
 FIELDS
 - "title": 3-7 words. Concrete and specific. No colon-subtitle, no "The Ultimate Guide To".

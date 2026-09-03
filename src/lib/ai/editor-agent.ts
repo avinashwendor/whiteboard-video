@@ -37,12 +37,13 @@ OPERATIONS
     visualTheme     a palette. Editorial (near-black, one plate of colour, cover type): "obsidian" | "noir" | "ember" | "newsprint".
                     Glass (blooms of light, frosted panels, brushed metal): "cobalt" | "abyss" | "daylight".
                     Printed (ruled paper, hard shadows, marker): "clean-light" | "studio-dark" | "cyber-blue" | "sunset".
-    shot            the composition: "bracket" | "statement" | "metric" | "contrast" | "tree" | "process" | "deck" | "collage" | "split" | "hero" | "takeaway"
+    shot            the composition, Modern videos only: "bracket" | "statement" | "metric" | "contrast" | "tree" | "process" | "deck" | "collage" | "split" | "hero" | "takeaway"
   Video fields, and nothing else:
     title           text
     description     text
     videoStyle      "whiteboard" | "hyperframes"   (the rendering engine, not a mood)
     musicMood       "calm" | "curious" | "driving" | "warm" | "serious" | "none"
+    boardStock      the surface, whiteboard videos only: "marker" | "blueprint" | "chalk" | "kraft" | "legal"
     introDuration   seconds, 0-20
     voiceDelay      seconds, 0-10
   A mood or a feeling is musicMood and visualTheme. It is never videoStyle.

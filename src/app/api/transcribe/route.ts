@@ -4,6 +4,8 @@ import { acquire, clientKey } from "@/lib/utils/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Uploads audio and waits on a provider; comfortably past any short default. */
+export const maxDuration = 120;
 
 const LIMITS = { capacity: 50, windowMs: 60_000, maxConcurrent: 5 };
 
@@ -24,11 +26,18 @@ export async function POST(req: Request) {
     } finally {
       permit.release();
     }
-  } catch (err: any) {
+  } catch (err) {
     console.error("Transcription error:", err);
-    return NextResponse.json(
-      { error: err.message || "Failed to transcribe audio" },
-      { status: err.status || 500 }
-    );
+    // A thrown value is not necessarily an Error, and a provider's own error
+    // often carries the status worth passing on. Both are read defensively
+    // rather than asserted, which is what the `any` here was standing in for.
+    const detail = err as { message?: unknown; status?: unknown };
+    const message =
+      typeof detail?.message === "string" ? detail.message : "Failed to transcribe audio";
+    const status =
+      typeof detail?.status === "number" && detail.status >= 400 && detail.status <= 599
+        ? detail.status
+        : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

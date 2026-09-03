@@ -783,6 +783,29 @@ function VideoAnswer({ generation, running }: { generation: Generation; running:
             {project.scenes.length} scenes · ~{Math.round(runtime)}s ·{" "}
             {project.videoStyle === "hyperframes" ? "Modern frames" : "Whiteboard"}
           </p>
+          {/*
+            A run can finish with scenes that did not. The commonest is a voice
+            request that fell over: the video is complete, plays start to
+            finish, and one shot in the middle is silent. Saying so here is the
+            difference between a fixable problem and a mystery, because this
+            card is what people look at — most never open the editor.
+          */}
+          {(() => {
+            const silent = project.scenes.filter(
+              (scene) => scene.narration.trim() && !scene.audio,
+            ).length;
+            const broken = project.scenes.filter((scene) => scene.status === "error").length;
+            if (!silent && !broken) return null;
+            const parts = [
+              broken ? `${broken} scene${broken > 1 ? "s" : ""} didn't generate` : null,
+              silent ? `${silent} ${silent > 1 ? "play" : "plays"} silent` : null,
+            ].filter(Boolean);
+            return (
+              <p className="mt-1.5 text-[12px] leading-relaxed text-danger">
+                {parts.join(" · ")} — open the editor to fix.
+              </p>
+            );
+          })()}
         </div>
         <Link
           href={`/editor/${generation.id}`}

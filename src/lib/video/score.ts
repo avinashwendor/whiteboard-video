@@ -16,22 +16,23 @@ import { moodRoot, type MusicMood } from "./music";
  * 1. **Every `at` is a landing time.** The scheduler subtracts each voice's
  *    own approach, so nothing here has to carry a hand-tuned offset -- and
  *    nothing arrives late because somebody forgot one.
- * 2. **The palette answers to the picture.** A glass panel resolving gets a
- *    glass voice; a hard modern cut gets weight under it; a marker stroke gets
- *    a marker. The same event list over a different engine sounds different.
+ * 2. **The palette answers to the picture.** A hard modern cut gets weight
+ *    under it; a marker stroke gets a marker. The same event list over a
+ *    different engine sounds different.
  * 3. **The last pass is a mixdown, not a list.** Cues collide -- two beats
- *    inside a tenth of a second, a chime under an impact -- and a schedule
- *    that plays all of them is the thing people mean by "the sound effects are
- *    a mess". `declutter` keeps the important hit and drops the one nobody
- *    would have missed.
+ *    inside a tenth of a second, a mark under an impact -- and a schedule that
+ *    plays all of them is the thing people mean by "the sound effects are a
+ *    mess". `declutter` keeps the important hit and drops the one nobody would
+ *    have missed.
+ * 4. **Nothing rings.** Every resolution is weight rather than a bell. See the
+ *    note at the top of `sfx.ts` -- a tonal tail is the single most
+ *    distracting thing a soundtrack can put over a talking video.
  */
 
 /** How loud a voice is allowed to be relative to the others when they collide. */
 const PRIORITY: Record<SfxName, number> = {
   impact: 100,
-  chime: 90,
   riser: 85,
-  glass: 80,
   thud: 70,
   sub: 68,
   whoosh: 60,
@@ -64,10 +65,20 @@ export interface ScoredScene {
    * The shot this scene is cut as, when the modern engine is driving.
    *
    * Sound follows picture: a fanned deck of cards wants a different mark from
-   * a counting statistic, and a scene of glass panels wants the one voice in
-   * the palette that sounds like glass.
+   * a counting statistic.
    */
   role?: string;
+  /**
+   * Where the picture cuts *inside* this scene, in scene time.
+   *
+   * A scene is several screens now, and a screen changing in silence is the
+   * one thing that reads as a glitch rather than an edit -- the eye registers
+   * the change and the ear says nothing happened. These get air, and nothing
+   * else: an internal cut is a smaller event than a scene change and must
+   * sound like one, or a film with eighteen screens in it becomes eighteen
+   * whooshes.
+   */
+  panelCuts?: number[];
 }
 
 export interface ScoreInput {
@@ -126,9 +137,6 @@ function declutter(events: SfxEvent[]): SfxEvent[] {
   return kept;
 }
 
-/** Shots whose subject is a surface rather than a mark. */
-const GLASSY = new Set(["glass", "panel", "deck", "tree", "bracket", "quote"]);
-
 export function buildScore(input: ScoreInput): Score {
   const key = moodRoot(input.mood ?? "calm");
   const events: SfxEvent[] = [];
@@ -151,11 +159,10 @@ export function buildScore(input: ScoreInput): Score {
   const titleLands = Math.max(SFX_LEAD.reverse, input.coverDuration * 0.42);
   push("reverse", titleLands, 0.7, "title");
   push(modern ? "impact" : "thud", titleLands, 0.85, "title");
-  push("glass", titleLands + 0.12, modern ? 0.5 : 0.3, "title");
+  push("sub", titleLands, modern ? 0.5 : 0.3, "title");
 
   input.scenes.forEach((scene, index) => {
     const { start } = scene;
-    const glassy = modern && GLASSY.has(scene.role ?? "");
 
     /* --------------------------------- the cut -------------------------------- */
 
@@ -166,6 +173,13 @@ export function buildScore(input: ScoreInput): Score {
 
     if (scene.hasNarration) {
       duck.push({ from: start + scene.lead, to: start + scene.lead + scene.speech });
+    }
+
+    /* ------------------------------ inner cuts ------------------------------- */
+
+    for (const [cut, at] of (scene.panelCuts ?? []).entries()) {
+      if (at <= 0.2 || at >= scene.duration - 0.2) continue;
+      push("swish", start + at, 0.45, `panel:${index}:${cut}`);
     }
 
     /* --------------------------------- beats ---------------------------------- */
@@ -179,7 +193,7 @@ export function buildScore(input: ScoreInput): Score {
         // marks a frame apart is not emphasis, it is a stumble.
         if (cue.at < 0.12) return;
         // Otherwise the shot locking into position, not an item arriving.
-        push(glassy ? "glass" : "latch", at, glassy ? 0.6 : 0.55, `beat:${index}:0`);
+        push("latch", at, 0.5, `beat:${index}:0`);
         return;
       }
 
@@ -195,16 +209,20 @@ export function buildScore(input: ScoreInput): Score {
 
     if (scene.statAt != null) {
       const at = start + scene.statAt;
-      push("riser", at, 0.8, `stat:${index}`);
-      push(index === input.scenes.length - 1 ? "impact" : "chime", at, 0.75, `stat:${index}`);
+      // The riser does the work; the landing is weight, not a bell.
+      push("riser", at, 0.7, `stat:${index}`);
+      push("impact", at, 0.6, `stat:${index}`);
     }
   });
 
   /* --------------------------------- the end -------------------------------- */
 
   // The last thing heard is the end of the last scene, not another effect.
+  // A closing bell is the most tempting mark in the whole palette and the one
+  // that most reliably makes a video feel like a corporate slideshow, so the
+  // film simply runs out: one low note under the final frame, then the bed.
   const last = input.scenes[input.scenes.length - 1];
-  if (last) push("chime", last.start + last.duration - 1.2, 0.45, "close");
+  if (last) push("sub", last.start + last.duration - 1.2, 0.4, "close");
 
   return { sfx: declutter(events), duck, key };
 }

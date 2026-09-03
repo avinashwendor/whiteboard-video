@@ -28,6 +28,7 @@ import {
   colourOf,
   setBoardStock,
 } from "../src/lib/whiteboard/palette";
+import { composeScene } from "../src/lib/whiteboard/scene";
 
 let failures = 0;
 function assert(condition: boolean, message: string) {
@@ -269,6 +270,44 @@ function contrast(a: string, b: string): number {
   // An unknown name must not leave a video drawing on nothing.
   setBoardStock("nonsense" as never);
   assert(COLOURS.paper === BOARD_STOCKS.marker.colours.paper, "an unknown stock falls back");
+
+  /**
+   * The one that actually bites.
+   *
+   * A layout bakes its colours in when it is *composed*, not when it is
+   * painted. Choose the stock after that and the paper turns dark while the
+   * drawing keeps the ink it was built with: a board that is genuinely there
+   * and completely invisible. Nothing throws, and the canvas is not blank --
+   * it is a dark rectangle with dark lines on it.
+   */
+  const spec = {
+    layout: "icons" as const,
+    title: "Where it breaks",
+    items: [
+      { icon: "database", label: "Store" },
+      { icon: "gauge", label: "Measure" },
+    ],
+  };
+
+  const inksUnder = (name: Parameters<typeof setBoardStock>[0]) => {
+    setBoardStock(name);
+    return composeScene(spec)
+      .beats.flatMap((beat) => beat.prims ?? [])
+      .map((prim) => {
+        const shaded = prim as { colour?: string; fill?: string };
+        return `${shaded.colour ?? ""}|${shaded.fill ?? ""}`;
+      })
+      .join(",");
+  };
+
+  const onWhiteboard = inksUnder("marker");
+  const onSlate = inksUnder("chalk");
+  assert(onWhiteboard.length > 0, "a composed board has colours baked into it at all");
+  assert(
+    onWhiteboard !== onSlate,
+    "composing under a different stock produces different ink -- if this passes trivially, the player is free to swap paper without rebuilding the board",
+  );
+  setBoardStock("marker");
 }
 
 if (failures) {

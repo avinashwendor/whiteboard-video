@@ -20,6 +20,16 @@
  * subtracts it. Callers name the frame the effect belongs on and never think
  * about attack times again.
  *
+ * ## No bells
+ *
+ * There is deliberately nothing in this palette that rings. A bell is the
+ * default reach for "something resolved" and it is the wrong one for a talking
+ * video: a long tonal tail arrives after the picture has already moved on, it
+ * stacks with the next one, and it sits in the same register as the voice. It
+ * is the sound people mean when they say a video's audio is distracting, and
+ * once you have heard it you cannot stop hearing it. Resolution here is done
+ * with weight -- a sub, an impact -- and marks are short and mostly noise.
+ *
  * Everything takes a `BaseAudioContext`, so the same code plays live and
  * renders into the offline context the exporter mixes with.
  */
@@ -32,8 +42,6 @@ export type SfxName =
   | "thud"
   | "impact"
   | "sub"
-  | "chime"
-  | "glass"
   | "key"
   | "latch"
   /* approach -- the hit is somewhere after the node starts */
@@ -54,7 +62,7 @@ export interface SfxEvent {
   gain?: number;
   /**
    * Musical root, in Hz, for the tonal voices. Passing the bed's root is what
-   * keeps a chime from sitting a semitone off the pad underneath it -- the
+   * keeps a mark from sitting a semitone off the pad underneath it -- the
    * detail that separates a scored video from one with sounds on it.
    */
   key?: number;
@@ -86,8 +94,6 @@ export const SFX_LEAD: Record<SfxName, number> = {
   thud: 0,
   impact: 0,
   sub: 0,
-  chime: 0,
-  glass: 0,
   key: 0,
   latch: 0,
   swish: 0.17,
@@ -96,16 +102,40 @@ export const SFX_LEAD: Record<SfxName, number> = {
   riser: 0.92,
 };
 
+/**
+ * Where each voice sits, relative to the narration.
+ *
+ * The distinction that matters for distraction is not "how long does it last"
+ * but "how long does it last *in the register the voice occupies*". A sub can
+ * decay for the better part of a second and read as weight, because nothing
+ * about a 40Hz tail competes with speech. The same decay at 800Hz is a bell,
+ * and a bell is the thing you cannot stop hearing.
+ *
+ * So: anything in `body` or `bright` must be short. `sub` is allowed to hang.
+ */
+export const SFX_REGISTER: Record<SfxName, "sub" | "body" | "bright"> = {
+  tick: "bright",
+  key: "bright",
+  latch: "bright",
+  swish: "bright",
+  stroke: "bright",
+  pop: "body",
+  whoosh: "body",
+  reverse: "body",
+  riser: "body",
+  impact: "body",
+  thud: "sub",
+  sub: "sub",
+};
+
 /** How long each voice rings on past its transient, for overlap checks. */
 export const SFX_TAIL: Record<SfxName, number> = {
   tick: 0.05,
-  pop: 0.2,
+  pop: 0.1,
   stroke: 0.14,
   thud: 0.32,
   impact: 0.5,
   sub: 0.7,
-  chime: 1.5,
-  glass: 0.9,
   key: 0.12,
   latch: 0.09,
   swish: 0.2,
@@ -204,35 +234,40 @@ function stroke({ ctx, out, at, level, seed }: VoiceContext) {
 }
 
 /**
- * A soft blip for something arriving on the board.
+ * A soft knock for something arriving on the board.
  *
- * Pitched off the bed's root rather than a fixed frequency, and stepped up the
- * triad as marks accumulate, so a row of four items reads as a phrase instead
- * of four identical bleeps.
+ * Deliberately not a bleep. An exposed sine with a long decay rings, and a
+ * ring is the one thing in a soundtrack a viewer cannot stop hearing -- it
+ * arrives after the picture has moved on and it stacks with the next one. So
+ * this is mostly a short noise transient with just enough pitch under it to
+ * have a body, tuned to the bed and stepped up the triad so a row of four
+ * items reads as a phrase rather than four identical taps.
  */
 function pop({ ctx, out, at, level, key, seed }: VoiceContext) {
   const degree = [0, 4, 7, 11, 12][Math.floor(seed) % 5];
-  const base = semitone(key * 4, degree);
+  // Two octaves down from where this used to sit: a body, not a bell.
+  const base = semitone(key * 2, degree);
 
   const osc = ctx.createOscillator();
   osc.type = "sine";
-  osc.frequency.setValueAtTime(base * 0.62, at);
-  osc.frequency.exponentialRampToValueAtTime(base, at + 0.055);
+  osc.frequency.setValueAtTime(base * 0.7, at);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.42, at + 0.07);
 
-  // A breath of noise on the front gives the sine an edge to land on; a pure
-  // sine alone is felt rather than heard against speech.
+  // The noise carries the mark; the pitch is only underneath it.
   const air = ctx.createBufferSource();
-  air.buffer = noiseBuffer(ctx, 0.03, seed * 17 + 1);
+  air.buffer = noiseBuffer(ctx, 0.05, seed * 17 + 1);
   const airFilter = ctx.createBiquadFilter();
-  airFilter.type = "highpass";
-  airFilter.frequency.value = 3_200;
+  airFilter.type = "bandpass";
+  airFilter.frequency.value = 1_800 + jitter(seed + 5) * 700;
+  airFilter.Q.value = 0.8;
 
-  osc.connect(envelope(ctx, at, 0.006, 0.16, 0.12 * level)).connect(out);
-  air.connect(airFilter).connect(envelope(ctx, at, 0.002, 0.03, 0.05 * level)).connect(out);
+  // Short enough that it is over before the next word is spoken.
+  osc.connect(envelope(ctx, at, 0.004, 0.075, 0.075 * level)).connect(out);
+  air.connect(airFilter).connect(envelope(ctx, at, 0.002, 0.05, 0.05 * level)).connect(out);
   osc.start(at);
-  osc.stop(at + 0.25);
+  osc.stop(at + 0.12);
   air.start(at);
-  air.stop(at + 0.06);
+  air.stop(at + 0.08);
 }
 
 /** A dry click for a step landing. */
@@ -370,7 +405,8 @@ function riser({ ctx, out, at, level, key: root, seed }: VoiceContext) {
 
   const osc = ctx.createOscillator();
   osc.type = "sawtooth";
-  // Rises to the fifth above the bed's root, so the landing chime completes it.
+  // Rises to the fifth above the bed's root, so the impact that lands on it
+  // arrives as a resolution rather than as an interruption.
   osc.frequency.setValueAtTime(semitone(root, -12), start);
   osc.frequency.exponentialRampToValueAtTime(semitone(root, 7), at);
 
@@ -402,48 +438,6 @@ function riser({ ctx, out, at, level, key: root, seed }: VoiceContext) {
   osc.stop(at + 0.18);
   air.start(start);
   air.stop(at + 0.16);
-}
-
-/** A small bell for a conclusion, built on the bed's own root. */
-function chime({ ctx, out, at, level, key: root }: VoiceContext) {
-  // Root, fifth and a high partial: a bell without a sample, in key.
-  for (const [steps, weight] of [
-    [12, 1],
-    [19, 0.5],
-    [24, 0.28],
-  ] as const) {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = semitone(root, steps);
-    const gain = envelope(ctx, at, 0.01, 1.5, 0.1 * level * weight);
-    osc.connect(gain).connect(out);
-    osc.start(at);
-    osc.stop(at + 1.8);
-  }
-}
-
-/**
- * Bright, glassy, with a long shimmer. For a panel resolving into place.
- *
- * The glass frames in this engine are the one place a decorative sound is
- * earned: the surface is the subject of the shot, so it gets a voice.
- */
-function glass({ ctx, out, at, level, key: root, seed }: VoiceContext) {
-  for (const [index, steps] of [24, 31, 36, 43].entries()) {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = semitone(root, steps) * (1 + (jitter(seed + index) - 0.5) * 0.004);
-    const gain = envelope(
-      ctx,
-      at + index * 0.012,
-      0.006,
-      0.55 + index * 0.12,
-      0.045 * level * (1 - index * 0.18),
-    );
-    osc.connect(gain).connect(out);
-    osc.start(at);
-    osc.stop(at + 1.1);
-  }
 }
 
 /** Weight under a hard cut. */
@@ -506,8 +500,6 @@ const VOICES: Record<SfxName, (voice: VoiceContext) => void> = {
   swish,
   reverse,
   riser,
-  chime,
-  glass,
   thud,
   impact,
   sub,
