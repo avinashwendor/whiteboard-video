@@ -37,6 +37,7 @@ import {
 } from "@/rescript/lib/edits";
 import type { ClipSegment, Word } from "@/rescript/lib/types";
 import { isDisfluencyPlaceholder } from "@/rescript/lib/disfluencies";
+import { findPauses, formatPause } from "@/rescript/lib/pauses";
 import { VAD_SAMPLE_RATE } from "@/rescript/lib/vad";
 import { peakBetween } from "@/rescript/lib/waveform";
 import { useCutRanges } from "@/rescript/hooks/useCutRanges";
@@ -604,6 +605,27 @@ export default function Timeline() {
     return words.filter((w) => w.end >= t0 && w.start <= t1);
   }, [words, pps, scrollLeft, width]);
 
+  /**
+   * Silence, drawn as its own chip on the wordbar.
+   *
+   * Without this a pause is just the empty space between two word chips —
+   * visible, but nothing you can point at. Computed from the full word list
+   * rather than the visible window so a gap is not invented at the edge of a
+   * scroll, then narrowed to what is on screen.
+   */
+  const visiblePauses = useMemo(() => {
+    const kept = words.filter((w) => !isWordCutOut(w, cuts));
+    const t0 = scrollLeft / pps - 1;
+    const t1 = (scrollLeft + width) / pps + 1;
+    return findPauses(kept, { duration }).filter(
+      (p) =>
+        p.end >= t0 &&
+        p.start <= t1 &&
+        // Already-cut silence is not on offer; the cut region renders instead.
+        !cuts.some((c) => c.start <= p.start + 0.01 && c.end >= p.end - 0.01)
+    );
+  }, [words, cuts, duration, pps, scrollLeft, width]);
+
   const playheadX = currentTime * pps - scrollLeft;
   const showHandles = pps >= HANDLE_VIS_PPS;
 
@@ -926,6 +948,36 @@ export default function Timeline() {
                     />
                   )}
                 </div>
+              );
+            })}
+
+            {/* Silence chips: the gaps between words, made clickable. */}
+            {visiblePauses.map((p) => {
+              const pWidth = Math.max(4, p.duration * pps - 1);
+              // Only label it when the chip is wide enough to read.
+              const label = pWidth > 26 ? formatPause(p.duration) : "";
+              return (
+                <button
+                  key={`pause-${p.start.toFixed(3)}`}
+                  type="button"
+                  data-tl-interactive
+                  data-tl-pause=""
+                  title={t("transcript.removePause")}
+                  aria-label={`${t("transcript.removePause")} ${formatPause(p.duration)}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    useEditorStore.getState().cutRanges([{ start: p.start, end: p.end }]);
+                  }}
+                  className="tl-pause absolute z-[3] flex cursor-pointer items-center justify-center overflow-hidden rounded-md border border-dashed border-zinc-300/90 bg-zinc-50/70 text-[9px] leading-none text-zinc-400 transition hover:border-red-300 hover:bg-red-50 hover:text-red-500 dark:border-zinc-600/90 dark:bg-zinc-800/50 dark:text-zinc-500 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  style={{
+                    left: p.start * pps,
+                    top: RULER_H + 5,
+                    width: pWidth,
+                    height: WORDBAR_H - 10,
+                  }}
+                >
+                  {label}
+                </button>
               );
             })}
 

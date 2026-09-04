@@ -69,6 +69,7 @@ export const de: Record<MessageKey, string> = {
   "transcript.correct": "Korrigieren",
   "transcript.scrollWithPlayhead": "Mit der Abspielposition scrollen",
   "transcript.joinSplit": "Clip geteilt — klicken, um diese Clips zu verbinden",
+  "transcript.removePause": "Diese Pause entfernen",
   "transcript.editorLabel": "Transkript",
   "transcript.slashTitle": "Einfügen",
   "transcript.slashSplit": "Hier teilen",

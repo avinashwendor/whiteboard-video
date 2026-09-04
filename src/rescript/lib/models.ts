@@ -2,6 +2,8 @@
 export type WhisperModel =
   | "base"
   | "small"
+  /** Telugu fine-tune from Speech Lab, IIT Madras. Exported locally to ONNX. */
+  | "teluguSmall"
   // | "medium"
   /** CrisperWhisper 2.0 Small, exported by tools/crisperwhisper-onnx. */
   // | "crisperSmall"
@@ -52,6 +54,25 @@ export type WhisperModelInfo = ModelDisplay & {
    * have not been published yet — see tools/crisperwhisper-onnx.
    */
   local?: boolean;
+  /**
+   * False when the ONNX export has no cross-attentions, so transformers.js
+   * cannot run DTW for word timestamps ("Model outputs must contain cross
+   * attentions to extract timestamps"). Such a model is decoded at segment
+   * level and the words are timed by CTC forced alignment instead, which
+   * measures boundaries against the audio rather than inferring them.
+   * Defaults to true.
+   */
+  wordTimestamps?: boolean;
+  /**
+   * `no_repeat_ngram_size` for decoding. 4 stops multilingual Whisper falling
+   * into "little bit of a little bit of a…" loops, but it also forbids
+   * repetition the speaker genuinely produced: measured on a Telugu clip where
+   * one phrase is said twice, it banned the second occurrence and the decode
+   * cascaded into nonsense for the rest of the clip — 12 garbled words against
+   * 27 correct ones with it off. Set 0 to disable. Loops are still caught after
+   * the fact by cleanTranscript(). Defaults to 4.
+   */
+  noRepeatNgramSize?: number;
 };
 
 export type ParakeetModelInfo = ModelDisplay & {
@@ -68,11 +89,24 @@ export type ModelInfo = WhisperModelInfo | ParakeetModelInfo;
 export const MODEL_ORDER: ModelId[] = [
   "base",
   "small",
+  "teluguSmall",
   // "medium",
   "parakeet",
   // "crisperSmall",
   // "crisperTurbo",
 ];
+
+/**
+ * Telugu fine-tune: q4 on both halves. The stock WHISPER_DTYPE keeps an fp32
+ * encoder, which for this locally-exported model was 337 MB of the download for
+ * no accuracy that survives into the transcript — onnx-community ship a 66 MB q4
+ * encoder for the same architecture, and a q4 encoder is already proven here
+ * (see CRISPER_SMALL_DTYPE).
+ */
+const WHISPER_Q4_DTYPE = {
+  webgpu: { encoder_model: "q4", decoder_model_merged: "q4" },
+  wasm: { encoder_model: "q4", decoder_model_merged: "q4" },
+} satisfies WhisperModelInfo["dtype"];
 
 const WHISPER_DTYPE = {
   // q4 decoder: q8 fails session creation on onnxruntime-web 1.26
@@ -179,6 +213,7 @@ const WHISPER_DTYPE = {
 export const MODELS: {
   base: WhisperModelInfo;
   small: WhisperModelInfo;
+  teluguSmall: WhisperModelInfo;
   // medium: WhisperModelInfo;
   parakeet: ParakeetModelInfo;
   // crisperSmall: WhisperModelInfo;
@@ -199,6 +234,34 @@ export const MODELS: {
     description: "More accurate on longer or noisier audio. Larger download.",
     size: "~600 MB",
     dtype: WHISPER_DTYPE,
+  },
+  /**
+   * Stock multilingual Whisper cannot write Telugu: at small it exceeds 100%
+   * WER, emitting a run of Telugu syllables with no word boundaries — the
+   * documented insertion-error failure for low-resource Indic languages. This
+   * fine-tune reports 9.47% WER on FLEURS Telugu, better than any cloud ASR
+   * measured on the language, and it keeps code-mixed English ("try", "bat")
+   * in Telugu script rather than dropping it.
+   *
+   * Served from public/models/ because no ONNX export is published; see
+   * tools/export-telugu-onnx. The upstream generation_config ships without
+   * alignment_heads, lang_to_id or task_to_id — word timestamps and the
+   * language/task tokens all need them — so the export grafts them from
+   * openai/whisper-small, whose architecture is identical (vocab 51865,
+   * d_model 768, 12/12 layers).
+   */
+  teluguSmall: {
+    backend: "whisper",
+    id: "whisper-telugu-small",
+    local: true,
+    // Exported without cross-attentions; CTC forced alignment times the words.
+    wordTimestamps: false,
+    // This checkpoint repeats phrases faithfully; the guard corrupts it.
+    noRepeatNgramSize: 0,
+    label: "Telugu (IIT Madras)",
+    description: "Fine-tuned for Telugu. Use this for Telugu or Tenglish audio.",
+    size: "~310 MB",
+    dtype: WHISPER_Q4_DTYPE,
   },
   // medium: {
   //   backend: "whisper",
@@ -266,6 +329,7 @@ export function isWhisperModel(value: unknown): value is WhisperModel {
   return (
     value === "base" ||
     value === "small" ||
+    value === "teluguSmall" ||
     value === "medium" ||
     value === "crisperSmall" ||
     value === "crisperTurbo"

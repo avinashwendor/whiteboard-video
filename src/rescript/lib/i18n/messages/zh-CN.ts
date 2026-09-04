@@ -69,6 +69,7 @@ export const zhCN: Record<MessageKey, string> = {
   "transcript.correct": "纠正",
   "transcript.scrollWithPlayhead": "跟随播放位置滚动",
   "transcript.joinSplit": "片段分割点 — 点击以合并片段",
+  "transcript.removePause": "删除此停顿",
   "transcript.editorLabel": "转录稿",
   "transcript.slashTitle": "插入",
   "transcript.slashSplit": "在此拆分",

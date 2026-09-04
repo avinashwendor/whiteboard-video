@@ -69,6 +69,7 @@ export const zhTW: Record<MessageKey, string> = {
   "transcript.correct": "修正",
   "transcript.scrollWithPlayhead": "隨播放頭捲動",
   "transcript.joinSplit": "片段分割 — 點一下即可合併這些片段",
+  "transcript.removePause": "刪除此停頓",
   "transcript.editorLabel": "逐字稿",
   "transcript.slashTitle": "插入",
   "transcript.slashSplit": "在此分割",
