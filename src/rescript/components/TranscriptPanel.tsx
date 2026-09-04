@@ -19,6 +19,7 @@ import { FloatingPortal } from "@floating-ui/react";
 import { useEditorStore } from "@/rescript/lib/store";
 import { isDisfluencyPlaceholder } from "@/rescript/lib/disfluencies";
 import TranscriptToolsMenu from "./TranscriptToolsMenu";
+import ProofreadButton from "./ProofreadButton";
 import {
   isTranscriptFile,
   parseTranscriptFile,
@@ -528,6 +529,7 @@ export default function TranscriptPanel() {
             </span>
           )}
           {status === "ready" && <TranscriptToolsMenu />}
+          {status === "ready" && words.length > 0 && <ProofreadButton />}
           {(status === "ready" || status === "error" || status === "transcribing") && (
             <>
               <label
