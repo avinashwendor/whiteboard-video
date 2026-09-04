@@ -44,6 +44,21 @@ for (let i = 0; i < Number(process.env.LINES ?? 600); i++) {
 async function main() {
   const plan = await planRescriptEdit({
   instruction: process.argv[2] ?? "Analyse this and propose an edit for a vertical short",
+  /**
+   * GLANCES=1 attaches a frame, which is what the editor does and the probe
+   * never did — the gap that hid a provider rejecting image parts outright.
+   */
+  ...(process.env.GLANCES
+    ? {
+        glances: [
+          {
+            at: 1,
+            dataUrl:
+              "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          },
+        ],
+      }
+    : {}),
   mode: (process.argv[3] as "propose" | "execute") ?? "propose",
   context: {
     duration: t,

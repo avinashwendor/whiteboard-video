@@ -1499,6 +1499,39 @@ still what the video is *about*.`,
    * maxima, and a model whose real window is smaller than its entry is exactly
    * the case that estimate cannot catch.
    */
+  /**
+   * Set once a provider has refused the frames, so later turns stop sending
+   * them instead of paying for the same rejection every turn.
+   */
+  let imagesRefused = false;
+
+  /** Whether any message still carries an `image_url` part. */
+  const hasImageParts = (list: ChatMessage[]): boolean =>
+    list.some(
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some(
+          (part) => (part as { type?: string })?.type === "image_url"
+        )
+    );
+
+  /**
+   * Flatten multimodal content back to the text it was wrapped around, in
+   * place. The prose already names each frame and its timestamp, so what
+   * survives still reads as a coherent instruction rather than a dangling
+   * reference to pictures that are no longer attached.
+   */
+  const stripImageParts = (list: ChatMessage[]): void => {
+    for (const message of list) {
+      if (!Array.isArray(message.content)) continue;
+      const text = message.content
+        .filter((part) => (part as { type?: string })?.type === "text")
+        .map((part) => (part as { text?: string }).text ?? "")
+        .join("\n");
+      (message as { content: unknown }).content = text;
+    }
+  };
+
   const ask = async (
     turn: number,
     squeeze = 1
@@ -1522,24 +1555,64 @@ still what the video is *about*.`,
     }
 
     let finishReason: string | undefined;
-    const text = await runTurn(
-      {
-        messages: packed.messages,
-        model: input.model,
-        // Cooler on a retry: the first attempt is allowed some judgement, a
-        // second one is being asked to comply with something specific.
-        temperature: turn === 0 ? 0.35 : 0.15,
-        maxTokens,
-        json: true,
-        signal: input.signal,
-        onMeta: (meta) => {
-          finishReason = meta.finishReason;
+    const send = (list: ChatMessage[]) =>
+      runTurn(
+        {
+          messages: list,
+          model: input.model,
+          // Cooler on a retry: the first attempt is allowed some judgement, a
+          // second one is being asked to comply with something specific.
+          temperature: turn === 0 ? 0.35 : 0.15,
+          maxTokens,
+          json: true,
+          signal: input.signal,
+          onMeta: (meta) => {
+            finishReason = meta.finishReason;
+          },
         },
-      },
-      emit,
-      input.generate
-    );
-    return { text, finishReason };
+        emit,
+        input.generate
+      );
+
+    try {
+      const text = await send(packed.messages);
+      return { text, finishReason };
+    } catch (err) {
+      /**
+       * Not every text model takes pictures, and a provider that does not says
+       * so by rejecting the whole request — there is no capability to read
+       * beforehand and no partial success to detect. Observed against Omega:
+       * the identical plan succeeds text-only and answers
+       * `400 invalid_request` the moment an `image_url` part is attached, so
+       * every request from the editor failed while the agent probe, which has
+       * no video and therefore no frames, passed.
+       *
+       * The frames are an aid to composition, never the content, so dropping
+       * them is the documented fallback rather than a failure. Done once and
+       * remembered, so the rest of the run does not pay for the same rejection.
+       */
+      const refusedImages =
+        err instanceof AppError &&
+        err.code === "invalid_request" &&
+        !imagesRefused &&
+        hasImageParts(messages);
+      if (!refusedImages) throw err;
+
+      imagesRefused = true;
+      stripImageParts(messages);
+      emit?.({
+        type: "retry",
+        reason: "the model would not take the frames — planning from the transcript alone",
+      });
+      const retry = packMessages({
+        pinned: messages.slice(0, PINNED),
+        body: messages.slice(PINNED),
+        budget,
+        keepRecent: 4,
+      });
+      const text = await send(retry.messages);
+      return { text, finishReason };
+    }
   };
 
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
