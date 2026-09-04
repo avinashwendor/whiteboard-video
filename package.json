@@ -38,7 +38,8 @@
     "test:limits": "tsx tests/limits-test.ts",
     "test:panels": "tsx tests/panels-test.ts",
     "test:media": "tsx tests/media-test.ts",
-    "eval": "tsx evals/run.mts"
+    "eval": "tsx evals/run.mts",
+    "export:telugu": "python3 tools/export-telugu-onnx/export.py"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",
