@@ -29,6 +29,7 @@ export const en = {
   "model.scriptNative": "Native",
   "model.scriptRoman": "Roman",
   "model.importTranscript": "Import transcript",
+  "model.notInstalled": "Not installed",
   "upload.continueProject": "Continue where you left off",
   "upload.recentProjects": "Recent projects",
   "upload.removeRecent": "Remove from recent",
@@ -187,6 +188,7 @@ export const en = {
   "progress.speakers": "Identifying speakers…",
   "error.selectModel": "Select a speech model to transcribe.",
   "error.workerCrashed": "Transcription worker crashed.",
+  "error.modelNotInstalled": "This speech model is not installed in this build. Rebuild it with tools/export-telugu-onnx, or pick another model.",
   "error.mediaEngineNetwork":
     "Couldn't load the media engine — the connection dropped. Check your internet and try again.",
   "error.processFile": "Failed to process this file.",

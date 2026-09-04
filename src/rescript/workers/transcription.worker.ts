@@ -79,6 +79,7 @@ import {
 } from "@/rescript/lib/languages";
 import { isIndicLanguage } from "@/rescript/lib/indic";
 import { detectLanguageFromText } from "@/rescript/lib/scriptDetect";
+import { localModelPresent } from "@/rescript/lib/localModels";
 import {
   VAD_FRAME_SIZE,
   VAD_SAMPLE_RATE,
@@ -426,17 +427,35 @@ function parakeetModel(): ModelDefinition<ParakeetInstance> {
  * enabled makes every Hub model try the local path first and 404 once per
  * file. Scoping it to the load keeps both paths clean.
  */
-function servedLocally<T>(definition: ModelDefinition<T>): ModelDefinition<T> {
+function servedLocally<T>(definition: ModelDefinition<T>, id: string): ModelDefinition<T> {
   const withLocalPath = async <R,>(fn: () => Promise<R>): Promise<R> => {
     const previousAllow = env.allowLocalModels;
     const previousPath = env.localModelPath;
+    const previousRemote = env.allowRemoteModels;
     env.allowLocalModels = true;
     env.localModelPath = LOCAL_MODEL_PATH;
+    /**
+     * No Hub fallback while a local model loads.
+     *
+     * These ids are directory names under public/models/, not Hub repos. Left
+     * enabled, a missing file falls through to the Hub and fails as
+     * `Unauthorized access to file: huggingface.co/<id>/config.json` — a 401 for
+     * a repository that was never supposed to exist, which reads as an auth
+     * problem rather than "the weights were not deployed". That is exactly what
+     * a build without them reports, because they are too large to commit.
+     */
+    env.allowRemoteModels = false;
     try {
       return await fn();
+    } catch (err) {
+      if (!(await localModelPresent(id))) {
+        throw new Error(en["error.modelNotInstalled"]);
+      }
+      throw err;
     } finally {
       env.allowLocalModels = previousAllow;
       env.localModelPath = previousPath;
+      env.allowRemoteModels = previousRemote;
     }
   };
 
@@ -475,7 +494,7 @@ const models = new ModelManager({
         // them — stay alive with no way left to reach them. See releaseAsr().
         dispose: (transcriber) => transcriber.dispose(),
       });
-      return [info.id, info.local ? servedLocally(definition) : definition];
+      return [info.id, info.local ? servedLocally(definition, info.id) : definition];
     })
   ),
 });

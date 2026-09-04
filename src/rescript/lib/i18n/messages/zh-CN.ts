@@ -30,6 +30,7 @@ export const zhCN: Record<MessageKey, string> = {
   "model.scriptNative": "原文",
   "model.scriptRoman": "罗马音",
   "model.importTranscript": "导入转录文本",
+  "model.notInstalled": "未安装",
   "upload.continueProject": "继续上次的项目",
   "upload.recentProjects": "最近项目",
   "upload.removeRecent": "从最近项目中移除",
@@ -187,6 +188,7 @@ export const zhCN: Record<MessageKey, string> = {
   "progress.speakers": "正在识别说话人…",
   "error.selectModel": "请选择用于转录的语音模型。",
   "error.workerCrashed": "转录进程发生崩溃。",
+  "error.modelNotInstalled": "此构建未安装该语音模型。请重新生成或选择其他模型。",
   "error.mediaEngineNetwork":
     "媒体引擎加载失败，网络连接已中断。请检查网络后重试。",
   "error.processFile": "无法处理此文件。",

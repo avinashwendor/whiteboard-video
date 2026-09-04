@@ -46,6 +46,8 @@ import {
   useEditorStore,
 } from "@/rescript/lib/store";
 import { hasIndicChars } from "@/rescript/lib/indic";
+import { localModelPresent } from "@/rescript/lib/localModels";
+import { isLocalModel } from "@/rescript/lib/models";
 import Popover, { PopoverContent, PopoverTrigger } from "./Popover";
 import { useI18n } from "./I18nProvider";
 
@@ -359,11 +361,32 @@ export function ModelOption({
   autoTrigger?: boolean;
 }) {
   const selector = useSelectorCtx();
+  const { t } = useI18n();
   const selected = selector.value === id;
 
   const Icon = icon ?? SOURCE_ICONS[id];
   const resolvedLabel = label ?? (isModelId(id) ? MODELS[id].label : id);
-  const resolvedMeta = meta ?? (isModelId(id) ? MODELS[id].size : undefined);
+  const baseMeta = meta ?? (isModelId(id) ? MODELS[id].size : undefined);
+
+  /**
+   * A model served from public/models/ may be absent: those weights are
+   * gitignored, so a deployment ships the row without the files. Probe once and
+   * mark the row rather than letting the user pick it and wait for a failure.
+   */
+  const isLocal = isModelId(id) && isLocalModel(id);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    if (!isLocal || !isModelId(id)) return;
+    let live = true;
+    localModelPresent(MODELS[id].id).then((present) => {
+      if (live) setMissing(!present);
+    });
+    return () => {
+      live = false;
+    };
+  }, [isLocal, id]);
+
+  const resolvedMeta = missing ? t("model.notInstalled") : baseMeta;
 
   const optionCtx = useMemo<ModelOptionContextValue>(
     () => ({
@@ -379,6 +402,7 @@ export function ModelOption({
   useOptionTrigger(id, { label: resolvedLabel, icon: Icon }, autoTrigger);
 
   const handleClick = () => {
+    if (missing) return;
     if (onSelect) {
       onSelect(optionCtx);
       return;
@@ -393,8 +417,10 @@ export function ModelOption({
         type="button"
         role="option"
         aria-selected={selected}
+        aria-disabled={missing}
+        data-missing={missing ? "" : undefined}
         onClick={handleClick}
-        className={`flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left transition cursor-pointer ${selected
+        className={`flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left transition ${missing ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${selected
             ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50"
             : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"
           }`}
