@@ -1,6 +1,18 @@
 export type TranscriptLanguage = "en" | "es" | "fr" | "de" | "zh" | "te";
 
 /**
+ * What the user picked on the model menu: one specific language, or "auto" to
+ * let Whisper decide.
+ *
+ * "auto" matters more than it looks. Whisper does not *guess* when it is handed
+ * a language — it obeys, and decoding speech as a language it is not produces
+ * fluent nonsense in that language's script rather than an error. A stale
+ * setting is therefore indistinguishable from a broken model, which is exactly
+ * how it fails in practice, so detection is the default.
+ */
+export type TranscriptLanguageSetting = TranscriptLanguage | "auto";
+
+/**
  * Output script for languages that have a non-Latin native script.
  *
  * "native" keeps Whisper's own output (తెలుగు); "roman" transliterates it to
@@ -27,12 +39,18 @@ export interface TranscriptLanguageInfo {
 const LANGUAGE_STORAGE_KEY = "rescript.transcript-language";
 const SCRIPT_STORAGE_KEY = "rescript.transcript-script";
 
-export const DEFAULT_TRANSCRIPT_LANGUAGE: TranscriptLanguage = "en";
+export const DEFAULT_TRANSCRIPT_LANGUAGE: TranscriptLanguageSetting = "auto";
 
 export const TRANSCRIPT_LANGUAGES: Record<
-  TranscriptLanguage,
+  TranscriptLanguageSetting,
   TranscriptLanguageInfo
 > = {
+  auto: {
+    label: "Auto-detect",
+    nativeLabel: "Auto-detect",
+    flag: "🌐",
+    code: "AUTO",
+  },
   en: {
     label: "English",
     nativeLabel: "English",
@@ -72,7 +90,8 @@ export const TRANSCRIPT_LANGUAGES: Record<
   },
 };
 
-export const TRANSCRIPT_LANGUAGE_ORDER: TranscriptLanguage[] = [
+export const TRANSCRIPT_LANGUAGE_ORDER: TranscriptLanguageSetting[] = [
+  "auto",
   "en",
   "es",
   "fr",
@@ -81,7 +100,8 @@ export const TRANSCRIPT_LANGUAGE_ORDER: TranscriptLanguage[] = [
   "te",
 ];
 
-export function isTranscriptLanguage(
+/** A concrete language — excludes "auto". This is what the aligner is keyed by. */
+export function isSpecificLanguage(
   value: unknown
 ): value is TranscriptLanguage {
   return (
@@ -94,8 +114,17 @@ export function isTranscriptLanguage(
   );
 }
 
+/** Anything selectable on the language menu, "auto" included. */
+export function isTranscriptLanguage(
+  value: unknown
+): value is TranscriptLanguageSetting {
+  return value === "auto" || isSpecificLanguage(value);
+}
+
 /** Whether a language exposes the native/roman script toggle. */
-export function isRomanizableLanguage(language: TranscriptLanguage): boolean {
+export function isRomanizableLanguage(
+  language: TranscriptLanguageSetting
+): boolean {
   return TRANSCRIPT_LANGUAGES[language].romanizable === true;
 }
 
@@ -106,7 +135,7 @@ export function isTranscriptScript(value: unknown): value is TranscriptScript {
 export const DEFAULT_TRANSCRIPT_SCRIPT: TranscriptScript = "native";
 
 /** Read the last-selected transcript language from localStorage. */
-export function loadTranscriptLanguagePreference(): TranscriptLanguage {
+export function loadTranscriptLanguagePreference(): TranscriptLanguageSetting {
   if (typeof window === "undefined") return DEFAULT_TRANSCRIPT_LANGUAGE;
   try {
     const raw = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -118,7 +147,9 @@ export function loadTranscriptLanguagePreference(): TranscriptLanguage {
 }
 
 /** Persist the selected transcript language for the next visit. */
-export function saveTranscriptLanguagePreference(language: TranscriptLanguage) {
+export function saveTranscriptLanguagePreference(
+  language: TranscriptLanguageSetting
+) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);

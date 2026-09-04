@@ -72,8 +72,13 @@ import {
   type CtcTokenizerLike,
   type CtcVocab,
 } from "@/rescript/lib/forcedAlign";
-import type { TranscriptLanguage } from "@/rescript/lib/languages";
+import {
+  isSpecificLanguage,
+  type TranscriptLanguage,
+  type TranscriptLanguageSetting,
+} from "@/rescript/lib/languages";
 import { isIndicLanguage } from "@/rescript/lib/indic";
+import { detectLanguageFromText } from "@/rescript/lib/scriptDetect";
 import {
   VAD_FRAME_SIZE,
   VAD_SAMPLE_RATE,
@@ -567,13 +572,34 @@ type Aligner = {
  * Multiple language-specific CTC models are registered; only the one for the
  * active transcript language is loaded.
  */
+/**
+ * Registry key: the weights *and* the text folding, not the weights alone.
+ *
+ * One CTC model can serve several languages under different normalizations —
+ * the MMS aligner takes `latin-lower` for Spanish and `indic-roman` for Telugu,
+ * because Telugu has to be romanized before it can meet a Latin-only vocabulary.
+ * Keying by model id alone silently kept whichever language was declared first
+ * and handed every other one that language's folding: Telugu text met the
+ * `latin-lower` fold, which strips everything outside `[A-Za-z']`, leaving an
+ * empty string. Alignment then found nothing to align and returned null, so
+ * every word silently kept its estimated time and the timeline never matched
+ * the audio.
+ *
+ * Sharing weights is not affected — both entries resolve to the same files, and
+ * Cache Storage dedupes the download by URL.
+ */
+function alignerKey(info: AlignModelInfo): string {
+  return `${info.id}#${info.normalize}`;
+}
+
 function buildAlignerRegistry(): Record<string, ModelDefinition<Aligner>> {
-  const byId = new Map<string, AlignModelInfo>();
+  const byKey = new Map<string, AlignModelInfo>();
   for (const info of Object.values(ALIGN_MODELS)) {
-    if (!byId.has(info.id)) byId.set(info.id, info);
+    const key = alignerKey(info);
+    if (!byKey.has(key)) byKey.set(key, info);
   }
   return Object.fromEntries(
-    [...byId.entries()].map(([id, info]) => [id, alignerModel(info)])
+    [...byKey.entries()].map(([key, info]) => [key, alignerModel(info)])
   );
 }
 
@@ -744,6 +770,46 @@ async function detectSpeechSegments(
 const FALLBACK_WORD_S = 0.5;
 
 /** Map Whisper word chunks from a segment onto the original media timeline. */
+/**
+ * Split segment-level chunks into one chunk per word, with times interpolated
+ * evenly across the segment.
+ *
+ * For a model whose export has no cross-attentions, Whisper can only say "this
+ * sentence spans 2.1s–5.4s". The even split is deliberately a placeholder: CTC
+ * forced alignment in {@link refineWordTimestamps} measures each boundary
+ * against the audio afterwards and overwrites these. It matters only that every
+ * word starts inside its own segment and in order, so the aligner has a sane
+ * seed and the transcript stays clickable even if alignment is skipped.
+ */
+function expandSegmentChunks(
+  chunks: AsrChunk[],
+  segmentDuration: number
+): AsrChunk[] {
+  const words: string[] = [];
+  for (const chunk of chunks) {
+    for (const word of chunk.text.trim().split(/\s+/)) {
+      if (word) words.push(word);
+    }
+  }
+  if (words.length === 0) return [];
+
+  /**
+   * Whisper's own segment times are discarded here rather than divided up.
+   *
+   * A fine-tune that was not trained to emit timestamp tokens returns junk for
+   * them — measured on this Telugu checkpoint, twenty-odd words all came back
+   * inside 0.69s–0.71s. Seeding from that is worse than having no seed at all,
+   * because CTC alignment only searches the window its seed spans: a 0.02s seed
+   * gives the aligner 0.02s of audio to place the whole sentence in, and every
+   * word stays stacked. Spreading across the slice hands it the real window.
+   */
+  const per = segmentDuration / words.length;
+  return words.map((text, i) => ({
+    text,
+    timestamp: [per * i, per * (i + 1)] as [number, number],
+  }));
+}
+
 function wordsFromChunks(
   chunks: AsrChunk[],
   offsetS: number,
@@ -863,7 +929,7 @@ function getAligner(language: TranscriptLanguage): Promise<Aligner> {
   if (!info) {
     return Promise.reject(new Error(`No CTC aligner for language: ${language}`));
   }
-  return aligners.load<Aligner>(info.id);
+  return aligners.load<Aligner>(alignerKey(info));
 }
 
 /** Per-frame log-probabilities for one slice of audio. */
@@ -921,11 +987,12 @@ async function forceAlign(
       value: rec.indeterminate ? null : rec.percent,
     });
   };
-  const unsubscribe = aligners.subscribe((snap) => report(snap.models[info.id]));
+  const key = alignerKey(info);
+  const unsubscribe = aligners.subscribe((snap) => report(snap.models[key]));
   // subscribe() only fires on the next change, so prime from current state: a
   // load that has started but not yet received its first byte would otherwise
   // leave the UI sitting on "Transcribing…".
-  report(aligners.status(info.id));
+  report(aligners.status(key));
   try {
     aligner = await getAligner(language);
   } finally {
@@ -958,6 +1025,17 @@ async function forceAlign(
         console.warn("Forced alignment failed for one batch; keeping decoded times.", err);
       }
     }
+    // alignBatch returns null rather than throwing when the transcript cannot be
+    // encoded into the model's vocabulary — the whole batch then silently keeps
+    // its decoded times, which for an estimated seed means evenly-spaced words
+    // and a timeline that does not line up with the audio. Say so.
+    if (!aligned) {
+      console.warn(
+        `[align] batch of ${batch.length} word(s) at ${from.toFixed(2)}s not aligned ` +
+          `(slice ${(slice.length / VAD_SAMPLE_RATE).toFixed(2)}s); keeping seed times. ` +
+          `First words: ${batch.slice(0, 4).map((w) => w.text).join(" ")}`
+      );
+    }
     out.push(...(aligned ?? batch));
     done++;
     post({ type: "progress", message: en["progress.aligning"], value: done / batches.length });
@@ -973,12 +1051,13 @@ async function forceAlign(
  * 3. Envelope edge expansion of peaky CTC spans
  * 4. Disfluency placeholders (after alignment — "..." has no CTC spelling)
  */
+/** `language` is undefined when auto-detection could not resolve one; that skips CTC. */
 async function refineWordTimestamps(
   words: Word[],
   speechFrames: boolean[],
   audio: Float32Array,
   duration: number,
-  language: TranscriptLanguage
+  language: TranscriptLanguage | undefined
 ): Promise<Word[]> {
   let out = alignWordsToSpeech(words, speechFrames, {
     duration,
@@ -986,7 +1065,7 @@ async function refineWordTimestamps(
     sampleRate: VAD_SAMPLE_RATE,
   });
 
-  if (alignModelFor(language)) {
+  if (language && alignModelFor(language)) {
     try {
       const measured = await forceAlign(out, audio, duration, language);
       out = expandToAcoustics(measured, speechEnvelope(audio, VAD_SAMPLE_RATE));
@@ -1147,11 +1226,16 @@ async function finishWithDiarization(
 async function runParakeet(
   audio: Float32Array,
   duration: number,
-  transcriptLanguage: TranscriptLanguage
+  setting: TranscriptLanguageSetting
 ): Promise<Word[]> {
+  // Parakeet detects the language itself and is never told one, so "auto" just
+  // means we do not know which aligner to warm yet — it is read off the
+  // transcript below, exactly as the auto path in runWhisper does.
+  const transcriptLanguage =
+    setting === "auto" ? undefined : setting;
   // Overlap diarizer (+ language-matched aligner) with Parakeet load.
   getDiarizer().catch(() => {});
-  if (alignModelFor(transcriptLanguage)) {
+  if (transcriptLanguage && alignModelFor(transcriptLanguage)) {
     getAligner(transcriptLanguage).catch(() => {});
   }
   const [loaded, vad] = await Promise.all([getParakeet(), getVad()]);
@@ -1224,22 +1308,135 @@ async function runParakeet(
     speechFrames,
     audio,
     duration,
-    transcriptLanguage
+    transcriptLanguage ??
+      detectLanguageFromText(cleaned.map((w) => w.text).join(" ")) ??
+      undefined
   );
   return finishWithDiarization(words, audio);
+}
+
+/**
+ * Ask Whisper which language it is hearing.
+ *
+ * This has to be done by hand. Omitting `language` does **not** enable
+ * detection in transformers.js — `_retrieve_init_tokens` warns "No language
+ * specified - defaulting to English (en)" and forces `<|en|>`, which is why an
+ * unset language renders Telugu speech as English words rather than failing.
+ *
+ * Whisper's own detection is a single decoder step: feed `<|startoftranscript|>`
+ * and the next-token distribution is over the 99 language tokens. Argmax across
+ * `lang_to_id` is the model's answer, and it is what the real Whisper CLI does
+ * too. Returns a Whisper language code ("te", "hi", "ur", …) — deliberately not
+ * narrowed to the languages we align, because forcing the *wrong* supported
+ * language is the failure this exists to prevent.
+ */
+async function detectSpokenLanguage(
+  transcriber: AutomaticSpeechRecognitionPipeline,
+  probes: Float32Array[]
+): Promise<string | null> {
+  try {
+    const model = transcriber.model as unknown as {
+      generation_config?: {
+        lang_to_id?: Record<string, number>;
+        decoder_start_token_id?: number;
+      };
+      (inputs: Record<string, unknown>): Promise<{
+        logits: { data: Float32Array; dims: number[] };
+      }>;
+    };
+    const config = model.generation_config;
+    const langToId = config?.lang_to_id;
+    const startId = config?.decoder_start_token_id;
+    if (!langToId || startId == null) return null;
+
+    const processor = transcriber.processor as unknown as (
+      audio: Float32Array
+    ) => Promise<Record<string, unknown>>;
+    const tokens = Object.keys(langToId);
+    /** Summed probability per language token across every probe window. */
+    const totals = new Float64Array(tokens.length);
+    let scored = 0;
+
+    for (const probe of probes) {
+      const features = await processor(probe);
+      const decoderInputIds = new Tensor(
+        "int64",
+        BigInt64Array.from([BigInt(startId)]),
+        [1, 1]
+      );
+      const output = await model({
+        ...features,
+        decoder_input_ids: decoderInputIds,
+      });
+
+      const { data, dims } = output.logits;
+      // Score the final position: [batch, seq, vocab], and seq is 1 here.
+      const vocab = dims[dims.length - 1];
+      const base = data.length - vocab;
+
+      // Softmax over the language tokens only, so each window contributes one
+      // unit of confidence. Raw logits would let a single loud window dominate.
+      let max = -Infinity;
+      for (let i = 0; i < tokens.length; i++) {
+        const v = data[base + langToId[tokens[i]]];
+        if (v > max) max = v;
+      }
+      let sum = 0;
+      const exp = new Float64Array(tokens.length);
+      for (let i = 0; i < tokens.length; i++) {
+        const e = Math.exp(data[base + langToId[tokens[i]]] - max);
+        exp[i] = e;
+        sum += e;
+      }
+      if (!(sum > 0) || !Number.isFinite(sum)) continue;
+      for (let i = 0; i < tokens.length; i++) totals[i] += exp[i] / sum;
+      scored++;
+    }
+
+    if (scored === 0) return null;
+
+    const ranked = tokens
+      .map((token, i) => ({ token, p: totals[i] / scored }))
+      .sort((a, b) => b.p - a.p);
+
+    // Log the runners-up: when detection is wrong it is almost always a near
+    // miss between related languages (te/ta/ml/kn), and the margin is the thing
+    // that tells you whether to trust it or pin the language by hand.
+    console.info(
+      `[asr] language candidates: ${ranked
+        .slice(0, 4)
+        .map((r) => `${r.token.slice(2, -2)} ${(r.p * 100).toFixed(1)}%`)
+        .join(", ")} (${scored} window(s))`
+    );
+
+    const code = ranked[0]?.token.slice(2, -2) ?? null;
+    return code && code.length >= 2 ? code : null;
+  } catch (err) {
+    console.warn("Language detection failed; falling back to English.", err);
+    return null;
+  }
 }
 
 async function runWhisper(
   audio: Float32Array,
   duration: number,
   choice: WhisperModel,
-  transcriptLanguage: TranscriptLanguage
+  setting: TranscriptLanguageSetting
 ): Promise<Word[]> {
+  const wordLevelTimestamps = MODELS[choice].wordTimestamps !== false;
+  const auto = setting === "auto";
+  /**
+   * The language token the decoder is given, as a Whisper code. On "auto" this
+   * is filled in by {@link detectSpokenLanguage} once the model is loaded —
+   * never left unset, because unset means English here, not detection.
+   */
+  let decodeLanguage: string | undefined = auto ? undefined : setting;
+
   // Overlap Whisper + Silero downloads; diarizer and language-matched aligner
   // warm in the background so both are cached by the time the transcript lands.
   getDiarizer().catch(() => {});
-  if (alignModelFor(transcriptLanguage)) {
-    getAligner(transcriptLanguage).catch(() => {});
+  if (decodeLanguage && alignModelFor(decodeLanguage)) {
+    getAligner(decodeLanguage as TranscriptLanguage).catch(() => {});
   }
   const [asr, vad] = await Promise.all([getAsr(choice), getVad()]);
   let transcriber = asr;
@@ -1252,6 +1449,39 @@ async function runWhisper(
     (n, s) => n + (s.endSample - s.startSample),
     0
   );
+
+  /**
+   * Detect once, on speech rather than on the whole file (leading silence or
+   * music makes the model guess), then force that language for every segment.
+   * One answer for the clip is the point: detecting per segment lets a single
+   * recording come back as three different languages spliced together.
+   */
+  if (auto && speechSegments.length > 0) {
+    // Sample the *longest* stretches of speech, not simply the first one. The
+    // opening segment is often a half-second of greeting, and 30s of mostly
+    // padded silence is what makes the model guess a neighbouring language.
+    const probes = [...speechSegments]
+      .sort(
+        (a, b) => b.endSample - b.startSample - (a.endSample - a.startSample)
+      )
+      .slice(0, 3)
+      .map((seg) =>
+        audio.slice(
+          seg.startSample,
+          // Whisper's encoder sees 30s; the processor pads or truncates to that.
+          Math.min(seg.startSample + 30 * VAD_SAMPLE_RATE, seg.endSample)
+        )
+      )
+      .filter((probe) => probe.length >= VAD_SAMPLE_RATE * 0.5);
+    const detected = await detectSpokenLanguage(transcriber, probes);
+    if (detected) {
+      decodeLanguage = detected;
+      console.info(`[asr] detected language: ${detected}`);
+      if (alignModelFor(detected)) {
+        getAligner(detected as TranscriptLanguage).catch(() => {});
+      }
+    }
+  }
 
   post({ type: "progress", message: en["progress.transcribing"], value: 0 });
 
@@ -1305,22 +1535,27 @@ async function runWhisper(
     }
   };
 
-  const asrOptions = {
+  const asrOptions = () => ({
     chunk_length_s: chunkLength,
     stride_length_s: stride,
-    return_timestamps: "word" as const,
+    // "word" needs cross-attentions in the export; a model without them is
+    // decoded per segment and timed by CTC instead. See WhisperModelInfo.
+    return_timestamps: wordLevelTimestamps ? ("word" as const) : true,
     // Anti-repetition: Whisper-base on multi-minute audio often falls into
     // loops like "little bit of a little bit of a…" near chunk boundaries
     // or silence. Keep penalty mild — 1.15 truncates multi-speaker clips
     // mid-utterance (second speaker dropped on continuous speech).
-    no_repeat_ngram_size: 4,
+    no_repeat_ngram_size: MODELS[choice].noRepeatNgramSize ?? 4,
     repetition_penalty: 1.05,
     // Plain decoding — no forced decoder prefix. Priming the decoder collapses
     // short VAD segments on every model here, whether with Whisper's
     // <|startofprev|> filler prompt or CrisperWhisper's mode tags. See the note
     // above MODELS in lib/models.ts; vad-regression-test.ts guards it.
-    language: transcriptLanguage,
-  };
+    language: decodeLanguage,
+    // Always transcribe. Left unset the model may predict <|translate|> and
+    // silently hand back an English translation instead of the source language.
+    task: "transcribe" as const,
+  });
 
   const rawWords: Word[] = [];
   const leadPadSamples = Math.floor(WHISPER_LEAD_PAD_S * VAD_SAMPLE_RATE);
@@ -1367,7 +1602,7 @@ async function runWhisper(
           interpolateProgress();
         },
       });
-      const output = await transcriber(slice, { ...asrOptions, streamer });
+      const output = await transcriber(slice, { ...asrOptions(), streamer });
       const result = Array.isArray(output) ? output[0] : output;
       return (result.chunks ?? []) as AsrChunk[];
     };
@@ -1393,7 +1628,12 @@ async function runWhisper(
       chunks = await runSlice();
     }
 
-    const words = wordsFromChunks(chunks, offsetS, sliceDuration, duration);
+    const words = wordsFromChunks(
+      wordLevelTimestamps ? chunks : expandSegmentChunks(chunks, sliceDuration),
+      offsetS,
+      sliceDuration,
+      duration
+    );
     // A segment that decodes to nothing is the signature of a model or prompt
     // that has collapsed on this slice — the timeline fills with "..." VAD
     // placeholders and the transcript silently loses a stretch of speech. It is
@@ -1419,12 +1659,21 @@ async function runWhisper(
   // Post-process: collapse leftover n-gram loops and drop known hallucination
   // phrases ("I'm sorry", "thanks for watching", …) that slip past decoding.
   const cleaned = cleanTranscript(rawWords);
+  /**
+   * Whisper may have detected any of 99 languages; we align a handful. When the
+   * detected one is not among them, fall back to reading the script off the
+   * transcript, and failing that skip CTC entirely (undefined) so the envelope
+   * heuristic does the timing rather than a model that cannot read the text.
+   */
+  const alignLanguage = isSpecificLanguage(decodeLanguage)
+    ? decodeLanguage
+    : (detectLanguageFromText(cleaned.map((w) => w.text).join(" ")) ?? undefined);
   const words = await refineWordTimestamps(
     cleaned,
     speechFrames,
     audio,
     duration,
-    transcriptLanguage
+    alignLanguage
   );
 
   return finishWithDiarization(words, audio);
@@ -1434,7 +1683,12 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const { audio, duration, model, language } = event.data;
   try {
     let choice: ModelId = model ?? "base";
-    const transcriptLanguage: TranscriptLanguage = language ?? "en";
+    let transcriptLanguage: TranscriptLanguageSetting = language ?? "auto";
+
+    // A single-language fine-tune has one right answer, so detection can only
+    // lose here — and it loses in a specific way: Whisper routinely picks a
+    // neighbouring Dravidian language (ml, ta, kn) for Telugu speech.
+    if (choice === "teluguSmall") transcriptLanguage = "te";
 
     // Parakeet TDT covers 25 European languages only — it has no Indic support,
     // so on an Indic transcript it would auto-detect the wrong language and emit

@@ -7,7 +7,7 @@
  */
 
 import { isTranscriptSource, type TranscriptSource } from "./source";
-import type { TranscriptLanguage } from "./languages";
+import type { TranscriptLanguageSetting } from "./languages";
 import {
   DEFAULT_TRANSCRIPT_LANGUAGE,
   isTranscriptLanguage,
@@ -28,7 +28,7 @@ export interface ProjectMeta {
   mediaKind: MediaKind;
   duration: number;
   source: TranscriptSource;
-  transcriptLanguage: TranscriptLanguage;
+  transcriptLanguage: TranscriptLanguageSetting;
   updatedAt: number;
   createdAt: number;
 }

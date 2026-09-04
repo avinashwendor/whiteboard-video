@@ -29,7 +29,7 @@ import {
   isRomanizableLanguage,
   TRANSCRIPT_LANGUAGE_ORDER,
   TRANSCRIPT_LANGUAGES,
-  type TranscriptLanguage,
+  type TranscriptLanguageSetting,
   type TranscriptScript,
 } from "@/rescript/lib/languages";
 import {
@@ -45,6 +45,7 @@ import {
   hydrateTranscriptScriptPreference,
   useEditorStore,
 } from "@/rescript/lib/store";
+import { hasIndicChars } from "@/rescript/lib/indic";
 import Popover, { PopoverContent, PopoverTrigger } from "./Popover";
 import { useI18n } from "./I18nProvider";
 
@@ -217,7 +218,10 @@ export default function ModelSelector({
   const showLanguageInTrigger =
     isWhisperModel(source) &&
     !activeTrigger?.busy &&
-    transcriptLanguage !== "en";
+    // "auto" is the default and the safe state — badging it would put a chip on
+    // every session. The badge exists to warn that decoding is pinned to one
+    // language, which is the setting that silently ruins a transcript.
+    transcriptLanguage !== "auto";
 
   // Always mount options (hidden when closed) so custom triggers stay registered.
   const options = children ?? (
@@ -328,6 +332,9 @@ export default function ModelSelector({
 const SOURCE_ICONS: Record<TranscriptSource, IconComponent> = {
   base: SignalBarsLow,
   small: SignalBarsMedium,
+  // Language-specific rather than "stronger": it beats every other row on
+  // Telugu and cannot transcribe anything else.
+  teluguSmall: Languages,
   parakeet: SignalBarsHigh,
   import: FileText,
 };
@@ -425,7 +432,20 @@ export function LanguageSection() {
   const { t } = useI18n();
   const active = TRANSCRIPT_LANGUAGES[language];
 
-  const select = (next: TranscriptLanguage) => {
+  /**
+   * Offer the native/roman switch when it can actually do something: the user
+   * pinned a language with a non-Latin script, or auto-detection already
+   * produced one (the transcript has Indic characters in it).
+   */
+  const words = useEditorStore((s) => s.words);
+  const transcriptHasIndic = useMemo(
+    () => words.some((w) => hasIndicChars(w.text)),
+    [words]
+  );
+  const showScriptToggle =
+    isRomanizableLanguage(language) || transcriptHasIndic;
+
+  const select = (next: TranscriptLanguageSetting) => {
     setLanguage(next);
     setSubmenuOpen(false);
     selector.closeMenu();
@@ -515,7 +535,7 @@ export function LanguageSection() {
           </PopoverContent>
         </div>
       </Popover>
-      {isRomanizableLanguage(language) && <ScriptToggle />}
+      {showScriptToggle && <ScriptToggle />}
     </div>
   );
 }

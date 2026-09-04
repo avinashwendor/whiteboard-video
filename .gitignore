@@ -44,6 +44,11 @@ next-env.d.ts
 # runtime assets copied from node_modules on postinstall
 /public/vendor/
 
+# Locally exported ONNX speech models (hundreds of MB of weights). Built by
+# tools/export-telugu-onnx, served from /models/<id>/ for MODELS entries
+# flagged `local`. Rebuild rather than commit.
+/public/models/
+
 # ad-hoc scratch media dropped at the repo root during manual testing
 /scratch_*
 /*.scratch.*

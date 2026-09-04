@@ -38,7 +38,7 @@ import {
   loadTranscriptScriptPreference,
   saveTranscriptLanguagePreference,
   saveTranscriptScriptPreference,
-  type TranscriptLanguage,
+  type TranscriptLanguageSetting,
   type TranscriptScript,
 } from "./languages";
 import { romanizeWords } from "./romanize";
@@ -90,7 +90,7 @@ let nativeWordsSnapshot: Word[] = [];
 function applyScript(
   words: Word[],
   script: TranscriptScript,
-  language: TranscriptLanguage
+  language: TranscriptLanguageSetting
 ): Word[] {
   if (script === "roman" && isRomanizableLanguage(language)) {
     return romanizeWords(words, language);
@@ -118,7 +118,7 @@ interface EditorState {
   /** Transcript source selected on the upload screen (speech model or import). */
   source: TranscriptSource;
   /** Language hint sent to Whisper when transcribing (Parakeet auto-detects). */
-  transcriptLanguage: TranscriptLanguage;
+  transcriptLanguage: TranscriptLanguageSetting;
   /**
    * Output script for a non-Latin language: "native" keeps Whisper's script,
    * "roman" transliterates it for display. Ignored for languages that are
@@ -194,7 +194,7 @@ interface EditorState {
   /** Delete a saved project; if it is the active one, resets to the home screen. */
   removeProject: (id: string) => Promise<void>;
   setSource: (s: TranscriptSource) => void;
-  setTranscriptLanguage: (language: TranscriptLanguage) => void;
+  setTranscriptLanguage: (language: TranscriptLanguageSetting) => void;
   /** Switch native/roman output; re-applies to the current transcript in place. */
   setTranscriptScript: (script: TranscriptScript) => void;
   setPendingTranscript: (t: PendingTranscript | null) => void;

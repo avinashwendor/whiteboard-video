@@ -39,11 +39,41 @@ const workerSrc = fs.readFileSync(
 // collapse short VAD segments: Small's longest slice decoded to a bare "Um,",
 // Medium truncated to a fragment, Turbo dropped a leading clause. See the note
 // above MODELS in lib/models.ts for the measurements.
+//
+// `detectSpokenLanguage` is exempt and excluded below. It is not conditioning:
+// it runs one forward pass whose decoder input is the bare
+// <|startoftranscript|> token, reads the language distribution off the logits,
+// and never feeds a token into the transcription decode. Language detection has
+// to be done by hand because transformers.js defaults an unset language to
+// English rather than detecting it.
+const detectionStart = workerSrc.indexOf("async function detectSpokenLanguage");
+assert(detectionStart !== -1, "expected a detectSpokenLanguage function");
+const afterDetection = workerSrc.indexOf("\nasync function ", detectionStart + 1);
+assert(afterDetection !== -1, "could not find the end of detectSpokenLanguage");
+const withoutDetection =
+  workerSrc.slice(0, detectionStart) + workerSrc.slice(afterDetection);
+
 assert(
-  !/decoder_input_ids/.test(workerSrc),
-  "worker must not force decoder_input_ids (prefix conditioning truncates VAD segments)"
+  !/decoder_input_ids/.test(withoutDetection),
+  "worker must not force decoder_input_ids outside language detection (prefix conditioning truncates VAD segments)"
+);
+// The transcription options themselves must stay clean.
+const asrOptionsMatch = workerSrc.match(/const asrOptions = \(\) => \(\{[\s\S]*?\n  \}\);/);
+assert(asrOptionsMatch !== null, "expected an asrOptions factory");
+assert(
+  !/decoder_input_ids|prompt_ids/.test(asrOptionsMatch![0]),
+  "asrOptions must not prime the decoder"
 );
 console.log("no decoder-prefix conditioning: ok");
+
+// Whisper predicts the task token when it is not pinned, and can choose
+// <|translate|> — which silently returns an English translation instead of a
+// transcript in the spoken language.
+assert(
+  /task:\s*"transcribe"/.test(workerSrc),
+  "worker must pin task to transcribe (unpinned, Whisper may translate to English)"
+);
+console.log("task pinned to transcribe: ok");
 
 // High repetition_penalty truncates this clip mid-utterance even on full audio.
 const penaltyMatch = workerSrc.match(/repetition_penalty:\s*([0-9.]+)/);
