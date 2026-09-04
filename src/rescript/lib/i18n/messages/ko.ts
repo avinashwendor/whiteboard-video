@@ -69,6 +69,7 @@ export const ko: Record<MessageKey, string> = {
   "transcript.correct": "수정",
   "transcript.scrollWithPlayhead": "재생 위치에 맞춰 스크롤",
   "transcript.joinSplit": "클립 분할 — 클릭하면 이 클립들을 합칩니다",
+  "transcript.removePause": "이 구간 삭제",
   "transcript.editorLabel": "자막",
   "transcript.slashTitle": "삽입",
   "transcript.slashSplit": "여기서 분할",

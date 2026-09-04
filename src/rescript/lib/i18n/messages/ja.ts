@@ -69,6 +69,7 @@ export const ja: Record<MessageKey, string> = {
   "transcript.correct": "修正",
   "transcript.scrollWithPlayhead": "再生位置に合わせてスクロール",
   "transcript.joinSplit": "クリップ分割 — クリックしてこれらのクリップを結合",
+  "transcript.removePause": "この間を削除",
   "transcript.editorLabel": "文字起こし",
   "transcript.slashTitle": "挿入",
   "transcript.slashSplit": "ここで分割",

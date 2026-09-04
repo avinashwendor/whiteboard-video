@@ -69,6 +69,7 @@ export const es: Record<MessageKey, string> = {
   "transcript.correct": "Corregir",
   "transcript.scrollWithPlayhead": "Desplazar con el cabezal",
   "transcript.joinSplit": "Clip dividido — haz clic para unir estos clips",
+  "transcript.removePause": "Eliminar esta pausa",
   "transcript.editorLabel": "Transcripción",
   "transcript.slashTitle": "Insertar",
   "transcript.slashSplit": "Dividir aquí",

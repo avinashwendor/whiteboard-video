@@ -38,6 +38,7 @@ import {
 } from "@/rescript/lib/edits";
 import { useTranscriptSelection } from "@/rescript/hooks/useTranscriptSelection";
 import { useTranscriptCaret } from "@/rescript/hooks/useTranscriptCaret";
+import { findPauses, formatPause, type Pause } from "@/rescript/lib/pauses";
 import { useTranscriptPlayheadFollow } from "@/rescript/hooks/useTranscriptPlayheadFollow";
 import { useWordAnchorFloating } from "@/rescript/hooks/useWordAnchorFloating";
 import { useCutRanges } from "@/rescript/hooks/useCutRanges";
@@ -106,6 +107,38 @@ const Caret = memo(function Caret() {
   );
 });
 
+/**
+ * A silence, shown inline as something you can act on.
+ *
+ * Rendered between words rather than as a word, because it is derived from the
+ * gap between two timings rather than stored — see lib/pauses.ts. Clicking it
+ * cuts exactly its range, so removing dead air is the same operation as cutting
+ * words and lands in the same undo history.
+ */
+const PauseChip = memo(function PauseChip({
+  pause,
+  onRemove,
+}: {
+  pause: Pause;
+  onRemove: (pause: Pause) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      data-pause={pause.beforeWordId ?? "end"}
+      title={t("transcript.removePause")}
+      aria-label={`${t("transcript.removePause")} ${formatPause(pause.duration)}`}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onRemove(pause)}
+      className="group mx-0.5 inline-flex cursor-pointer select-none items-center gap-1 rounded-md border border-dashed border-zinc-300 px-1.5 py-0.5 align-middle text-[11px] font-medium leading-none text-zinc-400 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-zinc-600 dark:text-zinc-500 dark:hover:border-red-900 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+    >
+      <Scissors size={9} className="opacity-0 transition-opacity group-hover:opacity-100" />
+      {formatPause(pause.duration)}
+    </button>
+  );
+});
+
 const SplitMarker = memo(function SplitMarker({
   boundaryId,
   onJoin,
@@ -149,6 +182,7 @@ export default function TranscriptPanel() {
   const importWords = useEditorStore((s) => s.importWords);
   const removeSceneBoundary = useEditorStore((s) => s.removeSceneBoundary);
   const splitAt = useEditorStore((s) => s.splitAt);
+  const cutRanges = useEditorStore((s) => s.cutRanges);
   const selectedWordIds = useEditorStore((s) => s.selectedWordIds);
   const playing = useEditorStore((s) => s.playing);
   const activeWordId = useEditorStore((s) => findActiveWordId(s.words, s.currentTime));
@@ -180,6 +214,43 @@ export default function TranscriptPanel() {
   const visibleWords = useMemo(
     () => (showDeleted ? words : words.filter((w) => !cutOutIds.has(w.id))),
     [words, showDeleted, cutOutIds]
+  );
+
+  /**
+   * Silence between the words the viewer will actually hear. Derived from the
+   * visible words, so cutting one recomputes its neighbours for free.
+   */
+  const pauseBeforeWordId = useMemo(() => {
+    const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
+    const map = new Map<number, Pause>();
+    for (const pause of findPauses(kept, { duration })) {
+      if (pause.beforeWordId === null) continue;
+      // A pause already inside a cut is silence the viewer will never hear, so
+      // there is nothing left to offer removing. Without this the chip survives
+      // its own click: cutting a gap removes no *word*, so the gap between the
+      // surrounding word timings is still there to be recomputed.
+      const alreadyCut = cuts.some(
+        (c) => c.start <= pause.start + 0.01 && c.end >= pause.end - 0.01
+      );
+      if (!alreadyCut) map.set(pause.beforeWordId, pause);
+    }
+    return map;
+  }, [visibleWords, cutOutIds, duration, cuts]);
+
+  /** Dead air after the final word — has no following word to hang off. */
+  const trailingPause = useMemo(() => {
+    const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
+    const tail = findPauses(kept, { duration }).find((p) => p.beforeWordId === null);
+    if (!tail) return null;
+    const alreadyCut = cuts.some(
+      (c) => c.start <= tail.start + 0.01 && c.end >= tail.end - 0.01
+    );
+    return alreadyCut ? null : tail;
+  }, [visibleWords, cutOutIds, duration, cuts]);
+
+  const removePause = useCallback(
+    (pause: Pause) => cutRanges([{ start: pause.start, end: pause.end }]),
+    [cutRanges]
   );
 
   const {
@@ -578,6 +649,12 @@ export default function TranscriptPanel() {
                             {caret?.kind === "before" && caret.wordId === w.id && (
                               <Caret />
                             )}
+                            {pauseBeforeWordId.has(w.id) && (
+                              <PauseChip
+                                pause={pauseBeforeWordId.get(w.id)!}
+                                onRemove={removePause}
+                              />
+                            )}
                             <WordSpan
                               word={w}
                               cutOut={cutOutIds.has(w.id)}
@@ -591,6 +668,11 @@ export default function TranscriptPanel() {
                       {caret?.kind === "end" &&
                         visible[visible.length - 1]?.id ===
                           visibleWords[visibleWords.length - 1]?.id && <Caret />}
+                      {trailingPause &&
+                        visible[visible.length - 1]?.id ===
+                          visibleWords[visibleWords.length - 1]?.id && (
+                          <PauseChip pause={trailingPause} onRemove={removePause} />
+                        )}
                     </p>
                   </div>
                 );

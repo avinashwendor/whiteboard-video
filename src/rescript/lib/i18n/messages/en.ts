@@ -68,6 +68,7 @@ export const en = {
   "transcript.correct": "Correct",
   "transcript.scrollWithPlayhead": "Scroll with the playhead",
   "transcript.joinSplit": "Clip split — click to join these clips",
+  "transcript.removePause": "Remove this pause",
   "transcript.editorLabel": "Transcript",
   "transcript.slashTitle": "Insert",
   "transcript.slashSplit": "Split here",
