@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { EntryHub } from "@/components/studio/entry-hub";
 import { SiteFooter } from "@/components/site/site-footer";
-import { Economics, EditorFeatures, VideoStyles } from "@/components/site/value-sections";
+import { EditorFeatures, EngineStatement, Pipeline } from "@/components/site/value-sections";
 import { Pricing } from "@/components/site/pricing";
 
 const Dither = dynamic(() => import("@/components/ui/dither"), {
@@ -41,7 +41,13 @@ export default function StudioPage() {
   };
 
   return (
-    <div className="relative w-full overflow-hidden bg-bg">
+    /*
+      `overflow-x-clip`, not `overflow-hidden`: hidden makes this a scroll
+      container, which silently disables `position: sticky` for everything
+      inside it — including the pinned heading in the pipeline section. Clip
+      cuts the same horizontal bleed without creating a scroll port.
+    */
+    <div className="relative w-full overflow-x-clip bg-bg">
       {/* ----------------- 01 HERO: DITHER BACKGROUND (85–94vh) ----------------- */}
       <section
         aria-label="Motionhouse introduction"
@@ -75,8 +81,36 @@ export default function StudioPage() {
             MOTIONHOUSE
           </p>
 
-          <h1 className="animate-slide-up-2 mt-5 text-balance text-[52px] font-medium leading-[0.92] tracking-[-0.04em] text-ink sm:text-[76px] lg:text-[96px]">
-            IDEAS INTO MOTION.
+          {/*
+            The noun rotates; the headline does not move. The window is one
+            line tall and as wide as the longest word, so nothing below it
+            shifts as the words go by. Screen readers get the sentence once,
+            from the label, rather than the whole stack of alternatives.
+          */}
+          <h1
+            aria-label="Ideas into videos."
+            className="animate-slide-up-2 mt-5 text-balance text-[52px] font-medium leading-[0.92] tracking-[-0.04em] text-ink sm:text-[76px] lg:text-[96px]"
+          >
+            <span aria-hidden>
+              IDEAS INTO
+              <br />
+              {/*
+                All five read off the same plural subject, so they are plural
+                too — "ideas into videos", not "ideas into video". MOTION and
+                ANYTHING are mass nouns and stay as they are.
+              */}
+              <span className="word-cycle">
+                <span className="word-cycle__sizer">VOICEOVERS.</span>
+                <span className="word-cycle__track">
+                  <span>VIDEOS.</span>
+                  <span>MOTION.</span>
+                  <span>VOICEOVERS.</span>
+                  <span>SCRIPTS.</span>
+                  <span>ANYTHING.</span>
+                  <span>VIDEOS.</span>
+                </span>
+              </span>
+            </span>
           </h1>
 
           <p className="animate-slide-up-3 mt-5 max-w-[520px] text-pretty text-[16px] leading-relaxed text-[#c9c9c4] sm:text-[18px]">
@@ -127,15 +161,19 @@ export default function StudioPage() {
           </div>
 
           <div className="mt-16 sm:mt-20">
-            <VideoStyles />
+            <EngineStatement />
+          </div>
+
+          {/*
+            How it works sits before the editor: the pipeline explains what
+            there is to direct, and the editor section then says you can.
+          */}
+          <div className="mt-16 sm:mt-20">
+            <Pipeline />
           </div>
 
           <div className="mt-16 sm:mt-20">
             <EditorFeatures />
-          </div>
-
-          <div className="mt-16 sm:mt-20">
-            <Economics />
           </div>
 
           <div className="mt-16 sm:mt-20">

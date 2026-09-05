@@ -25,7 +25,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
     title: "Produce",
     links: [
       { label: "Start from an idea", href: "/#production-entry-hub" },
-      { label: "Bring your own footage", href: "/#production-entry-hub" },
+      { label: "Bring your own footage", href: "/video-editor" },
       { label: "Hyperframes", href: "/#production-entry-hub" },
       { label: "Drawn whiteboard", href: "/#production-entry-hub" },
       { label: "Modern frames", href: "/#production-entry-hub" },
@@ -57,7 +57,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
       { label: "History", href: "/history" },
       { label: "Examples", href: "/#production-entry-hub" },
       { label: "Pricing", href: "/#pricing" },
-      { label: "Sign in", href: "/signin" },
+      { label: "Sign in", href: "/sign-in" },
     ],
   },
 ];

@@ -216,6 +216,123 @@ body {
   .grain-shimmer__sweep {
     animation: none;
   }
+  /*
+   * The blanket rule above would run the cycle once at 0.01ms and leave it
+   * parked on the duplicate word at the end of the track. Hold the first one
+   * instead — same word, but reached by not animating rather than by
+   * finishing instantly.
+   */
+  .word-cycle__track {
+    animation: none !important;
+    transform: none !important;
+  }
+  /*
+   * The reveal is the effect; a card stuck part-way through its rise is just
+   * illegible if the motion is unwanted. Show them settled.
+   */
+  .step-card {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/*
+ * The hero's rotating noun.
+ *
+ * A window exactly one line tall with a column of words sliding through it, so
+ * the headline says a different thing every couple of seconds without ever
+ * changing size. Two things keep it from moving the page:
+ *
+ * `height: 1em` on the window and on every word in the track means the block
+ * occupies one line box no matter how many words are stacked inside it, and
+ * `overflow: hidden` keeps the rest of the column out of the flow's way.
+ *
+ * The sizer is a hidden copy of the longest word. It — not the word currently
+ * showing — sets the window's width, so the line does not re-centre itself on
+ * every rotation.
+ *
+ * The track ends on a duplicate of the first word, so the loop restarts from a
+ * frame identical to the one it just left and reads as continuous.
+ */
+.word-cycle {
+  position: relative;
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.word-cycle__sizer {
+  display: block;
+  height: 1em;
+  line-height: 1em;
+  visibility: hidden;
+}
+
+.word-cycle__track {
+  position: absolute;
+  inset: 0;
+  display: block;
+  animation: wordCycle 12s cubic-bezier(0.76, 0, 0.24, 1) infinite;
+}
+
+.word-cycle__track > span {
+  display: block;
+  height: 1em;
+  line-height: 1em;
+  text-align: center;
+}
+
+/*
+ * Five words, five holds, five slides. Each pair of stops holds a word for
+ * roughly 1.7s and then takes about 0.7s to hand over to the next.
+ */
+@keyframes wordCycle {
+  0%,
+  14% {
+    transform: translateY(0);
+  }
+  20%,
+  34% {
+    transform: translateY(-1em);
+  }
+  40%,
+  54% {
+    transform: translateY(-2em);
+  }
+  60%,
+  74% {
+    transform: translateY(-3em);
+  }
+  80%,
+  94% {
+    transform: translateY(-4em);
+  }
+  100% {
+    transform: translateY(-5em);
+  }
+}
+
+/*
+ * The how-it-works cards, revealed one at a time.
+ *
+ * Each card starts low and faint and settles into place the first time it
+ * crosses into view — a rise, not a fade, so the grid reads as something
+ * assembling rather than a fixed page underneath it that was merely hidden.
+ * Lives here rather than as inline styles so the reduced-motion override
+ * below has a single rule to switch off.
+ */
+.step-card {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.step-card--seen {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* Studio hairline divider */

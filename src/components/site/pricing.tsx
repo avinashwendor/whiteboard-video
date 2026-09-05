@@ -4,12 +4,11 @@ import { cn } from "@/lib/utils/cn";
 /**
  * Pricing.
  *
- * Two shapes, because the two ways people use this are genuinely different:
- * someone making a video a week wants a flat bill, and someone making thirty
- * in a burst before a launch wants to pay for the burst. The numbers below
- * follow from what a video actually costs to run — rendering and storage are
- * free because they happen in the viewer's browser, so what is left is tokens
- * and speech.
+ * Three columns, and the first one is a door rather than a plan: a trial that
+ * runs the paid product for a fortnight so the decision is made on the real
+ * thing. After that the two shapes are genuinely different — someone making a
+ * video a week wants a flat bill, and someone making thirty in a burst before
+ * a launch wants to pay for the burst.
  */
 
 interface Plan {
@@ -26,24 +25,25 @@ interface Plan {
 
 const PLANS: Plan[] = [
   {
-    name: "Local",
+    name: "Trial",
     price: "Free",
-    line: "Everything runs in your browser. No account, nothing uploaded.",
+    cadence: "for 14 days",
+    line: "The full Studio plan, for two weeks. No card, no invoice at the end.",
     features: [
-      "Unlimited whiteboard and frame videos",
-      "Bring your own API keys",
+      "5 videos to spend however you like",
+      "Every voice and language",
       "Full editor, timeline and Ask",
-      "MP4 export, rendered on your machine",
+      "MP4 export, no watermark",
     ],
-    cta: "Start now",
-    href: "/new",
-    note: "What you are using right now.",
+    cta: "Start free trial",
+    href: "/sign-up",
+    note: "Ends on its own. Nothing to cancel.",
   },
   {
     name: "Studio",
     price: "₹1,499",
     cadence: "/month",
-    line: "Our keys, our models, no setup. For a steady drip of videos.",
+    line: "For a steady drip of videos. Everything set up, nothing to configure.",
     features: [
       "60 videos a month",
       "Every voice and language",
@@ -51,7 +51,7 @@ const PLANS: Plan[] = [
       "Project history synced across devices",
     ],
     cta: "Join the waitlist",
-    href: "/signin",
+    href: "/sign-up",
     featured: true,
   },
   {
@@ -66,7 +66,7 @@ const PLANS: Plan[] = [
       "Good for launches and one-offs",
     ],
     cta: "Join the waitlist",
-    href: "/signin",
+    href: "/sign-up",
   },
 ];
 
@@ -76,13 +76,13 @@ export function Pricing() {
       <div className="flex flex-col justify-between gap-4 border-b border-line pb-8 sm:flex-row sm:items-end">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-dim">Pricing</p>
-          <h2 className="mt-3 text-balance text-[30px] font-medium leading-[1.08] tracking-[-0.03em] text-ink sm:text-[36px]">
-            Pay for the videos, not the servers.
+          <h2 className="mt-3 max-w-[15ch] text-balance text-[30px] font-medium leading-[1.08] tracking-[-0.03em] text-ink sm:text-[36px]">
+            Pay for videos, not seats.
           </h2>
         </div>
         <p className="max-w-[340px] text-pretty text-[13.5px] leading-relaxed text-muted sm:text-right">
-          Rendering happens on your machine and the sound is synthesised, so there is no farm and
-          no licensing to pass on to you.
+          One price covers the whole pipeline — script, voice, scenes and export. Nothing is
+          licensed from a stock library, so nothing is passed on to you.
         </p>
       </div>
 
@@ -146,8 +146,8 @@ export function Pricing() {
       </div>
 
       <p className="pt-5 text-[12.5px] leading-relaxed text-faint">
-        Paid plans are not live yet — the waitlist is real, the billing is not. Local stays free
-        regardless.
+        Billing is not switched on yet. The trial and the waitlist are real; cards come with
+        launch, and nobody is charged before then.
       </p>
     </section>
   );

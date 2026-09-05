@@ -2,11 +2,16 @@ import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * The three ways into a production.
+ * The three ways into a production, plus history.
  *
  * Each one is a link to a real route, not a sheet over this grid: a production
  * is where you are going, so it gets a URL, a back button and a reload that
  * does not throw the choice away.
+ *
+ * Numbered 01 through 04 in the order they actually sit on the page — footage
+ * before Hyperframes before history — rather than the scrambled 01/02/04/03
+ * this used to run, which read as a typo the moment anyone compared the
+ * numeral to its position.
  */
 export function EntryHub() {
   return (
@@ -39,7 +44,7 @@ export function EntryHub() {
         {/* Right column — Secondary modes (approx 38% width) */}
         <div className="flex flex-col border-t border-line lg:col-span-5 lg:border-l lg:border-t-0">
           <Panel
-            href="/upload"
+            href="/video-editor"
             className="flex-1"
             minHeight="min-h-[230px]"
             padding="p-7 sm:p-8"
@@ -56,28 +61,7 @@ export function EntryHub() {
               </p>
             </div>
 
-            <Footing label="Upload footage" arrow="↑" />
-          </Panel>
-
-          <Panel
-            href="/history"
-            className="border-t border-line"
-            minHeight="min-h-[150px]"
-            padding="p-7 sm:p-8"
-            background="bg-surface hover:bg-surface-raised"
-          >
-            <div>
-              <span className="font-mono text-[11px] tracking-[0.14em] text-dim">04</span>
-              <h3 className="mt-3 text-[20px] font-medium tracking-[-0.02em] text-ink sm:text-[22px]">
-                Carry on with something
-              </h3>
-              <p className="mt-2 text-pretty text-[13px] leading-relaxed text-muted">
-                Everything you have made is still here. Reopen a project in the editor rather than
-                starting from nothing.
-              </p>
-            </div>
-
-            <Footing label="Open history" arrow="→" />
+            <Footing label="Open the editor" arrow="→" />
           </Panel>
 
           <Panel
@@ -99,6 +83,27 @@ export function EntryHub() {
             </div>
 
             <Footing label="Modern frames" arrow="→" />
+          </Panel>
+
+          <Panel
+            href="/history"
+            className="border-t border-line"
+            minHeight="min-h-[150px]"
+            padding="p-7 sm:p-8"
+            background="bg-surface hover:bg-surface-raised"
+          >
+            <div>
+              <span className="font-mono text-[11px] tracking-[0.14em] text-dim">04</span>
+              <h3 className="mt-3 text-[20px] font-medium tracking-[-0.02em] text-ink sm:text-[22px]">
+                Carry on with something
+              </h3>
+              <p className="mt-2 text-pretty text-[13px] leading-relaxed text-muted">
+                Everything you have made is still here. Reopen a project in the editor rather than
+                starting from nothing.
+              </p>
+            </div>
+
+            <Footing label="Open history" arrow="→" />
           </Panel>
         </div>
       </div>
