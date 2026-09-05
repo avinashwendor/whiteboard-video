@@ -77,18 +77,48 @@ disabled per-model — see `MODELS.teluguSmall.noRepeatNgramSize`.
 
 ## Deploying it
 
-The weights are not in the repo, so a deployment ships the *option* without the
-*files*. The app handles that honestly — the row renders disabled and marked
-"Not installed" rather than failing after the user picks it — but to actually
-ship Telugu you need one of:
+The weights are not in the repo — the decoder alone is 260 MB, past what GitHub
+accepts as a file at all — so a deployment has an **empty `public/models/`**.
+Production serves the same `/models/<id>/...` paths from object storage instead,
+through `src/app/models/[...path]/route.ts`. Same-origin on purpose: the model
+id stays a plain path, `localModelPresent` keeps probing the same URL, the
+editor's cross-origin isolation has nothing to negotiate, and the bucket stays
+private with its keys server-side.
 
-1. **Publish the export to a Hugging Face repo** (recommended). Upload the
-   contents of `public/models/whisper-telugu-small/`, then in `models.ts` set
-   `id` to that repo and drop `local: true`. transformers.js fetches and caches
-   it like any other model, and nothing needs to be in the image.
-2. **Run this script during the build**, which costs the full Python toolchain
-   plus a ~1 GB download in the build image.
-3. **Mount the directory** at `public/models/` from a persistent volume.
+With no bucket configured that route 404s, which the UI already reads as "not
+installed" — the row disables itself rather than failing after the user picks it
+and waits. So an unconfigured deploy degrades, it does not break.
 
-Option 1 is the only one that keeps deploys small and the browser cache warm
-across releases.
+### Publishing a new export
+
+```sh
+railway bucket create rescript-models --region sjc      # once per project
+eval "$(railway bucket credentials --bucket rescript-models --json | jq -r '
+  "export AWS_ACCESS_KEY_ID=\(.accessKeyId)
+   export AWS_SECRET_ACCESS_KEY=\(.secretAccessKey)
+   export BUCKET=\(.bucketName) ENDPOINT=\(.endpoint) AWS_REGION=auto"')"
+
+aws s3 sync public/models/whisper-telugu-small "s3://$BUCKET/whisper-telugu-small" \
+  --endpoint-url "$ENDPOINT"
+```
+
+Then set `MODEL_BUCKET_ENDPOINT`, `MODEL_BUCKET_NAME`, `MODEL_BUCKET_ACCESS_KEY_ID`
+and `MODEL_BUCKET_SECRET_ACCESS_KEY` on the service (`railway variables --set`),
+and check it end to end — this calls the real route against the real bucket,
+which nothing in development exercises because `public/models/` shadows it:
+
+```sh
+railway run npm run probe:models
+```
+
+### The alternatives, and why not
+
+* **A Hugging Face repo.** Free CDN, browser-cached across releases, and
+  transformers.js fetches it natively — genuinely the better host. It needs a
+  write token this project does not have. Swapping to it later is two lines in
+  `models.ts`: set `id` to the repo and drop `local: true`.
+* **Running this script during the build.** Costs the full Python toolchain plus
+  a ~1 GB download in every build image, to reproduce identical weights.
+* **A persistent volume mounted at `public/models/`.** Works, but the weights
+  then live outside both the repo and any versioning, and have to be re-uploaded
+  by hand per environment.

@@ -3,8 +3,10 @@
  *
  * Models flagged `local` live in public/models/<id>/ and are gitignored —
  * hundreds of megabytes of weights that are rebuilt rather than committed. A
- * deployment therefore ships the *option* without the files, and the row would
- * otherwise fail only once the user picks it and waits.
+ * deployment therefore has an empty public/models/, and serves the same paths
+ * from object storage instead (src/app/models/[...path]). Either way the files
+ * may genuinely be absent — nobody ran the export, or no bucket is configured —
+ * and the row would otherwise fail only once the user picks it and waits.
  *
  * Probing config.json is enough: it is the first file transformers.js asks for,
  * so if it is missing the load cannot succeed either.

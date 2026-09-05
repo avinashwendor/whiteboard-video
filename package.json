@@ -39,7 +39,8 @@
     "test:panels": "tsx tests/panels-test.ts",
     "test:media": "tsx tests/media-test.ts",
     "eval": "tsx evals/run.mts",
-    "export:telugu": "python3 tools/export-telugu-onnx/export.py"
+    "export:telugu": "python3 tools/export-telugu-onnx/export.py",
+    "probe:models": "tsx scripts/probe-models.mts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",
@@ -54,6 +55,7 @@
     "@react-three/postprocessing": "^3.0.5",
     "@sentry/react": "^10.69.0",
     "@types/three": "^0.185.4",
+    "aws4fetch": "^1.0.20",
     "cfb": "^1.2.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.33.0",

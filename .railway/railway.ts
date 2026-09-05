@@ -15,6 +15,17 @@ export default defineRailway(() => {
       OMEGA_API_KEY: preserve(),
       TAVILY_API_KEY: preserve(),
 
+      // Object storage holding the locally-exported ONNX speech models. The
+      // weights are far too large for the repository — the Telugu decoder alone
+      // is 260 MB — so public/models/ is empty in a deployment and
+      // src/app/models/[...path] streams them from here instead. Created with
+      // `railway bucket create rescript-models`; `preserve()` keeps the keys in
+      // Railway rather than in source.
+      MODEL_BUCKET_ENDPOINT: preserve(),
+      MODEL_BUCKET_NAME: preserve(),
+      MODEL_BUCKET_ACCESS_KEY_ID: preserve(),
+      MODEL_BUCKET_SECRET_ACCESS_KEY: preserve(),
+
       // Clerk. The keys stay in Railway — `preserve()` reads whatever is set
       // there without writing it here, which is also what lets production hold
       // a pk_live_/sk_live_ pair while this file stays the same.
