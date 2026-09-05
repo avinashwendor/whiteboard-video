@@ -45,8 +45,12 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   matcher: [
-    // Everything except Next internals and static assets.
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|avif|wasm|mp3|mp4|json)).*)",
+    // Everything except Next internals, static assets, and the speech-model
+    // weights. `models` is excluded by path rather than extension because the
+    // export is .onnx, .txt and .json together, and one of those files is
+    // 260 MB — there is nothing for auth to decide about it and no reason to
+    // stream it through Clerk.
+    "/((?!_next|models/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|avif|wasm|mp3|mp4|json)).*)",
     "/(api|trpc)(.*)",
     // Clerk's auto-proxy path, so handshakes and its own endpoints reach the
     // middleware even though the pattern above would otherwise skip them.
