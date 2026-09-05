@@ -1,4 +1,12 @@
-import { findPauses, formatPause, DEFAULT_MIN_PAUSE_S } from "../src/rescript/lib/pauses";
+import {
+  findPauses,
+  formatPause,
+  clampPauseThreshold,
+  DEFAULT_MIN_PAUSE_S,
+  MIN_PAUSE_THRESHOLD_S,
+  MAX_PAUSE_THRESHOLD_S,
+  PAUSE_THRESHOLD_PRESETS,
+} from "../src/rescript/lib/pauses";
 import type { Word } from "../src/rescript/lib/types";
 
 function assert(cond: unknown, msg: string) {
@@ -69,6 +77,36 @@ const w = (id: number, start: number, end: number): Word => ({
   assert(formatPause(0.44) === "0.4s", `unexpected: ${formatPause(0.44)}`);
   assert(formatPause(1.25) === "1.3s", `unexpected: ${formatPause(1.25)}`);
   assert(DEFAULT_MIN_PAUSE_S > 0, "default threshold must be positive");
+}
+
+/* ------------------------------- threshold -------------------------------- */
+{
+  // The control is a slider over a range, so junk and out-of-range input has to
+  // land somewhere sane rather than hiding every pause or showing every frame.
+  assert(clampPauseThreshold(Number.NaN) === DEFAULT_MIN_PAUSE_S, "NaN falls back");
+  assert(clampPauseThreshold(-5) === MIN_PAUSE_THRESHOLD_S, "clamps below the floor");
+  assert(clampPauseThreshold(99) === MAX_PAUSE_THRESHOLD_S, "clamps above the ceiling");
+  // Snapped to the slider's step, so the stored number and its label agree.
+  assert(clampPauseThreshold(0.37) === 0.35, `snapped to step: ${clampPauseThreshold(0.37)}`);
+
+  for (const preset of PAUSE_THRESHOLD_PRESETS) {
+    assert(
+      clampPauseThreshold(preset) === preset,
+      `preset ${preset} must survive clamping unchanged`
+    );
+  }
+
+  // Raising the threshold can only ever hide pauses, never reveal them. That
+  // monotonicity is what makes the slider readable while you drag it.
+  const take = [w(1, 0.0, 0.5), w(2, 0.7, 1.0), w(3, 1.9, 2.2), w(4, 4.0, 4.5)];
+  let previous = Infinity;
+  for (const step of [0.05, 0.2, 0.35, 0.8, 1.5, 3]) {
+    const found = findPauses(take, { minDuration: step, duration: 5 }).length;
+    assert(found <= previous, `threshold ${step} showed more pauses than the step below`);
+    previous = found;
+  }
+  assert(findPauses(take, { minDuration: 0.05, duration: 5 }).length > 0, "loosest finds some");
+  assert(findPauses(take, { minDuration: 3, duration: 5 }).length === 0, "tightest finds none");
 }
 
 console.log("ALL PAUSE TESTS PASSED");

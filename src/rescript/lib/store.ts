@@ -42,6 +42,12 @@ import {
   type TranscriptScript,
 } from "./languages";
 import { romanizeWords } from "./romanize";
+import {
+  DEFAULT_MIN_PAUSE_S,
+  clampPauseThreshold,
+  loadPauseThresholdPreference,
+  savePauseThresholdPreference,
+} from "./pauses";
 import { en } from "@/rescript/lib/i18n/messages/en";
 import { detectMediaKind, type MediaKind } from "./media";
 import { buildWaveformPeaks, type WaveformPeaks } from "./waveform";
@@ -126,6 +132,12 @@ interface EditorState {
    */
   transcriptScript: TranscriptScript;
   /**
+   * Shortest gap, in seconds, still shown as a pause you can point at. Every
+   * pause in the transcript and on the timeline is derived from this, so
+   * lowering it reveals breaths and raising it hides the rhythm of speech.
+   */
+  pauseThreshold: number;
+  /**
    * Caption file parsed on the upload screen when source is "import".
    * Cleared when switching back to a speech model or after media loads.
    */
@@ -197,6 +209,7 @@ interface EditorState {
   setTranscriptLanguage: (language: TranscriptLanguageSetting) => void;
   /** Switch native/roman output; re-applies to the current transcript in place. */
   setTranscriptScript: (script: TranscriptScript) => void;
+  setPauseThreshold: (seconds: number) => void;
   setPendingTranscript: (t: PendingTranscript | null) => void;
   setDuration: (d: number) => void;
   /**
@@ -430,6 +443,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   source: "base",
   transcriptLanguage: DEFAULT_TRANSCRIPT_LANGUAGE,
   transcriptScript: DEFAULT_TRANSCRIPT_SCRIPT,
+  pauseThreshold: DEFAULT_MIN_PAUSE_S,
   pendingTranscript: null,
   projectId: null,
   skipTranscription: false,
@@ -621,6 +635,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } else {
       set({ transcriptScript });
     }
+  },
+  setPauseThreshold: (seconds) => {
+    // Pauses are derived, never stored, so this needs no history entry and
+    // cannot desync from the words: everything recomputes on the next render.
+    const pauseThreshold = clampPauseThreshold(seconds);
+    savePauseThresholdPreference(pauseThreshold);
+    set({ pauseThreshold });
   },
   setPendingTranscript: (pendingTranscript) => set({ pendingTranscript }),
   setDuration: (duration) => {
@@ -1131,6 +1152,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       source: loadModelPreference(),
       transcriptLanguage: loadTranscriptLanguagePreference(),
       transcriptScript: loadTranscriptScriptPreference(),
+      pauseThreshold: loadPauseThresholdPreference(),
       pendingTranscript: null,
       projectId: null,
       skipTranscription: false,
@@ -1172,6 +1194,14 @@ export function hydrateTranscriptLanguagePreference() {
   const stored = loadTranscriptLanguagePreference();
   if (stored !== useEditorStore.getState().transcriptLanguage) {
     useEditorStore.setState({ transcriptLanguage: stored });
+  }
+}
+
+/** Apply the stored pause threshold after mount (avoids SSR/localStorage mismatch). */
+export function hydratePauseThresholdPreference() {
+  const stored = loadPauseThresholdPreference();
+  if (stored !== useEditorStore.getState().pauseThreshold) {
+    useEditorStore.setState({ pauseThreshold: stored });
   }
 }
 

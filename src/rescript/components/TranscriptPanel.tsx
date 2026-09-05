@@ -20,6 +20,7 @@ import { useEditorStore } from "@/rescript/lib/store";
 import { isDisfluencyPlaceholder } from "@/rescript/lib/disfluencies";
 import TranscriptToolsMenu from "./TranscriptToolsMenu";
 import ProofreadButton from "./ProofreadButton";
+import PauseThresholdControl from "./PauseThresholdControl";
 import {
   isTranscriptFile,
   parseTranscriptFile,
@@ -171,6 +172,7 @@ export default function TranscriptPanel() {
   const words = useEditorStore((s) => s.words);
   const sceneBoundaries = useEditorStore((s) => s.sceneBoundaries);
   const duration = useEditorStore((s) => s.duration);
+  const pauseThreshold = useEditorStore((s) => s.pauseThreshold);
   const status = useEditorStore((s) => s.status);
   const progress = useEditorStore((s) => s.progress);
   const partialText = useEditorStore((s) => s.partialText);
@@ -224,7 +226,7 @@ export default function TranscriptPanel() {
   const pauseBeforeWordId = useMemo(() => {
     const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
     const map = new Map<number, Pause>();
-    for (const pause of findPauses(kept, { duration })) {
+    for (const pause of findPauses(kept, { minDuration: pauseThreshold, duration })) {
       if (pause.beforeWordId === null) continue;
       // A pause already inside a cut is silence the viewer will never hear, so
       // there is nothing left to offer removing. Without this the chip survives
@@ -236,18 +238,20 @@ export default function TranscriptPanel() {
       if (!alreadyCut) map.set(pause.beforeWordId, pause);
     }
     return map;
-  }, [visibleWords, cutOutIds, duration, cuts]);
+  }, [visibleWords, cutOutIds, duration, cuts, pauseThreshold]);
 
   /** Dead air after the final word — has no following word to hang off. */
   const trailingPause = useMemo(() => {
     const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
-    const tail = findPauses(kept, { duration }).find((p) => p.beforeWordId === null);
+    const tail = findPauses(kept, { minDuration: pauseThreshold, duration }).find(
+      (p) => p.beforeWordId === null
+    );
     if (!tail) return null;
     const alreadyCut = cuts.some(
       (c) => c.start <= tail.start + 0.01 && c.end >= tail.end - 0.01
     );
     return alreadyCut ? null : tail;
-  }, [visibleWords, cutOutIds, duration, cuts]);
+  }, [visibleWords, cutOutIds, duration, cuts, pauseThreshold]);
 
   const removePause = useCallback(
     (pause: Pause) => cutRanges([{ start: pause.start, end: pause.end }]),
@@ -529,6 +533,7 @@ export default function TranscriptPanel() {
             </span>
           )}
           {status === "ready" && <TranscriptToolsMenu />}
+          {status === "ready" && words.length > 0 && <PauseThresholdControl />}
           {status === "ready" && words.length > 0 && <ProofreadButton />}
           {(status === "ready" || status === "error" || status === "transcribing") && (
             <>

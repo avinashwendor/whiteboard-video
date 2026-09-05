@@ -104,6 +104,7 @@ export default function Timeline() {
   const words = useEditorStore((s) => s.words);
   const sceneBoundaries = useEditorStore((s) => s.sceneBoundaries);
   const duration = useEditorStore((s) => s.duration);
+  const pauseThreshold = useEditorStore((s) => s.pauseThreshold);
   const currentTime = useEditorStore((s) => s.currentTime);
   const playing = useEditorStore((s) => s.playing);
   const selectedClipIndex = useEditorStore((s) => s.selectedClipIndex);
@@ -617,14 +618,14 @@ export default function Timeline() {
     const kept = words.filter((w) => !isWordCutOut(w, cuts));
     const t0 = scrollLeft / pps - 1;
     const t1 = (scrollLeft + width) / pps + 1;
-    return findPauses(kept, { duration }).filter(
+    return findPauses(kept, { minDuration: pauseThreshold, duration }).filter(
       (p) =>
         p.end >= t0 &&
         p.start <= t1 &&
         // Already-cut silence is not on offer; the cut region renders instead.
         !cuts.some((c) => c.start <= p.start + 0.01 && c.end >= p.end - 0.01)
     );
-  }, [words, cuts, duration, pps, scrollLeft, width]);
+  }, [words, cuts, duration, pauseThreshold, pps, scrollLeft, width]);
 
   const playheadX = currentTime * pps - scrollLeft;
   const showHandles = pps >= HANDLE_VIS_PPS;

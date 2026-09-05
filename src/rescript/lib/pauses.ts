@@ -73,3 +73,48 @@ export function findPauses(
 export function formatPause(seconds: number): string {
   return `${seconds.toFixed(1)}s`;
 }
+
+/**
+ * How long a gap must be before it is worth showing, in seconds.
+ *
+ * There is no correct value. A scripted read to camera leaves 0.2s between
+ * clauses and a conversational take leaves a second; the same threshold turns
+ * one transcript into a wall of chips and hides every real breath in the other.
+ * So it is the user's to set, and these are the useful places to start from
+ * rather than the only ones allowed.
+ */
+export const PAUSE_THRESHOLD_PRESETS = [0.2, 0.35, 0.8, 1.5] as const;
+
+export const MIN_PAUSE_THRESHOLD_S = 0.05;
+export const MAX_PAUSE_THRESHOLD_S = 3;
+
+/** Clamp to the supported range, falling back to the default for junk. */
+export function clampPauseThreshold(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_MIN_PAUSE_S;
+  // Round to the slider's step so the stored value and the rendered label agree.
+  const stepped = Math.round(value * 20) / 20;
+  return Math.min(MAX_PAUSE_THRESHOLD_S, Math.max(MIN_PAUSE_THRESHOLD_S, stepped));
+}
+
+const THRESHOLD_STORAGE_KEY = "rescript.pause-threshold";
+
+/** Read the last-set pause threshold from localStorage. */
+export function loadPauseThresholdPreference(): number {
+  if (typeof window === "undefined") return DEFAULT_MIN_PAUSE_S;
+  try {
+    const raw = window.localStorage.getItem(THRESHOLD_STORAGE_KEY);
+    if (raw !== null) return clampPauseThreshold(Number.parseFloat(raw));
+  } catch {
+    // private mode / disabled storage
+  }
+  return DEFAULT_MIN_PAUSE_S;
+}
+
+export function savePauseThresholdPreference(value: number) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(THRESHOLD_STORAGE_KEY, String(value));
+  } catch {
+    // private mode / disabled storage
+  }
+}
