@@ -50,7 +50,9 @@
     "test:broll": "tsx tests/broll-test.ts",
     "probe:media": "tsx scripts/probe-media.mts",
     "probe:voice": "tsx scripts/probe-voice.mts",
-    "test:voices": "tsx tests/voice-engines-test.ts"
+    "test:voices": "tsx tests/voice-engines-test.ts",
+    "probe:vision": "tsx scripts/probe-vision.mts",
+    "test:omegavision": "tsx tests/omega-vision-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

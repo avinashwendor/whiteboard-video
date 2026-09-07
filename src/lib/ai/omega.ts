@@ -139,10 +139,62 @@ function extractText(choice: OmegaChoice | undefined): string {
   return "";
 }
 
+/**
+ * Rewrite OpenAI-style image parts into Anthropic content blocks.
+ *
+ * Omega is OpenAI-shaped in almost every respect — the path, the auth header,
+ * `response_format`, streaming — so the whole codebase speaks that dialect and
+ * `ChatMessage` carries `image_url` parts. Images are the one place it is not.
+ * Probed directly: an identical request answers 200 as text and
+ * `400 invalid_request` the moment an `image_url` part is attached, with a
+ * message that names no parameter. The same picture as an Anthropic
+ * `{type:"image", source:{type:"base64", …}}` block answers 200 and the model
+ * describes it correctly.
+ *
+ * Which is not surprising in hindsight: every model id here is `claude-`
+ * prefixed, and `parseContent` above already handles Anthropic-style blocks
+ * coming *back*. The request side speaks the same dialect and nothing was
+ * translating it.
+ *
+ * The cost of not doing this was invisible in the build and loud in the editor:
+ * the agent's frames were refused on every plan, the harness stripped them and
+ * carried on from the transcript, and the panel said "the model would not take
+ * the frames" every single time.
+ *
+ * Only data URIs convert. A hosted URL is refused by Omega in either dialect,
+ * so it is dropped rather than sent to be rejected — the text part beside it
+ * still describes what the picture was.
+ */
+export function toProviderContent(content: ChatMessage["content"]): unknown {
+  if (typeof content === "string") return content;
+
+  const out: unknown[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      out.push(part);
+      continue;
+    }
+    const url = part.image_url?.url ?? "";
+    const match = /^data:([^;,]+);base64,(.+)$/s.exec(url);
+    if (!match) continue;
+    out.push({
+      type: "image",
+      source: { type: "base64", media_type: match[1], data: match[2] },
+    });
+  }
+  return out;
+}
+
 function body(input: TextGenerationInput, model: string, stream: boolean) {
   const payload: Record<string, unknown> = {
     model,
-    messages: input.messages satisfies ChatMessage[],
+    // Translated at the boundary rather than upstream: the rest of the app
+    // uses one message shape, and which dialect a provider wants is the
+    // provider's business.
+    messages: input.messages.map((message) => ({
+      ...message,
+      content: toProviderContent(message.content),
+    })),
     temperature: input.temperature ?? 0.7,
     max_tokens: input.maxTokens ?? 1600,
     stream,

@@ -110,6 +110,25 @@ async function main() {
       }
     : {}),
   mode: (process.argv[3] as "propose" | "execute") ?? "propose",
+  /**
+   * STREAM=1 exercises the path the editor actually uses.
+   *
+   * Supplying `onEvent` is what turns streaming on, and the difference is not
+   * cosmetic: a non-streamed request does not send headers until the whole
+   * answer is written, so it is capped by the 60s time-to-headers timeout,
+   * while a streamed one starts immediately and is not. A big prompt with
+   * frames attached can exceed that unstreamed and be perfectly fine in the
+   * editor — so a timeout here proves nothing about the app unless this is on.
+   */
+  ...(process.env.STREAM
+    ? {
+        onEvent: (event: { type: string; [k: string]: unknown }) => {
+          if (event.type !== "thinking") {
+            process.stderr.write(`[${event.type}] ${JSON.stringify(event).slice(0, 160)}\n`);
+          }
+        },
+      }
+    : {}),
   context: {
     duration: t,
     playhead: 0,
