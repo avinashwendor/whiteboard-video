@@ -48,7 +48,9 @@
     "test:camera": "tsx tests/camera-variety-test.ts",
     "test:kenburns": "tsx tests/ken-burns-test.ts",
     "test:broll": "tsx tests/broll-test.ts",
-    "probe:media": "tsx scripts/probe-media.mts"
+    "probe:media": "tsx scripts/probe-media.mts",
+    "probe:voice": "tsx scripts/probe-voice.mts",
+    "test:voices": "tsx tests/voice-engines-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

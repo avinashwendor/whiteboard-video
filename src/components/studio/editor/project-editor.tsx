@@ -477,6 +477,18 @@ export function ProjectEditor({ generation }: { generation: Generation }) {
                 ]}
                 onChange={(musicMood) => commit({ ...project, musicMood })}
               />
+              {(project.musicMood ?? "calm") !== "none" ? (
+                <Choice
+                  label="Music from"
+                  value={project.musicSource ?? "synth"}
+                  columns={2}
+                  options={[
+                    { value: "synth" as const, label: "Built-in" },
+                    { value: "generated" as const, label: "Generated" },
+                  ]}
+                  onChange={(musicSource) => commit({ ...project, musicSource })}
+                />
+              ) : null}
               <div className="grid grid-cols-2 gap-2.5">
                 <LabelledInput
                   label="Intro (s)"

@@ -147,6 +147,23 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
   return out;
 }
 
+/**
+ * ElevenLabs says "male"/"female"; the rest of this app says
+ * "masculine"/"feminine".
+ *
+ * `castVoice` compares `voice.gender` against the director's brief with `===`,
+ * so an unnormalised label does not merely fail to match — it scores −4 against
+ * every voice of the requested gender and +0 against the others, which makes
+ * the casting reliably pick the *opposite* one. Asked for a warm feminine
+ * narrator it cast "Roger". Silent, and wrong in the most visible possible way.
+ */
+function normaliseGender(value: string | undefined): string | undefined {
+  const v = value?.trim().toLowerCase();
+  if (v === "male") return "masculine";
+  if (v === "female") return "feminine";
+  return v || undefined;
+}
+
 export const elevenlabs: TTSProvider = {
   id: "elevenlabs",
   isConfigured,
@@ -166,7 +183,7 @@ export const elevenlabs: TTSProvider = {
         id: voice.voice_id,
         name: voice.name ?? voice.voice_id,
         description: voice.description ?? labels.description,
-        gender: labels.gender,
+        gender: normaliseGender(labels.gender),
         accent,
         language: voice.fine_tuning?.language,
         languages: voice.verified_languages

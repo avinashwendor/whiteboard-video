@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { resolveTts } from "@/lib/ai/tts";
+import { resolveTts, ttsProviders } from "@/lib/ai/tts";
 import { pollinations } from "@/lib/ai/image";
 import { omega } from "@/lib/ai/omega";
 import type { ModelInfo } from "@/lib/ai/types";
@@ -75,11 +75,13 @@ export async function GET(req: Request) {
         return NextResponse.json({ success: true as const, provider, models: await puterModels() });
       }
 
-      // `voice` asks for whichever engine is configured; the older provider
-      // names still work so a saved setting keeps resolving.
+      // `voice` asks for whichever engine is configured; naming one asks for
+      // that one, and the older names still work so a saved setting keeps
+      // resolving.
       case "voice":
       case "deepgram":
-      case "cartesia": {
+      case "cartesia":
+      case "elevenlabs": {
         const engine = resolveTts(provider === "voice" ? undefined : provider);
         if (!engine.isConfigured()) {
           return NextResponse.json({
@@ -88,7 +90,8 @@ export async function GET(req: Request) {
             voices: [],
             languages: [],
             models: [],
-            notice: "Add DEEPGRAM_API_KEY to .env.local to enable narration.",
+            notice:
+              "No voice engine is configured. Add ELEVENLABS_API_KEY, DEEPGRAM_API_KEY or CARTESIA_API_KEY to .env.local.",
           });
         }
         const voices = await engine.listVoices();
@@ -99,6 +102,9 @@ export async function GET(req: Request) {
           voices,
           languages,
           models: voices.map((voice) => ({ id: voice.id, label: voice.name })),
+          // Every engine, so the picker can offer the choice instead of
+          // showing whichever one won the preference order.
+          engines: ttsProviders(),
         });
       }
 

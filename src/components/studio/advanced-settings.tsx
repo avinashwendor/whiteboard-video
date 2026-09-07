@@ -96,6 +96,26 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
     }),
   );
 
+  const engines = catalogues.voiceEngines ?? [];
+  const engineLabel =
+    engines.find((e) => e.id === (settings.voiceProvider || ""))?.label ??
+    engines.find((e) => e.configured)?.label ??
+    "auto";
+
+  /**
+   * The Indian-voice shortcuts, kept only where they resolve.
+   *
+   * They were nine Cartesia ids under a heading that said "Cartesia", which
+   * was honest right up until another engine led the order — after which every
+   * shortcut set a voice id that did not exist in the loaded catalogue, and the
+   * narration silently came back in the default voice. Filtering against the
+   * live list means the section simply disappears on an engine that has no
+   * matching voices, which is the truthful thing for it to do.
+   */
+  const shortcuts = INDIAN_VOICE_SHORTCUTS.filter((preset) =>
+    catalogues.voices.some((voice) => voice.id === preset.id),
+  );
+
   const showText = mode !== "image";
   const showImage =
     mode === "image" ||
@@ -119,30 +139,89 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
       {open ? (
         <div className="animate-fade space-y-6 border-t border-line bg-surface/50 px-6 py-6 sm:px-8">
           {showVoice ? (
-            <div className="border-l border-line pl-3">
-              <p className="mb-2 text-[12px] font-medium text-muted">
-                Popular Indian TTS Voices (Cartesia)
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {INDIAN_VOICE_SHORTCUTS.map((preset) => {
-                  const isSelected = settings.voiceId === preset.id;
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => updateSettings({ voiceId: preset.id, language: preset.lang })}
-                      className={cn(
-                        "border-b py-0.5 text-[11.5px] transition-colors",
-                        isSelected
-                          ? "border-ink font-medium text-ink"
-                          : "border-transparent text-muted hover:border-line-strong hover:text-ink",
-                      )}
-                    >
-                      {preset.name} · <span className="text-faint">{preset.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="space-y-4 border-l border-line pl-3">
+              {/*
+                The engine, then its voices. In that order because the second
+                depends on the first: the three engines share no voice ids, so
+                changing the engine replaces the whole list below.
+              */}
+              {engines.length > 1 ? (
+                <div>
+                  <p className="mb-2 text-[12px] font-medium text-muted">Voice engine</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {[{ id: "", label: "Auto", configured: true }, ...engines].map((engine) => {
+                      const isSelected = (settings.voiceProvider || "") === engine.id;
+                      return (
+                        <button
+                          key={engine.id || "auto"}
+                          type="button"
+                          disabled={!engine.configured}
+                          onClick={() => updateSettings({ voiceProvider: engine.id, voiceId: "" })}
+                          title={
+                            engine.configured
+                              ? undefined
+                              : `Add ${engine.id.toUpperCase()}_API_KEY to enable this engine`
+                          }
+                          className={cn(
+                            "border-b py-0.5 text-[11.5px] transition-colors",
+                            !engine.configured
+                              ? "cursor-not-allowed border-transparent text-faint"
+                              : isSelected
+                                ? "border-ink font-medium text-ink"
+                                : "border-transparent text-muted hover:border-line-strong hover:text-ink",
+                          )}
+                        >
+                          {engine.label}
+                          {engine.configured ? "" : " · no key"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-faint">
+                    Auto uses whichever is configured. Changing the engine reloads the
+                    voice list — the engines share no voices.
+                  </p>
+                </div>
+              ) : null}
+
+              {/*
+                Shortcuts, filtered against the catalogue that is actually
+                loaded. These were nine hardcoded Cartesia ids under a heading
+                that named Cartesia, so on any other engine every one of them
+                selected a voice that does not exist.
+              */}
+              {shortcuts.length ? (
+                <div>
+                  <p className="mb-2 text-[12px] font-medium text-muted">
+                    Indian voices
+                    <span className="ml-1.5 font-normal text-faint">
+                      · {catalogues.voices.length ? engineLabel : "loading"}
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {shortcuts.map((preset) => {
+                      const isSelected = settings.voiceId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() =>
+                            updateSettings({ voiceId: preset.id, language: preset.lang })
+                          }
+                          className={cn(
+                            "border-b py-0.5 text-[11.5px] transition-colors",
+                            isSelected
+                              ? "border-ink font-medium text-ink"
+                              : "border-transparent text-muted hover:border-line-strong hover:text-ink",
+                          )}
+                        >
+                          {preset.name} · <span className="text-faint">{preset.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

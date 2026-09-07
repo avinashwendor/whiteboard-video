@@ -327,7 +327,15 @@ export interface SpeechResponse {
 }
 
 export function generateSpeech(
-  body: { transcript: string; voiceId: string; language?: string; speed?: number; modelId?: string },
+  body: {
+    transcript: string;
+    voiceId: string;
+    language?: string;
+    speed?: number;
+    modelId?: string;
+    /** Omit to let the server pick whichever engine is configured. */
+    provider?: string;
+  },
   signal?: AbortSignal,
 ): Promise<SpeechResponse> {
   return post<SpeechResponse>("/api/tts", body, signal);
@@ -401,6 +409,8 @@ export interface CatalogueResponse {
   models?: ModelInfo[];
   voices?: VoiceInfo[];
   languages?: string[];
+  /** Every speech engine and whether it has a key. Only on the voice call. */
+  engines?: Array<{ id: string; label: string; configured: boolean }>;
   notice?: string;
 }
 

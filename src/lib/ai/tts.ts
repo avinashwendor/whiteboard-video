@@ -34,6 +34,9 @@ const PROVIDERS: Record<TTSProviderId, TTSProvider> = {
  */
 const ORDER: TTSProviderId[] = ["elevenlabs", "deepgram", "cartesia"];
 
+/** The ids, for a zod enum. Derived so a new engine is accepted everywhere at once. */
+export const TTS_PROVIDER_IDS = ORDER as [TTSProviderId, ...TTSProviderId[]];
+
 /** Shown in the picker. Kept here so the label and the id cannot drift. */
 export const TTS_PROVIDER_LABELS: Record<TTSProviderId, string> = {
   elevenlabs: "ElevenLabs",

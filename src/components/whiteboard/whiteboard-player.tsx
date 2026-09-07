@@ -41,6 +41,7 @@ import {
 } from "@/lib/video/export";
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
+import { BED_DUCK, BED_LEVEL, fetchBed } from "@/lib/video/bed";
 import { createSfxBus, scheduleSfx } from "@/lib/video/sfx";
 
 /**
@@ -417,6 +418,7 @@ export function WhiteboardPlayer({
   const [immersive, setImmersive] = useState(false);
   /** The bed the director asked for, if any. */
   const musicMood: MusicMood = (project.musicMood as MusicMood) ?? "calm";
+  const musicSource = project.musicSource ?? "synth";
 
   /**
    * The sound score.
@@ -680,6 +682,20 @@ export function WhiteboardPlayer({
 
   /** Tears the graph down. Scheduled nodes die with the bus they feed. */
   const stopSound = useCallback(() => {
+    // The bed is a looping buffer source, so disconnecting its output is not
+    // enough — it would keep running, and decoding, for the life of the page,
+    // once per scrub. Oscillators from `scheduleMusic` end on their own.
+    const bed = bedSourceRef.current;
+    if (bed) {
+      try {
+        bed.stop();
+        bed.disconnect();
+      } catch {
+        /* never started, or already stopped */
+      }
+      bedSourceRef.current = null;
+    }
+
     const live = soundRef.current;
     if (!live) return;
     try {
@@ -704,6 +720,49 @@ export function WhiteboardPlayer({
    * window a beat ahead of the picture, which is the only arrangement where a
    * hit cannot land on the wrong frame.
    */
+  /**
+   * The generated bed, decoded and held.
+   *
+   * Fetched once per mood-and-length and kept in a ref rather than state: the
+   * sound callbacks must not re-create themselves when it arrives, or every
+   * scrub would restart the audio graph. The preview simply has no bed until
+   * this lands, and plays the synthesised one meanwhile — which is also
+   * exactly what happens when generation is not configured.
+   */
+  const bedRef = useRef<AudioBuffer | null>(null);
+  /** The playing bed, so scrubbing and stopping can silence it. */
+  const bedSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const [bedReady, setBedReady] = useState(0);
+
+  useEffect(() => {
+    bedRef.current = null;
+    if (musicSource !== "generated" || musicMood === "none" || total <= 0) return;
+
+    const controller = new AbortController();
+    void (async () => {
+      const bed = await fetchBed(musicMood, total, project.title, controller.signal);
+      if (!bed || controller.signal.aborted) return;
+      try {
+        const AudioCtor =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtor) return;
+        const context = audioCtxRef.current ?? new AudioCtor();
+        audioCtxRef.current = context;
+        const bytes = await (await fetch(bed.url, { signal: controller.signal })).arrayBuffer();
+        if (controller.signal.aborted) return;
+        bedRef.current = await context.decodeAudioData(bytes);
+        // Nudges the sound callbacks to rebuild so the bed is actually heard
+        // without waiting for the next scrub.
+        setBedReady((n) => n + 1);
+      } catch {
+        // No bed. The synthesised one is still there.
+      }
+    })();
+
+    return () => controller.abort();
+  }, [musicSource, musicMood, total, project.title]);
+
   const startSound = useCallback(
     (fromSeconds: number) => {
       stopSound();
@@ -727,7 +786,35 @@ export function WhiteboardPlayer({
         music.connect(master);
 
         const rate = playbackSpeed;
-        if (musicMood !== "none") {
+        const bed = musicSource === "generated" ? bedRef.current : null;
+        if (bed) {
+          // The generated bed replaces the synthesised one rather than joining
+          // it: they are the same layer realised two ways, and both at once is
+          // two pieces of music playing over each other.
+          //
+          // Ducked by hand, matching the export's arithmetic exactly — the
+          // preview and the file have to be the same mix, and this is the one
+          // place they could quietly diverge.
+          const gain = context.createGain();
+          gain.connect(music);
+          gain.gain.value = BED_LEVEL;
+          const base = context.currentTime + 0.06;
+          for (const span of score.duck ?? []) {
+            const from = base + Math.max(0, span.from - fromSeconds) / rate;
+            const to = base + Math.max(0, span.to - fromSeconds) / rate;
+            if (to < base) continue;
+            gain.gain.setTargetAtTime(BED_LEVEL * BED_DUCK, Math.max(base, from - 0.2), 0.12);
+            gain.gain.setTargetAtTime(BED_LEVEL, Math.max(base, to), 0.35);
+          }
+          const source = context.createBufferSource();
+          source.buffer = bed;
+          source.loop = true;
+          source.playbackRate.value = rate;
+          source.connect(gain);
+          // Offset into the loop, so scrubbing lands where the music would be.
+          source.start(base, fromSeconds % Math.max(0.1, bed.duration));
+          bedSourceRef.current = source;
+        } else if (musicMood !== "none") {
           scheduleMusic(context, music, {
             mood: musicMood,
             duration: total,
@@ -751,7 +838,12 @@ export function WhiteboardPlayer({
         // A blocked audio context costs the score, never the video.
       }
     },
-    [muted, musicMood, playbackSpeed, score, soundOn, stopSound, total],
+    // `bedReady` is listed deliberately and the linter cannot see why: the bed
+    // itself lives in a ref (so the callback does not rebuild on every decode),
+    // and this counter is the only signal that the ref now holds something.
+    // Without it a bed that finishes generating mid-playback is never heard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [muted, musicMood, musicSource, bedReady, playbackSpeed, score, soundOn, stopSound, total],
   );
 
   /**
@@ -1109,6 +1201,16 @@ export function WhiteboardPlayer({
               mood: musicMood,
               duck: score.duck,
               key: score.key,
+              // Resolved here rather than read from the ref: the export can be
+              // started before the preview has ever played, so the bed may not
+              // have been fetched yet. `fetchBed` shares the in-flight request
+              // and caches by mood and length, so this is the same piece of
+              // music the preview is holding — never a second generation, and
+              // never a file whose music differs from what was watched.
+              bedUrl:
+                musicSource === "generated" && musicMood !== "none"
+                  ? ((await fetchBed(musicMood, total, project.title))?.url ?? undefined)
+                  : undefined,
             },
             onProgress: (fraction, stage) => {
               setExportProgress(fraction);
@@ -1206,6 +1308,7 @@ export function WhiteboardPlayer({
     exporting,
     mimeType,
     musicMood,
+    musicSource,
     offlineExport,
     paintAt,
     score,

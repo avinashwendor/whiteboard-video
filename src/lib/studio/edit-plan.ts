@@ -30,6 +30,7 @@ export const PROJECT_FIELDS = {
   description: { kind: "string" },
   videoStyle: { kind: "enum", values: ["whiteboard", "hyperframes"] },
   musicMood: { kind: "enum", values: ["calm", "curious", "driving", "warm", "serious", "none"] },
+  musicSource: { kind: "enum", values: ["synth", "generated"] },
   boardStock: { kind: "enum", values: [...BOARD_STOCK_NAMES_TUPLE] },
   introDuration: { kind: "number", min: 0, max: 20 },
   voiceDelay: { kind: "number", min: 0, max: 10 },
@@ -292,6 +293,7 @@ export function pruneForAgent(project: ProjectAsset): unknown {
     description: project.description,
     videoStyle: project.videoStyle,
     musicMood: project.musicMood,
+    musicSource: project.musicSource,
     introDuration: project.introDuration,
     voiceDelay: project.voiceDelay,
     scenes: project.scenes.map((scene, index) => ({

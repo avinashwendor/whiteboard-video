@@ -51,6 +51,8 @@ interface Catalogues {
   imageModels: Record<string, ModelInfo[]>;
   voices: VoiceInfo[];
   languages: string[];
+  /** The speech engines this deployment has, for the picker. */
+  voiceEngines: Array<{ id: string; label: string; configured: boolean }>;
   notices: Record<string, string | undefined>;
   loading: boolean;
 }
@@ -201,6 +203,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     imageModels: {},
     voices: [],
     languages: [],
+    voiceEngines: [],
     notices: {},
     loading: true,
   });
@@ -267,7 +270,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         fetchCatalogue("omega", controller.signal),
         fetchCatalogue("puter", controller.signal),
         fetchCatalogue("pollinations", controller.signal),
-        fetchCatalogue("voice", controller.signal),
+        // The chosen engine, or whichever is configured when nothing is
+        // chosen. This has to be inside the effect's dependency on
+        // `voiceProvider`: the engines share no voice ids, so a picker that
+        // changed the engine without refetching would leave the last engine's
+        // voices on screen and every one of them unusable.
+        fetchCatalogue(settings.voiceProvider || "voice", controller.signal),
       ]);
       if (controller.signal.aborted) return;
 
@@ -280,6 +288,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         },
         voices: voice.voices ?? [],
         languages: voice.languages ?? [],
+        voiceEngines: voice.engines ?? [],
         notices: {
           omega: text.notice,
           puter: puterImages.notice,
@@ -300,10 +309,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         // default is re-picked whenever the current one is not in the list.
         const known = voice.voices?.some((entry) => entry.id === next.voiceId);
         if (voice.voices?.length && (!next.voiceId || !known)) {
+          // By property, not by id. This named one Deepgram voice, which is
+          // exactly the kind of default that stops working silently when the
+          // engine changes — and it changed.
           const preferred =
-            voice.voices.find((entry) => entry.id === "aura-2-hera-en") ??
             voice.voices.find((entry) => entry.isIndian || entry.language === "en-IN") ??
-            voice.voices.find((entry) => [entry.language, ...(entry.languages ?? [])].includes("en"));
+            voice.voices.find((entry) =>
+              [entry.language, ...(entry.languages ?? [])].includes("en")
+            ) ??
+            voice.voices.find((entry) =>
+              [entry.language, ...(entry.languages ?? [])].some((tag) =>
+                tag?.toLowerCase().startsWith("en")
+              )
+            );
           next.voiceId = (preferred ?? voice.voices[0]).id;
         }
         return next;
@@ -311,7 +329,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     })();
 
     return () => controller.abort();
-  }, []);
+    // Only the voice engine: the text and image catalogues do not change with
+    // it, and depending on the whole settings object would refetch all four
+    // every time somebody moved the speed slider.
+  }, [settings.voiceProvider]);
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((previous) => ({ ...previous, ...patch }));
@@ -557,6 +578,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 voiceId: settings.voiceId,
                 language: settings.language || undefined,
                 speed: settings.speed,
+                // Empty means "whichever is configured", which is what the
+                // server does when the field is absent.
+                provider: settings.voiceProvider || undefined,
               },
               signal,
             );
@@ -917,6 +941,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                   voiceId,
                   language: settings.language || undefined,
                   speed: settings.speed,
+                  provider: settings.voiceProvider || undefined,
                 },
                 signal,
               );

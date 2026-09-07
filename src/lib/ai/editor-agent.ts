@@ -43,6 +43,10 @@ OPERATIONS
     description     text
     videoStyle      "whiteboard" | "hyperframes"   (the rendering engine, not a mood)
     musicMood       "calm" | "curious" | "driving" | "warm" | "serious" | "none"
+    musicSource     "synth" | "generated" — how the mood is realised. "synth" is the built-in
+                    underscore: instant and deliberately unnoticeable. "generated" asks for a real
+                    piece in the same mood; reach for it when they say the music should stand out,
+                    or ask for "real music". The mood still chooses the feel.
     boardStock      the surface, whiteboard videos only: "marker" | "blueprint" | "chalk" | "kraft" | "legal"
     introDuration   seconds, 0-20
     voiceDelay      seconds, 0-10

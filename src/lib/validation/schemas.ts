@@ -4,6 +4,7 @@ import { THEME_NAMES } from "@/lib/hyperframes/theme";
 import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
 import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
 import { POSITIONS } from "@/rescript/lib/overlay/ops-schema";
+import { TTS_PROVIDER_IDS } from "@/lib/ai/tts";
 
 /**
  * Every request body crosses this boundary. Limits here are the first line of
@@ -67,8 +68,15 @@ export const imageRequestSchema = z.object({
 export type ImageRequest = z.infer<typeof imageRequestSchema>;
 
 export const ttsRequestSchema = z.object({
-  /** Voice engine to use. Falls back to whatever is configured. */
-  provider: z.enum(["deepgram", "cartesia"]).optional(),
+  /**
+   * Voice engine to use. Falls back to whatever is configured.
+   *
+   * Derived from the registry rather than restated. It was a hand-written
+   * `["deepgram", "cartesia"]`, so the moment a third engine was added it was
+   * rejected here by name — the one place nobody thinks to look, because the
+   * engine resolves perfectly well when nothing asks for it.
+   */
+  provider: z.enum(TTS_PROVIDER_IDS).optional(),
   transcript: z
     .string()
     .trim()

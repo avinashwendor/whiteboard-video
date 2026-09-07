@@ -2,6 +2,7 @@
 
 import { ArrayBufferTarget, Muxer } from "mp4-muxer";
 import { scheduleMusic, type MusicMood } from "./music";
+import { BED_CROSSFADE, BED_DUCK, BED_LEVEL } from "./bed";
 import { createSfxBus, scheduleSfx, type SfxEvent } from "./sfx";
 
 /**
@@ -35,6 +36,15 @@ export interface SoundRequest {
   /** Musical root the effects were scored against, so they render in key. */
   key?: number;
   mood?: MusicMood;
+  /**
+   * A generated bed, already stored same-origin.
+   *
+   * When present it replaces the synthesised music entirely — the two are the
+   * same layer realised two ways, and playing both is two pieces of music at
+   * once. The effects and the ducking are unchanged either way, which is the
+   * point of putting it on the same bus.
+   */
+  bedUrl?: string;
   /** Spans where narration plays, so the bed ducks beneath it. */
   duck?: Array<{ from: number; to: number }>;
   /** 0..1 master for the score, separate from the narration. */
@@ -187,11 +197,21 @@ async function renderAudioBed(
   sound: SoundRequest | undefined,
   signal?: AbortSignal,
 ): Promise<AudioBuffer | null> {
-  const hasScore = Boolean(sound && ((sound.sfx?.length ?? 0) > 0 || sound.mood));
+  const hasScore = Boolean(
+    sound && ((sound.sfx?.length ?? 0) > 0 || sound.mood || sound.bedUrl)
+  );
   if (!placements.length && !hasScore) return null;
 
   const decoder = new OfflineAudioContext(CHANNELS, Math.ceil(SAMPLE_RATE * 0.1), SAMPLE_RATE);
-  const unique = [...new Set(placements.map((entry) => entry.url))];
+  // The generated bed decodes through the same pass as the narration clips —
+  // it is just another same-origin URL, which is why it can join the mix
+  // rather than needing a track of its own.
+  const unique = [
+    ...new Set([
+      ...placements.map((entry) => entry.url),
+      ...(sound?.bedUrl ? [sound.bedUrl] : []),
+    ]),
+  ];
   const decoded = new Map<string, AudioBuffer>();
 
   await Promise.all(
@@ -230,7 +250,30 @@ async function renderAudioBed(
     score.gain.value = sound.level ?? 1;
     score.connect(context.destination);
 
-    if (sound.mood && sound.mood !== "none") {
+    const bed = sound.bedUrl ? decoded.get(sound.bedUrl) : undefined;
+    if (bed) {
+      // Ducked by hand rather than by `scheduleMusic`, which schedules its own
+      // oscillators. Same shape, same spans, so a generated bed sits under the
+      // narration exactly as the synthesised one does.
+      const gain = context.createGain();
+      gain.connect(score);
+      gain.gain.value = BED_LEVEL;
+      for (const span of sound.duck ?? []) {
+        gain.gain.setTargetAtTime(BED_LEVEL * BED_DUCK, Math.max(0, span.from - 0.2), 0.12);
+        gain.gain.setTargetAtTime(BED_LEVEL, Math.max(0, span.to), 0.35);
+      }
+      // Looped, because a bed is generated at a fixed length and the video is
+      // whatever length it is. Trimmed by the render, so a loop point past the
+      // end simply never plays.
+      let at = 0;
+      while (at < duration) {
+        const source = context.createBufferSource();
+        source.buffer = bed;
+        source.connect(gain);
+        source.start(at);
+        at += Math.max(1, bed.duration - BED_CROSSFADE);
+      }
+    } else if (sound.mood && sound.mood !== "none") {
       scheduleMusic(context, score, {
         mood: sound.mood,
         duration,

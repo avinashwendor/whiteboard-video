@@ -96,6 +96,15 @@ export interface ProjectAsset extends Omit<Storyboard, "scenes"> {
   /** Underscore chosen for this video by the director. */
   musicMood?: "calm" | "curious" | "driving" | "warm" | "serious" | "none";
   /**
+   * How the mood is realised.
+   *
+   * "synth" is the built-in underscore: instant, free, deterministic, and
+   * furniture. "generated" asks ElevenLabs for a real piece in the same mood —
+   * better when the music is meant to be noticed, and it costs a request, a few
+   * seconds, and determinism. The mood still chooses the feel either way.
+   */
+  musicSource?: "synth" | "generated";
+  /**
    * The surface a whiteboard video is drawn on.
    *
    * Ignored by the modern engine, which has its own palettes. Chosen by the
@@ -142,6 +151,16 @@ export interface Settings {
   imageSize: string;
   imageStyle: ImageStyle | "auto";
   voiceId: string;
+  /**
+   * Which speech engine narrates.
+   *
+   * "" means "whichever is configured", which is what this always did and is
+   * still the right default — the engines are interchangeable behind one
+   * contract and the preference order is a considered one. It is a setting
+   * because voices are not interchangeable: somebody who has picked a specific
+   * ElevenLabs voice does not want a Deepgram one because the order changed.
+   */
+  voiceProvider: string;
   language: string;
   speed: number;
   sceneCount: number;
@@ -179,7 +198,12 @@ export const DEFAULT_SETTINGS: Settings = {
   imageModel: "",
   imageSize: "1280x720",
   imageStyle: "auto",
-  voiceId: "4459a9a5-69d6-4680-b970-e13dc51845b6", // Siya (English · Bright Conversationalist)
+  // Empty on purpose. Which voice is right depends on which engine answered,
+  // and the engines have no ids in common — a Cartesia id was hardcoded here
+  // and stopped resolving the moment a third engine led the order. The live
+  // catalogue picks the default, which is the only thing that can.
+  voiceId: "",
+  voiceProvider: "",
   language: "en",
   speed: 1,
   sceneCount: 6,

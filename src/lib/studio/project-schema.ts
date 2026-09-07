@@ -81,6 +81,7 @@ export const editableProjectSchema = z.looseObject({
   introDuration: z.number().min(0).max(20).optional(),
   voiceDelay: z.number().min(0).max(10).optional(),
   musicMood: z.enum(["calm", "curious", "driving", "warm", "serious", "none"]).optional(),
+  musicSource: z.enum(["synth", "generated"]).optional(),
   boardStock: z.enum(BOARD_STOCK_NAMES_TUPLE).optional(),
 });
 
