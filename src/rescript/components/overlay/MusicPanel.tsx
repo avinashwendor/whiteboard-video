@@ -10,6 +10,7 @@ import {
   defaultGainFor,
   type AudioKind,
 } from "@/rescript/lib/overlay/audio";
+import { runPlan } from "@/rescript/lib/overlay/ops";
 import { Button, Empty, Row, Section, Segmented, Slider, TextInput, Toggle, formatSeconds } from "./ui";
 
 /**
@@ -54,6 +55,9 @@ export default function MusicPanel() {
   const [error, setError] = useState<string | null>(null);
   const [auditioning, setAuditioning] = useState<HTMLAudioElement | null>(null);
   const [can, setCan] = useState<Record<string, boolean>>({});
+  /** The automatic pass, which is several catalogue fetches and takes a moment. */
+  const [sounding, setSounding] = useState<"subtle" | "energetic" | "comedic" | null>(null);
+  const [sounded, setSounded] = useState<string | null>(null);
 
   const clips = useOverlayStore((s) => s.audio);
   const addAudio = useOverlayStore((s) => s.addAudio);
@@ -61,6 +65,9 @@ export default function MusicPanel() {
   const removeAudio = useOverlayStore((s) => s.removeAudio);
   const timeline = useOutputTimeline();
   const playhead = useOutputTime();
+  // Only needed so `runPlan` has a complete context; nothing about sound uses
+  // it, but the shape is shared with every other operation and stays shared.
+  const aspect = useOverlayStore((s) => s.aspect);
 
   // What this deployment can search, so the picker offers what works rather
   // than letting someone search a catalogue that will always come back empty.
@@ -201,8 +208,72 @@ export default function MusicPanel() {
     { value: "sfx", label: "Effects" },
   ];
 
+  /**
+   * Sound the edit, in one go.
+   *
+   * Runs the same `autoSfx` operation the agent does — not a second
+   * implementation of it. Placement is the hard part of a sound effect and it
+   * is frame-accurate work off the cuts, the punch-ins and the captions; a
+   * panel that only offered a search box was asking somebody to do that by
+   * hand, one effect at a time, against a waveform.
+   */
+  const sound = useCallback(
+    async (style: "subtle" | "energetic" | "comedic") => {
+      if (sounding) return;
+      setSounding(style);
+      setError(null);
+      setSounded(null);
+      try {
+        const results = await runPlan([{ op: "autoSfx", style }], {
+          playhead,
+          duration: timeline.duration,
+          timeline,
+          aspect,
+        });
+        const first = results[0];
+        if (first?.ok) setSounded(first.message);
+        else setError(first?.message ?? "Nothing could be placed.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "That didn't work.");
+      } finally {
+        setSounding(null);
+      }
+    },
+    [sounding, playhead, timeline, aspect]
+  );
+
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+      <Section
+        title="Sound the edit"
+      >
+        <p className="mb-2 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-600">
+          Puts effects on the moments the edit already made — the cuts, the
+          punch-ins, the captions — spaced so they stay punctuation. Do the
+          cutting first.
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(["subtle", "energetic", "comedic"] as const).map((style) => (
+            <Button
+              key={style}
+              onClick={() => void sound(style)}
+              disabled={!!sounding || can.sfx === false}
+            >
+              {sounding === style ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                style.charAt(0).toUpperCase() + style.slice(1)
+              )}
+            </Button>
+          ))}
+        </div>
+        {sounded && (
+          <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-600">
+            {sounded}
+          </p>
+        )}
+      </Section>
+
       <Section title="Find">
         <Segmented value={kind} options={KINDS} onChange={setKind} />
         {can[kind] === false && (

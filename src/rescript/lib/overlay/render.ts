@@ -22,6 +22,7 @@ import { drawShapePath } from "./shapes";
 import type {
   Composition,
   ImageElement,
+  ImageMotion,
   OverlayElement,
   ShapeElement,
   SubtitleCue,
@@ -420,10 +421,62 @@ function tokenState(state: DrawState, p: number): DrawState {
   };
 }
 
+/**
+ * How far a Ken Burns move travels, at amount 1.
+ *
+ * 6% of zoom over the life of the shot, or 4% of the box in pan. Both are under
+ * what anybody consciously registers, which is the entire specification: the
+ * move exists so the picture does not read as dead, and a still that visibly
+ * slides has become a slideshow transition instead.
+ */
+const KEN_BURNS_ZOOM = 0.06;
+const KEN_BURNS_PAN = 0.04;
+
+/**
+ * The transform for a still's slow move, at progress `p` through its life.
+ *
+ * `cover` is forced while a move is on, and it has to be: `contain` fits the
+ * whole picture in the box, so panning it reveals the empty box behind it and
+ * zooming it out shrinks the picture away from its own frame. There is nothing
+ * to move *into* unless the picture is already larger than what you can see.
+ */
+export function kenBurns(
+  motion: ImageMotion | undefined,
+  p: number
+): { zoom: number; dx: number; dy: number } {
+  if (!motion || motion.kind === "none") return { zoom: 1, dx: 0, dy: 0 };
+  const amount = Math.max(0, Math.min(2, motion.amount));
+  const eased = Math.max(0, Math.min(1, p));
+
+  switch (motion.kind) {
+    case "zoomIn":
+      return { zoom: 1 + KEN_BURNS_ZOOM * amount * eased, dx: 0, dy: 0 };
+    case "zoomOut":
+      return { zoom: 1 + KEN_BURNS_ZOOM * amount * (1 - eased), dx: 0, dy: 0 };
+    case "panLeft":
+      // Held slightly zoomed throughout, or the pan would expose the edge.
+      return {
+        zoom: 1 + KEN_BURNS_PAN * amount,
+        dx: -KEN_BURNS_PAN * amount * (eased - 0.5),
+        dy: 0,
+      };
+    case "panRight":
+      return {
+        zoom: 1 + KEN_BURNS_PAN * amount,
+        dx: KEN_BURNS_PAN * amount * (eased - 0.5),
+        dy: 0,
+      };
+    default:
+      return { zoom: 1, dx: 0, dy: 0 };
+  }
+}
+
 function drawImageElement(
   ctx: CanvasRenderingContext2D,
   el: ImageElement,
-  box: Px
+  box: Px,
+  /** 0..1 through the element's life on screen. Drives the slow move. */
+  progress = 0
 ) {
   const img = peekImage(el.src);
   const radius = el.radius * Math.min(box.w, box.h);
@@ -456,16 +509,21 @@ function drawImageElement(
   roundRect(ctx, box.x, box.y, box.w, box.h, radius);
   ctx.clip();
 
+  const move = kenBurns(el.motion, progress);
+  const moving = move.zoom !== 1 || move.dx !== 0 || move.dy !== 0;
+  // A move needs something to move into, and `contain` has nothing: the whole
+  // picture already fits, so panning it exposes the box behind it.
+  const fit = moving ? "cover" : el.fit;
   const scale =
-    el.fit === "cover"
+    (fit === "cover"
       ? Math.max(box.w / img.naturalWidth, box.h / img.naturalHeight)
-      : Math.min(box.w / img.naturalWidth, box.h / img.naturalHeight);
+      : Math.min(box.w / img.naturalWidth, box.h / img.naturalHeight)) * move.zoom;
   const dw = img.naturalWidth * scale;
   const dh = img.naturalHeight * scale;
   ctx.drawImage(
     img,
-    box.x + (box.w - dw) / 2,
-    box.y + (box.h - dh) / 2,
+    box.x + (box.w - dw) / 2 + move.dx * box.w,
+    box.y + (box.h - dh) / 2 + move.dy * box.h,
     dw,
     dh
   );
@@ -567,9 +625,14 @@ export function paintElement(
     case "text":
       drawText(ctx, element, size, state, box);
       break;
-    case "image":
-      drawImageElement(ctx, element, box);
+    case "image": {
+      // Progress through the element's own life, not the video's, so a picture
+      // up for three seconds completes its move in three seconds whether it
+      // sits at the top of the video or the end.
+      const life = Math.max(0.001, element.end - element.start);
+      drawImageElement(ctx, element, box, (t - element.start) / life);
       break;
+    }
     case "shape":
       drawShape(ctx, element, size, box, state);
       break;
@@ -604,6 +667,42 @@ function subtitleLines(
   const kept = lines.slice(0, style.maxLines - 1);
   kept.push(lines.slice(style.maxLines - 1).join(" "));
   return kept;
+}
+
+/**
+ * A word, stripped to what two spellings of it have in common.
+ *
+ * Punctuation and case are what stop "faster," matching "faster", which is the
+ * only comparison this file ever makes between two tokens.
+ */
+function bareWord(token: string): string {
+  return token.replace(/[^\p{L}\p{N}']/gu, "").toLowerCase();
+}
+
+/**
+ * Should this word be stressed?
+ *
+ * "auto" is a shape rule, not an understanding one: anything carrying a digit,
+ * a currency amount or a percentage, and anything written in capitals in the
+ * transcript. Those are what a person emphasises out loud, near enough, and
+ * the rule costs a regex rather than a model call. Keywords are always
+ * stressed, on top.
+ *
+ * The deliberate omission is emphasis by *meaning*. Guessing which adjective
+ * matters produces a caption where a different word is coloured every line,
+ * which reads as a fault rather than as emphasis.
+ */
+function stressed(token: string, style: SubtitleStyle): boolean {
+  const bare = bareWord(token);
+  if (!bare) return false;
+  if (style.keywords.length && style.keywords.includes(bare)) return true;
+  if (style.emphasis !== "auto") return false;
+  if (/\d/.test(token)) return true;
+  if (/[%$£€₹]/.test(token)) return true;
+  // Written in capitals in the source. Two letters or more, so "I" and "A" do
+  // not light up every line.
+  const letters = token.replace(/[^\p{L}]/gu, "");
+  return letters.length >= 2 && letters === letters.toUpperCase();
 }
 
 export function paintSubtitle(
@@ -642,6 +741,13 @@ export function paintSubtitle(
     const p = clamp01(into / 0.18);
     alpha = clamp01(p * 2);
     scale = 0.9 + 0.1 * (1 - Math.pow(1 - p, 3));
+  } else if (style.animation === "bounce") {
+    // Overshoots and settles, in 220ms. The overshoot is the difference
+    // between a caption that appears and one that lands.
+    const p = clamp01(into / 0.22);
+    alpha = clamp01(p * 3);
+    const eased = 1 - Math.pow(1 - p, 3);
+    scale = 0.72 + 0.36 * eased - 0.08 * Math.sin(eased * Math.PI);
   }
   ctx.globalAlpha = alpha;
 
@@ -653,11 +759,20 @@ export function paintSubtitle(
     ctx.translate(-cx, -cy);
   }
 
-  // Karaoke needs to know which word is live; measure per word on that path.
-  const active =
-    style.animation === "karaoke" && cue.words?.length
-      ? cue.words.find((w) => t >= w.start && t < w.end) ?? null
-      : null;
+  // The live word, for karaoke and for the grow-on-speech. Needed whenever
+  // either is asked for, not only under the karaoke animation — the two were
+  // one thing until a preset wanted a bounce with a plain colour.
+  const wantsLive =
+    (style.animation === "karaoke" || style.activeScale !== 1) && !!cue.words?.length;
+  const active = wantsLive
+    ? (cue.words!.find((w) => t >= w.start && t < w.end) ?? null)
+    : null;
+  const highlighting = style.animation === "karaoke";
+  const emphasising = style.emphasis === "auto" || style.keywords.length > 0;
+  // Word-by-word drawing costs a `measureText` per token, so it is only taken
+  // when something actually differs between words.
+  const perWord = !!active || emphasising;
+  const emphasisInk = style.emphasisColor ?? style.highlight;
 
   lines.forEach((line, i) => {
     const width = ctx.measureText(line).width;
@@ -693,20 +808,40 @@ export function paintSubtitle(
       ctx.strokeText(line, x, y);
     }
 
-    if (active) {
-      // Re-draw word by word so only the live one takes the highlight colour.
+    if (perWord) {
+      // Re-draw word by word so the live one and the stressed ones can differ.
       // Splitting on the rendered line keeps spacing identical to the plain
-      // path — measuring each token separately would drift.
+      // path — laying each token out from its own measurement would drift.
+      const liveBare = active ? bareWord(active.text) : "";
       let cursor = x;
       for (const token of line.split(/(\s+)/)) {
         const tokenWidth = ctx.measureText(token).width;
         if (token.trim()) {
-          const bare = token.replace(/[^\p{L}\p{N}']/gu, "").toLowerCase();
-          const live =
-            bare.length > 0 &&
-            active.text.replace(/[^\p{L}\p{N}']/gu, "").toLowerCase() === bare;
-          ctx.fillStyle = live ? style.highlight : style.color;
-          ctx.fillText(token, cursor, y);
+          const bare = bareWord(token);
+          const live = !!liveBare && bare.length > 0 && bare === liveBare;
+          ctx.fillStyle =
+            live && highlighting
+              ? style.highlight
+              : stressed(token, style)
+                ? emphasisInk
+                : style.color;
+
+          if (live && style.activeScale !== 1) {
+            // Grown about its own centre, so the words either side do not move.
+            // Scaling the line instead is the obvious implementation and it
+            // makes the whole caption jitter once a word, which reads as a
+            // rendering fault rather than as emphasis.
+            ctx.save();
+            const cx = cursor + tokenWidth / 2;
+            const cy = y + lineHeight / 2;
+            ctx.translate(cx, cy);
+            ctx.scale(style.activeScale, style.activeScale);
+            ctx.translate(-cx, -cy);
+            ctx.fillText(token, cursor, y);
+            ctx.restore();
+          } else {
+            ctx.fillText(token, cursor, y);
+          }
         }
         cursor += tokenWidth;
       }

@@ -21,6 +21,7 @@
 import type { AnimationSpec } from "./types";
 import type { PositionName, SizeName } from "./ops-schema";
 import type { TextStylePatch } from "./presets";
+import { typefaceStack } from "./typefaces";
 
 export type TemplateCategory =
   | "title"
@@ -54,10 +55,25 @@ export interface TextTemplate {
   sample: string;
 }
 
-const SANS = "var(--font-geist-sans), system-ui, sans-serif";
-const HAND = "var(--font-hand), var(--font-geist-sans), system-ui, sans-serif";
-const SERIF = "Georgia, 'Times New Roman', serif";
-const MONO = "var(--font-geist-mono), ui-monospace, monospace";
+/**
+ * The faces, from the one catalogue.
+ *
+ * Written out rather than inlined so the difference between two templates is
+ * visible at a glance: a library where thirty-six entries all say `SANS` is a
+ * library of one look with thirty-six sets of timings, which is what this was.
+ */
+const SANS = typefaceStack("sans");
+const MONO = typefaceStack("mono");
+const HAND = typefaceStack("marker");
+const CAVEAT = typefaceStack("caveat");
+const ANTON = typefaceStack("anton");
+const BEBAS = typefaceStack("bebas");
+const ARCHIVO = typefaceStack("archivo");
+const SYNE = typefaceStack("syne");
+const PLAYFAIR = typefaceStack("playfair");
+const INSTRUMENT = typefaceStack("instrument");
+const GROTESK = typefaceStack("grotesk");
+const BUNGEE = typefaceStack("bungee");
 
 /** The house accent, matching the one the agent's style guide names. */
 const ACCENT = "#ffd60a";
@@ -83,11 +99,11 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Kinetic mask",
     category: "title",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: ARCHIVO,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
-      letterSpacing: -0.03,
+      letterSpacing: -0.02,
       shadow: true,
       sizeScale: 1.2,
     },
@@ -103,12 +119,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Bold slam",
     category: "title",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: ANTON,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
       uppercase: true,
-      letterSpacing: -0.02,
+      letterSpacing: -0.01,
       shadow: true,
       sizeScale: 1.25,
     },
@@ -123,11 +139,11 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Editorial",
     category: "title",
     style: {
-      fontFamily: SERIF,
+      fontFamily: INSTRUMENT,
       fontWeight: 400,
       color: "#ffffff",
       background: null,
-      letterSpacing: -0.01,
+      letterSpacing: -0.005,
       shadow: true,
       sizeScale: 1.2,
     },
@@ -142,12 +158,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Split reveal",
     category: "title",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: BEBAS,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
       uppercase: true,
-      letterSpacing: 0.02,
+      letterSpacing: 0.04,
       shadow: true,
       sizeScale: 1.1,
     },
@@ -181,12 +197,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Stamp",
     category: "title",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: BUNGEE,
+      fontWeight: 400,
       color: ACCENT,
       background: null,
       uppercase: true,
-      letterSpacing: 0.04,
+      letterSpacing: 0.02,
       strokeColor: "#0a0b0d",
       strokeWidth: 0.06,
       shadow: false,
@@ -203,7 +219,7 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Neon",
     category: "title",
     style: {
-      fontFamily: SANS,
+      fontFamily: SYNE,
       fontWeight: 800,
       color: "#f5f3ff",
       background: null,
@@ -311,8 +327,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Bracketed",
     category: "lowerThird",
     style: {
-      fontFamily: MONO,
-      fontWeight: 500,
+      fontFamily: GROTESK,
+      fontWeight: 700,
       color: ACCENT,
       background: null,
       uppercase: true,
@@ -352,8 +368,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Corner tag",
     category: "lowerThird",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: GROTESK,
+      fontWeight: 700,
       color: "#0a0b0d",
       background: ACCENT,
       uppercase: true,
@@ -420,12 +436,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Bounce",
     category: "caption",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: ARCHIVO,
+      fontWeight: 400,
       color: ACCENT,
       background: null,
       uppercase: true,
-      letterSpacing: 0,
+      letterSpacing: -0.02,
       strokeColor: "#0a0b0d",
       strokeWidth: 0.08,
       shadow: false,
@@ -464,12 +480,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "One word",
     category: "caption",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: ANTON,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
       uppercase: true,
-      letterSpacing: -0.02,
+      letterSpacing: -0.01,
       strokeColor: "#0a0b0d",
       strokeWidth: 0.1,
       shadow: false,
@@ -530,8 +546,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Sticky note",
     category: "callout",
     style: {
-      fontFamily: HAND,
-      fontWeight: 400,
+      fontFamily: CAVEAT,
+      fontWeight: 700,
       color: "#0a0b0d",
       background: "#fde68a",
       letterSpacing: 0,
@@ -573,8 +589,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Quote",
     category: "callout",
     style: {
-      fontFamily: SERIF,
-      fontWeight: 400,
+      fontFamily: PLAYFAIR,
+      fontWeight: 500,
       italic: true,
       color: "#ffffff",
       background: null,
@@ -593,12 +609,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Warning",
     category: "callout",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: BUNGEE,
+      fontWeight: 400,
       color: "#0a0b0d",
       background: "#f97316",
       uppercase: true,
-      letterSpacing: 0.04,
+      letterSpacing: 0.02,
       padding: 0.5,
       radius: 0.1,
       shadow: true,
@@ -615,8 +631,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Aside",
     category: "callout",
     style: {
-      fontFamily: SANS,
-      fontWeight: 500,
+      fontFamily: CAVEAT,
+      fontWeight: 700,
       italic: true,
       color: "rgba(255,255,255,0.82)",
       background: null,
@@ -638,11 +654,11 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Big stat",
     category: "data",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: ANTON,
+      fontWeight: 400,
       color: ACCENT,
       background: null,
-      letterSpacing: -0.04,
+      letterSpacing: -0.03,
       shadow: true,
       sizeScale: 1.6,
     },
@@ -657,11 +673,11 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Stat + note",
     category: "data",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: ARCHIVO,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
-      letterSpacing: -0.03,
+      letterSpacing: -0.02,
       shadow: true,
       sizeScale: 1.15,
     },
@@ -696,12 +712,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Versus",
     category: "data",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: BEBAS,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
       uppercase: true,
-      letterSpacing: 0.02,
+      letterSpacing: 0.03,
       strokeColor: "#0a0b0d",
       strokeWidth: 0.06,
       shadow: false,
@@ -718,8 +734,8 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Unit label",
     category: "data",
     style: {
-      fontFamily: MONO,
-      fontWeight: 500,
+      fontFamily: GROTESK,
+      fontWeight: 700,
       color: "rgba(255,255,255,0.75)",
       background: null,
       uppercase: true,
@@ -804,12 +820,12 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "Chapter",
     category: "cta",
     style: {
-      fontFamily: SANS,
-      fontWeight: 800,
+      fontFamily: BEBAS,
+      fontWeight: 400,
       color: "#ffffff",
       background: null,
       uppercase: true,
-      letterSpacing: 0.12,
+      letterSpacing: 0.06,
       shadow: true,
       sizeScale: 0.7,
     },
@@ -824,11 +840,11 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     label: "End card",
     category: "cta",
     style: {
-      fontFamily: SANS,
-      fontWeight: 900,
+      fontFamily: PLAYFAIR,
+      fontWeight: 700,
       color: "#ffffff",
       background: null,
-      letterSpacing: -0.03,
+      letterSpacing: -0.01,
       shadow: true,
       sizeScale: 1.35,
     },
@@ -837,6 +853,403 @@ export const TEXT_TEMPLATES: TextTemplate[] = [
     position: "center",
     size: "xl",
     sample: "Thanks for watching",
+  },
+  /* ---------------------------- added: more voice --------------------------- */
+  //
+  // The library above covers the shapes an edit needs. What it did not cover is
+  // *range*: eight titles that are all a grotesque in a different weight are
+  // one title. These are the entries that sound like something — a magazine, a
+  // sticker, a scoreboard, a note somebody left — and the reason to have them
+  // is that "make it look good" is not a style, and a model with only safe
+  // options will pick the safe one every time.
+  {
+    id: "megaCondensed",
+    label: "Mega condensed",
+    category: "title",
+    style: {
+      fontFamily: ANTON,
+      fontWeight: 400,
+      color: "#ffffff",
+      background: null,
+      uppercase: true,
+      letterSpacing: -0.015,
+      strokeColor: "#000000",
+      strokeWidth: 0.05,
+      shadow: false,
+      sizeScale: 1.6,
+    },
+    // Bigger than anything else here on purpose. Anton is condensed, so a long
+    // word still fits across a vertical frame at this size — which is the whole
+    // reason to reach for it.
+    enter: { kind: "scaleUp", duration: 0.35, easing: "backOut" },
+    exit: { kind: "blur", duration: 0.2, easing: "easeIn" },
+    position: "center",
+    size: "xl",
+    sample: "EVERYTHING CHANGES",
+  },
+  {
+    id: "magazine",
+    label: "Magazine",
+    category: "title",
+    style: {
+      fontFamily: PLAYFAIR,
+      fontWeight: 900,
+      italic: true,
+      color: "#ffffff",
+      background: null,
+      letterSpacing: -0.02,
+      shadow: true,
+      sizeScale: 1.35,
+    },
+    enter: { kind: "mask", duration: 0.8, easing: "easeOut", unit: "word", stagger: 0.16 },
+    exit: fade(0.3),
+    position: "center",
+    size: "xl",
+    sample: "The Long Way Round",
+  },
+  {
+    id: "artDirected",
+    label: "Art directed",
+    category: "title",
+    style: {
+      fontFamily: SYNE,
+      fontWeight: 800,
+      color: "#ffffff",
+      background: null,
+      uppercase: true,
+      letterSpacing: 0.12,
+      shadow: true,
+      sizeScale: 1.05,
+    },
+    // Wide tracking and a slow per-letter arrival: the look reads as designed
+    // rather than typed, which is the only thing it is for.
+    enter: { kind: "fade", duration: 0.9, easing: "easeOut", unit: "char", stagger: 0.035 },
+    exit: fade(0.4),
+    position: "center",
+    size: "l",
+    sample: "S T U D I O",
+  },
+  {
+    id: "outlineOnly",
+    label: "Outline",
+    category: "title",
+    style: {
+      fontFamily: ARCHIVO,
+      fontWeight: 400,
+      // Transparent fill with a heavy stroke: the footage shows through the
+      // letters, which is why it only works over a picture and never over a card.
+      color: "rgba(255,255,255,0)",
+      background: null,
+      uppercase: true,
+      letterSpacing: -0.01,
+      strokeColor: "#ffffff",
+      strokeWidth: 0.045,
+      shadow: false,
+      sizeScale: 1.4,
+    },
+    enter: { kind: "scaleUp", duration: 0.5, easing: "easeOut" },
+    exit: fade(0.25),
+    position: "center",
+    size: "xl",
+    sample: "THROUGH",
+  },
+  {
+    id: "tickerTitle",
+    label: "Ticker",
+    category: "title",
+    style: {
+      fontFamily: BEBAS,
+      fontWeight: 400,
+      color: "#0a0b0d",
+      background: ACCENT,
+      uppercase: true,
+      letterSpacing: 0.05,
+      padding: 0.34,
+      radius: 0,
+      shadow: false,
+      sizeScale: 0.95,
+    },
+    enter: { kind: "wipeRight", duration: 0.45, easing: "easeOut" },
+    exit: { kind: "slideLeft", duration: 0.25, easing: "easeIn" },
+    position: "upper-third",
+    size: "l",
+    sample: "BREAKING",
+  },
+
+  /* --------------------------- added: lower thirds -------------------------- */
+  {
+    id: "sidebar",
+    label: "Side bar",
+    category: "lowerThird",
+    style: {
+      fontFamily: GROTESK,
+      fontWeight: 700,
+      color: "#ffffff",
+      background: "rgba(10,11,13,0.72)",
+      letterSpacing: 0,
+      padding: 0.42,
+      radius: 0.08,
+      shadow: false,
+      sizeScale: 0.82,
+    },
+    enter: { kind: "slideRight", duration: 0.4, easing: "easeOut" },
+    exit: { kind: "slideLeft", duration: 0.25, easing: "easeIn" },
+    position: "bottom-left",
+    size: "m",
+    sample: "Priya Raman · Head of Design",
+  },
+  {
+    id: "serifName",
+    label: "Serif name",
+    category: "lowerThird",
+    style: {
+      fontFamily: INSTRUMENT,
+      fontWeight: 400,
+      color: "#ffffff",
+      background: null,
+      letterSpacing: 0,
+      shadow: true,
+      sizeScale: 0.95,
+    },
+    enter: { kind: "fade", duration: 0.6, easing: "easeOut" },
+    exit: fade(0.35),
+    position: "lower-third",
+    size: "m",
+    sample: "Anand Verma, founder",
+  },
+
+  /* ----------------------------- added: captions ---------------------------- */
+  {
+    id: "shoutCaption",
+    label: "Shout",
+    category: "caption",
+    style: {
+      fontFamily: ANTON,
+      fontWeight: 400,
+      color: "#ffffff",
+      background: null,
+      uppercase: true,
+      letterSpacing: -0.005,
+      strokeColor: "#000000",
+      strokeWidth: 0.07,
+      shadow: false,
+      sizeScale: 1.3,
+    },
+    // The short-form caption: heavy, outlined so it needs no box, and arriving
+    // on the beat rather than fading in.
+    enter: { kind: "pop", duration: 0.22, easing: "backOut" },
+    exit: { kind: "none", duration: 0, easing: "linear" },
+    position: "center",
+    size: "l",
+    sample: "NO WAY",
+  },
+  {
+    id: "chipCaption",
+    label: "Chip",
+    category: "caption",
+    style: {
+      fontFamily: GROTESK,
+      fontWeight: 700,
+      color: "#0a0b0d",
+      background: "#ffffff",
+      uppercase: false,
+      letterSpacing: -0.01,
+      padding: 0.4,
+      radius: 0.5,
+      shadow: true,
+      sizeScale: 0.8,
+    },
+    enter: { kind: "pop", duration: 0.3, easing: "backOut" },
+    exit: fade(0.18),
+    position: "upper-third",
+    size: "m",
+    sample: "here's the part that matters",
+  },
+  {
+    id: "handNote",
+    label: "Hand note",
+    category: "caption",
+    style: {
+      fontFamily: CAVEAT,
+      fontWeight: 700,
+      color: ACCENT,
+      background: null,
+      letterSpacing: 0,
+      shadow: true,
+      sizeScale: 1.15,
+    },
+    enter: { kind: "mask", duration: 0.5, easing: "easeOut", unit: "word", stagger: 0.1 },
+    exit: fade(0.25),
+    position: "right",
+    size: "m",
+    sample: "watch this bit",
+  },
+
+  /* ----------------------------- added: callouts ---------------------------- */
+  {
+    id: "pullQuote",
+    label: "Pull quote",
+    category: "callout",
+    style: {
+      fontFamily: PLAYFAIR,
+      fontWeight: 500,
+      italic: true,
+      color: "#ffffff",
+      background: "rgba(10,11,13,0.55)",
+      letterSpacing: -0.01,
+      padding: 0.6,
+      radius: 0.04,
+      align: "left",
+      shadow: false,
+      sizeScale: 1,
+    },
+    enter: { kind: "slideUp", duration: 0.5, easing: "easeOut" },
+    exit: fade(0.3),
+    position: "left",
+    size: "m",
+    sample: "“We shipped it in a weekend.”",
+  },
+  {
+    id: "sticker",
+    label: "Sticker",
+    category: "callout",
+    style: {
+      fontFamily: BUNGEE,
+      fontWeight: 400,
+      color: "#0a0b0d",
+      background: ACCENT,
+      uppercase: true,
+      letterSpacing: 0.02,
+      padding: 0.4,
+      radius: 0.14,
+      strokeColor: null,
+      shadow: true,
+      sizeScale: 0.85,
+    },
+    // Sits at an angle in use — `addText` can turn it, and a sticker that is
+    // perfectly level does not read as a sticker.
+    enter: { kind: "pop", duration: 0.28, easing: "backOut" },
+    exit: { kind: "scaleUp", duration: 0.18, easing: "easeIn" },
+    position: "top-right",
+    size: "m",
+    sample: "NEW",
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    category: "callout",
+    style: {
+      fontFamily: MONO,
+      fontWeight: 500,
+      color: "#4ade80",
+      background: "rgba(6,8,10,0.88)",
+      letterSpacing: 0,
+      padding: 0.55,
+      radius: 0.05,
+      align: "left",
+      shadow: false,
+      sizeScale: 0.72,
+    },
+    enter: { kind: "typewriter", duration: 1.1, easing: "linear" },
+    exit: fade(0.2),
+    position: "bottom-left",
+    size: "m",
+    sample: "$ npm run build",
+  },
+
+  /* ------------------------------- added: data ------------------------------ */
+  {
+    id: "scoreboard",
+    label: "Scoreboard",
+    category: "data",
+    style: {
+      fontFamily: BEBAS,
+      fontWeight: 400,
+      color: "#ffffff",
+      background: "rgba(10,11,13,0.8)",
+      uppercase: true,
+      letterSpacing: 0.04,
+      padding: 0.36,
+      radius: 0.06,
+      shadow: false,
+      sizeScale: 1.05,
+    },
+    enter: { kind: "slideDown", duration: 0.4, easing: "backOut" },
+    exit: { kind: "slideUp", duration: 0.25, easing: "easeIn" },
+    position: "top",
+    size: "l",
+    sample: "12 — 4",
+  },
+  {
+    id: "percentPop",
+    label: "Percent",
+    category: "data",
+    style: {
+      fontFamily: ANTON,
+      fontWeight: 400,
+      color: ACCENT,
+      background: null,
+      uppercase: true,
+      letterSpacing: -0.03,
+      strokeColor: "#0a0b0d",
+      strokeWidth: 0.055,
+      shadow: false,
+      // The library's ceiling. A figure is the one caption allowed to be this
+      // big, and past here it stops being type and starts being a graphic.
+      sizeScale: 1.7,
+    },
+    // The single biggest thing this library can put on screen, because a figure
+    // is the one caption that is allowed to be the whole frame.
+    enter: { kind: "pop", duration: 0.3, easing: "backOut" },
+    exit: { kind: "blur", duration: 0.22, easing: "easeIn" },
+    position: "center",
+    size: "xl",
+    sample: "94%",
+  },
+
+  /* -------------------------------- added: CTA ------------------------------ */
+  {
+    id: "arrowNote",
+    label: "Arrow note",
+    category: "cta",
+    style: {
+      fontFamily: CAVEAT,
+      fontWeight: 700,
+      color: ACCENT,
+      background: null,
+      letterSpacing: 0,
+      shadow: true,
+      sizeScale: 1.2,
+    },
+    // Pairs with an addShape "arrow" pointing at whatever it is about. On its
+    // own it is a handwritten caption; the pair is the thing worth having.
+    enter: { kind: "mask", duration: 0.55, easing: "easeOut", unit: "word", stagger: 0.12 },
+    exit: fade(0.25),
+    position: "bottom-right",
+    size: "m",
+    sample: "link below",
+  },
+  {
+    id: "bigCta",
+    label: "Big CTA",
+    category: "cta",
+    style: {
+      fontFamily: ARCHIVO,
+      fontWeight: 400,
+      color: "#0a0b0d",
+      background: ACCENT,
+      uppercase: true,
+      letterSpacing: -0.01,
+      padding: 0.44,
+      radius: 0.1,
+      shadow: true,
+      sizeScale: 1.05,
+    },
+    enter: { kind: "scaleUp", duration: 0.35, easing: "backOut" },
+    exit: { kind: "none", duration: 0, easing: "linear" },
+    position: "bottom",
+    size: "l",
+    sample: "SUBSCRIBE",
   },
 ];
 
@@ -860,4 +1273,35 @@ export function templatesByCategory(): {
       templates: TEXT_TEMPLATES.filter((t) => t.category === category),
     }))
     .filter((group) => group.templates.length > 0);
+}
+
+/**
+ * The library, as the agent is shown it.
+ *
+ * Generated rather than written into the prompt by hand. The prompt used to
+ * carry the same thirty-six names in prose, and prose drifts: a template added
+ * in one place and not the other is either invisible to the model or is an
+ * operation it plans confidently and the executor silently ignores. There was a
+ * test holding the two in step, which is the right instinct and the wrong
+ * mechanism — a list with one source cannot drift.
+ *
+ * Grouped by category, and within a category in declaration order, which is
+ * ordered by how often each is the right answer. The model is told that, so
+ * "the first one listed" is usable advice.
+ */
+export function describeTemplates(): string {
+  const labels: Record<TemplateCategory, string> = {
+    title: "Titles",
+    lowerThird: "Lower thirds",
+    caption: "Captions",
+    callout: "Callouts",
+    data: "Data",
+    cta: "Call to action",
+  };
+  return templatesByCategory()
+    .map((group) => {
+      const heading = `${labels[group.category]}:`.padEnd(15);
+      return `    ${heading}${group.templates.map((t) => t.id).join(" ")}`;
+    })
+    .join("\n");
 }

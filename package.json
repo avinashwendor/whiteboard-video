@@ -40,7 +40,13 @@
     "test:media": "tsx tests/media-test.ts",
     "eval": "tsx evals/run.mts",
     "export:telugu": "python3 tools/export-telugu-onnx/export.py",
-    "probe:models": "tsx scripts/probe-models.mts"
+    "probe:models": "tsx scripts/probe-models.mts",
+    "test:vision": "tsx tests/vision-test.ts",
+    "test:subtitles": "tsx tests/subtitle-density-test.ts",
+    "test:sfx": "tsx tests/sfx-test.ts",
+    "test:agentvision": "tsx tests/agent-vision-test.mts",
+    "test:camera": "tsx tests/camera-variety-test.ts",
+    "test:kenburns": "tsx tests/ken-burns-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

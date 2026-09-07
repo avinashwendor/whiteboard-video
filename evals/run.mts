@@ -88,7 +88,7 @@ function worldFor(fixture: Fixture): PlanWorld {
     transcript: fixture.transcript,
     // Both on, so a fixture never fails because a key is missing from the
     // environment rather than because the plan was wrong.
-    can: { generateImage: true, photoSearch: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true },
   };
 }
 
@@ -127,7 +127,7 @@ async function runOne(fixture: Fixture): Promise<Result> {
         // defaults to "here" must land in the same place on every run or the
         // score moves for a reason nobody changed.
         playhead: 0,
-        can: { generateImage: true, photoSearch: true },
+        can: { generateImage: true, photoSearch: true, music: true, sfx: true },
       },
     });
 

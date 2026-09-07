@@ -13,6 +13,7 @@
  */
 
 import {
+  MAX_TOOL_CALLS,
   planRescriptEdit,
   type RescriptAgentContext,
 } from "../src/lib/ai/rescript-agent.js";
@@ -35,7 +36,7 @@ const context: RescriptAgentContext = {
     longestPauses: [], clipCount: 1, runsLong: false,
   },
   aspect: 16 / 9,
-  can: { generateImage: true, photoSearch: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
 };
 
 const SAME_LOOK = JSON.stringify({
@@ -116,10 +117,13 @@ function model(replies: (n: number) => string) {
 /* ------------------- a model that burns its whole look budget --------------- */
 
 {
-  // Six distinct looks is the budget; the seventh is refused, and after the
-  // wasted ones the tools close. A plan after that must still land.
+  // The budget is a constant, and the test reads it rather than restating it:
+  // the number has changed once already (six looks became eight when the frames
+  // became measurable) and a test that hardcodes it fails for the wrong reason.
+  // What is being checked is the shape — every look inside the budget is
+  // answered and traced, the one past it is refused and is not.
   const stub = model((n) => {
-    if (n < 9) {
+    if (n < MAX_TOOL_CALLS + 1) {
       return JSON.stringify({
         thinking: "looking",
         tool: "read_transcript",
@@ -138,8 +142,8 @@ function model(replies: (n: number) => string) {
     `a plan after the budget runs out should still land, got ${JSON.stringify(plan.ops)}`
   );
   assert(
-    plan.trace.length === 6,
-    `only the six answered looks belong in the trace, got ${plan.trace.length}`
+    plan.trace.length === MAX_TOOL_CALLS,
+    `only the ${MAX_TOOL_CALLS} answered looks belong in the trace, got ${plan.trace.length}`
   );
 }
 

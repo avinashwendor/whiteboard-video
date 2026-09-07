@@ -3,6 +3,7 @@ import { IMAGE_STYLES } from "@/lib/ai/prompt-engineering";
 import { THEME_NAMES } from "@/lib/hyperframes/theme";
 import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
 import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
+import { POSITIONS } from "@/rescript/lib/overlay/ops-schema";
 
 /**
  * Every request body crosses this boundary. Limits here are the first line of
@@ -140,6 +141,14 @@ export type EditRequest = z.infer<typeof editRequestSchema>;
  * pruned in the browser -- numbered elements, boundary times, a trimmed
  * transcript -- so nothing carries word-level timings or media across the wire.
  */
+/** A measured fraction of the frame, of the frame's luminance, or of a score. */
+const unitInterval = z.number().min(0).max(1);
+/** `#rrggbb`, as `vision.ts` writes them. */
+const hexColour = z
+  .string()
+  .trim()
+  .regex(/^#[0-9a-fA-F]{6}$/, "must be a #rrggbb colour");
+
 export const rescriptAgentRequestSchema = z.object({
   instruction: promptField,
   context: z.object({
@@ -204,7 +213,65 @@ export const rescriptAgentRequestSchema = z.object({
         zoom: z.number().min(0.1).max(10),
       })
       .optional(),
-    can: z.object({ generateImage: z.boolean(), photoSearch: z.boolean() }),
+    /**
+     * The same frames, measured.
+     *
+     * Where the subject is, how busy each region is, the palette, and every named
+     * position scored for how well type would read there. Numbers rather than
+     * pixels, which is why sixteen of these cost less than one more thumbnail.
+     *
+     * Bounded field by field rather than by a blanket size cap: this is computed
+     * by our own code in the browser, so anything arriving in the wrong shape is
+     * either a stale client or somebody probing the route, and both want the same
+     * answer.
+     */
+    vision: z
+      .array(
+        z.object({
+          at: z.number().min(0).max(24 * 3600),
+          brightness: unitInterval,
+          contrast: unitInterval,
+          busy: unitInterval,
+          subject: z
+            .object({
+              x: unitInterval,
+              y: unitInterval,
+              spread: unitInterval,
+              confidence: unitInterval,
+            })
+            .nullable(),
+          colors: z.array(hexColour).max(6),
+          accent: hexColour,
+          zones: z
+            .array(
+              z.object({
+                position: z.enum(POSITIONS),
+                score: unitInterval,
+                ink: z.enum(["light", "dark"]),
+                scrim: z.boolean(),
+                overSubject: unitInterval,
+                busy: unitInterval,
+                note: z.string().trim().max(120),
+              }),
+            )
+            .max(16),
+          change: unitInterval.nullable(),
+        }),
+      )
+      .max(24)
+      .optional(),
+    can: z.object({
+      generateImage: z.boolean(),
+      photoSearch: z.boolean(),
+      /**
+       * Sound. Defaulted to false rather than true on purpose: a client too old
+       * to send these is a client whose executor may not know how to fetch
+       * them either, and an agent that plans nothing is better than one that
+       * plans sound which silently never arrives.
+       */
+      music: z.boolean().default(false),
+      sfx: z.boolean().default(false),
+    }),
   }),
   /**
    * "propose" describes the edit and waits; "execute" performs it; "review"

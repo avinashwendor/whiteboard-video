@@ -1,5 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Permanent_Marker } from "next/font/google";
+import {
+  Anton,
+  Archivo_Black,
+  Bebas_Neue,
+  Bungee,
+  Caveat,
+  Geist,
+  Geist_Mono,
+  Instrument_Serif,
+  Permanent_Marker,
+  Playfair_Display,
+  Space_Grotesk,
+  Syne,
+} from "next/font/google";
 import Script from "next/script";
 import { buildLocaleBootScript } from "@/rescript/lib/i18n";
 import "./rescript.css";
@@ -14,12 +27,101 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-/** Backs the "Marker" text style in the composition panel. */
+/**
+ * The display faces, matching `overlay/typefaces.ts` variable for variable.
+ *
+ * All of them are self-hosted by `next/font` at build time, so none of this
+ * costs a request to Google at runtime. `display: "swap"` is deliberate on
+ * every one: a caption that renders in a fallback for 100ms in the DOM is
+ * nothing, and the canvas does not use these until `ensureTypefaces()` has
+ * actually loaded them.
+ */
 const marker = Permanent_Marker({
   variable: "--font-hand",
   subsets: ["latin"],
   weight: "400",
+  display: "swap",
 });
+
+const anton = Anton({
+  variable: "--font-anton",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
+const bebas = Bebas_Neue({
+  variable: "--font-bebas",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
+const archivo = Archivo_Black({
+  variable: "--font-archivo",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
+const syne = Syne({
+  variable: "--font-syne",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  display: "swap",
+});
+
+const playfair = Playfair_Display({
+  variable: "--font-playfair",
+  subsets: ["latin"],
+  weight: ["500", "700", "900"],
+  display: "swap",
+});
+
+const instrument = Instrument_Serif({
+  variable: "--font-instrument",
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const grotesk = Space_Grotesk({
+  variable: "--font-grotesk",
+  subsets: ["latin"],
+  weight: ["500", "700"],
+  display: "swap",
+});
+
+const bungee = Bungee({
+  variable: "--font-bungee",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
+const caveat = Caveat({
+  variable: "--font-caveat",
+  subsets: ["latin"],
+  weight: ["600", "700"],
+  display: "swap",
+});
+
+/** Every font variable, in one string, for the html element's class. */
+const FONT_VARIABLES = [
+  geistSans.variable,
+  geistMono.variable,
+  marker.variable,
+  anton.variable,
+  bebas.variable,
+  archivo.variable,
+  syne.variable,
+  playfair.variable,
+  instrument.variable,
+  grotesk.variable,
+  bungee.variable,
+  caveat.variable,
+].join(" ");
 
 // Ported from MotionScript's own root layout. Upstream also mounted Google
 // Analytics and Vercel Web Analytics pointed at getrescript.com's properties;
@@ -82,7 +184,7 @@ export default function MotionScriptLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${marker.variable} h-full antialiased`}
+      className={`${FONT_VARIABLES} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

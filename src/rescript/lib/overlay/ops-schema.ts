@@ -16,6 +16,11 @@
  */
 
 import { z } from "zod";
+import { TYPEFACE_IDS } from "./typefaces";
+// The preset list lives with the presets. A second copy here went stale the
+// moment the library grew, and rejected names the prompt had already taught.
+import { SUBTITLE_PRESET_IDS } from "./subtitles";
+import { SFX_IDS } from "./sfx";
 
 export const POSITIONS = [
   "top-left",
@@ -78,14 +83,6 @@ export const TRANSITIONS = [
   "iris",
 ] as const;
 
-export const SUBTITLE_PRESET_IDS = [
-  "clean",
-  "broadcast",
-  "shorts",
-  "karaoke",
-  "minimal",
-] as const;
-
 /** A hex colour or a CSS rgb/rgba string. Anything else is rejected. */
 const colour = z
   .string()
@@ -110,8 +107,20 @@ const elementNumber = z.number().int().min(1).max(200);
 
 const animationField = z.enum(ANIMATIONS);
 
+/**
+ * The face, by name.
+ *
+ * Separate from `style` on purpose: a style says how the words should *read*
+ * (a title, a badge, a quote) and a typeface says what they are *set in*. The
+ * two are orthogonal — a badge in Bungee and a badge in Space Grotesk are the
+ * same idea in two different pieces — and collapsing them, as this editor did
+ * for a year, is why every video it made was set in the same face.
+ */
+const typefaceField = z.enum(TYPEFACE_IDS);
+
 const textFields = {
   text: z.string().min(1).max(500).optional(),
+  typeface: typefaceField.optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   align: z.enum(["left", "center", "right"]).optional(),
@@ -142,16 +151,36 @@ export const addTextOp = z.object({
    * nudged without being rebuilt.
    */
   template: z.string().trim().max(40).optional(),
+  /** Overrides whatever face the template or style would have used. */
+  typeface: typefaceField.optional(),
   color: colour.optional(),
   background: colour.nullable().optional(),
   align: z.enum(["left", "center", "right"]).optional(),
   uppercase: z.boolean().optional(),
+  /** Tighter or looser tracking, in ems. Display faces want a little negative. */
+  tracking: z.number().min(-0.15).max(0.5).optional(),
+  /** An outline round the type, in fractions of the font size. 0.06-0.14 reads. */
+  stroke: z.number().min(0).max(0.3).optional(),
+  strokeColor: colour.nullable().optional(),
+  /** Turn the element, in degrees. A sticker sits at 3-8; anything past 15 is a mistake. */
+  rotation: z.number().min(-180).max(180).optional(),
   enter: animationField.optional(),
   exit: animationField.optional(),
 });
 
 export const addImageOp = z.object({
   op: z.literal("addImage"),
+  /**
+   * The slow move over the still.
+   *
+   * Defaulted rather than optional, and the default is on: a picture held
+   * motionless over moving footage is the single clearest sign that a b-roll
+   * insert was pasted in rather than cut in. "auto" alternates the direction
+   * across a plan so three inserts in a row do not all drift the same way.
+   */
+  motion: z
+    .enum(["auto", "none", "zoomIn", "zoomOut", "panLeft", "panRight"])
+    .optional(),
   /** Artwork to generate. Mutually exclusive with `query`. */
   prompt: z.string().min(2).max(400).optional(),
   /** A real photograph to search for. */
@@ -249,10 +278,49 @@ export const subtitlesOp = z.object({
   highlight: colour.optional(),
   background: colour.nullable().optional(),
   size: z.enum(SIZES).optional(),
-  position: z.enum(["top", "center", "bottom"]).optional(),
+  /**
+   * Where the caption band sits. Three bands, not eleven positions.
+   *
+   * An element's `position` and a subtitle's `position` are different
+   * vocabularies with the same field name, and the model reaches for the one it
+   * has just used — "lower-third", "top-right" — perfectly reasonably. Refusing
+   * that threw away the entire subtitles operation and, with it, the captions,
+   * for a word whose meaning was never in doubt. So the element vocabulary is
+   * accepted and folded onto the band it names.
+   */
+  position: z
+    .union([z.enum(["top", "center", "bottom"]), z.enum(POSITIONS)])
+    .transform((value) =>
+      value === "top" || value === "center" || value === "bottom"
+        ? value
+        : value.startsWith("top") || value === "upper-third"
+          ? ("top" as const)
+          : value === "left" || value === "right"
+            ? ("center" as const)
+            : ("bottom" as const)
+    )
+    .optional(),
   uppercase: z.boolean().optional(),
   maxCharsPerLine: z.number().int().min(10).max(80).optional(),
   maxLines: z.number().int().min(1).max(4).optional(),
+  /**
+   * How much is on screen at once.
+   *
+   * The character budget cannot express this: a one-word cue is nowhere near
+   * the line limit, so the grouper keeps going and "one word at a time"
+   * silently produces ordinary captions. 1-3 is short-form; 0 lets the line
+   * length decide, which is what a subtitle wants.
+   */
+  wordsPerCue: z.number().int().min(0).max(12).optional(),
+  /** The face the captions are set in. */
+  typeface: typefaceField.optional(),
+  /** Stress figures, amounts and shouted words automatically. */
+  emphasis: z.enum(["off", "auto"]).optional(),
+  /** Words that always take the emphasis colour. */
+  keywords: z.array(z.string().trim().min(1).max(40)).max(24).optional(),
+  emphasisColor: colour.optional(),
+  /** How much the spoken word grows, 1-1.3. Needs per-word timings. */
+  activeScale: z.number().min(1).max(1.4).optional(),
 });
 
 export const removeFillersOp = z.object({ op: z.literal("removeFillers") });
@@ -458,6 +526,17 @@ export const autoPunchInsOp = z.object({
   /** Roughly how many per minute. The placer still enforces its own spacing. */
   perMinute: z.number().min(0.5).max(8).optional(),
   amount: z.number().min(0).max(2).optional(),
+  /**
+   * How the camera behaves across the run.
+   *
+   * "steady" pushes in every time — right for a talking head, and the reason
+   * every automatic edit this tool used to make moved the camera identically
+   * ten times in a row. "varied" picks per moment: a new speaker gets a hard
+   * cut to tighter, and after two pushes the frame opens back up so the video
+   * does not simply get closer for its whole length. "energetic" is the
+   * short-form treatment — snaps, no travel.
+   */
+  style: z.enum(["steady", "varied", "energetic"]).optional(),
 });
 
 /* ---------------------------------- grade ---------------------------------- */
@@ -523,6 +602,45 @@ export const setMusicLevelOp = z.object({
   duck: z.boolean().optional(),
 });
 
+/**
+ * A named effect at a named moment.
+ *
+ * Named rather than searched, because "say what it should sound like" is a real
+ * burden when the other end is a catalogue search: asked for a whoosh a model
+ * writes "whoosh", but asked for the sound of a camera pushing in it writes
+ * something evocative that matches nothing at all. The name resolves to a query
+ * that has been checked.
+ */
+export const addSfxOp = z.object({
+  op: z.literal("addSfx"),
+  effect: z.enum(SFX_IDS),
+  /** Output-clock second the effect should *land* on. Its lead-in is handled. */
+  at: seconds,
+  /** 0..1. Leave it out; the library's own level is tuned per effect. */
+  gain: z.number().min(0).max(1).optional(),
+});
+
+/**
+ * Sound the whole edit, off the edit itself.
+ *
+ * The placement an effect needs is frame-accurate and is not in the transcript
+ * — it is in the cuts, the punch-ins and the captions, all of which the project
+ * already holds. So this reads them rather than asking the model to time
+ * anything.
+ */
+export const autoSfxOp = z.object({
+  op: z.literal("autoSfx"),
+  style: z.enum(["subtle", "energetic", "comedic"]).optional(),
+  /** Ceiling per minute. The spacing rule still wins. 1-4. */
+  perMinute: z.number().min(0.5).max(6).optional(),
+});
+
+export const removeSfxOp = z.object({
+  op: z.literal("removeSfx"),
+  /** Clear them all, or only the one nearest this second. */
+  at: seconds.optional(),
+});
+
 export const removeMusicOp = z.object({
   op: z.literal("removeMusic"),
 });
@@ -556,6 +674,9 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   addMusicOp,
   setMusicLevelOp,
   removeMusicOp,
+  addSfxOp,
+  autoSfxOp,
+  removeSfxOp,
 ]);
 
 export type AgentOp = z.infer<typeof agentOpSchema>;

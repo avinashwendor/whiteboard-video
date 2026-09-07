@@ -362,3 +362,116 @@ export const GRADE_PRESET_IDS = GRADE_PRESETS.map((p) => p.id);
 export function gradePreset(id: string): GradeSpec | null {
   return GRADE_PRESETS.find((p) => p.id === id)?.grade ?? null;
 }
+
+/* ------------------------------ reading the look ---------------------------- */
+
+/**
+ * What this footage needs, from what it measurably is.
+ *
+ * The agent has been choosing a look off the transcript, which means it has
+ * been choosing one off the *subject* — "a cooking video, so warmFilm" — with
+ * no idea whether the footage is already warm, already contrasty, or two stops
+ * under. That is how you get a warm grade on footage shot under tungsten and a
+ * bleach pass on something already flat.
+ *
+ * Now that `vision.ts` measures brightness, contrast and the palette, the
+ * corrective half of a grade is arithmetic. This does that half and stops
+ * there: it says *this footage is dark and flat, so lift it and add contrast*,
+ * and it deliberately does not have an opinion about whether the piece wants to
+ * feel warm or cold. That is the half that belongs to whoever is making it.
+ *
+ * Reads only the derived figures, so it works server-side on the wire form.
+ */
+export interface GradeReading {
+  /** The preset to start from. */
+  preset: string;
+  /** Nudges to apply over it, already clamped to sane amounts. */
+  adjust: Partial<GradeSpec>;
+  /** One clause per reason, in the order they were noticed. */
+  reasons: string[];
+}
+
+export function suggestGrade(
+  frames: { brightness: number; contrast: number; colors: string[] }[]
+): GradeReading | null {
+  if (!frames.length) return null;
+
+  const n = frames.length;
+  const brightness = frames.reduce((a, f) => a + f.brightness, 0) / n;
+  const contrast = frames.reduce((a, f) => a + f.contrast, 0) / n;
+
+  // Warmth, from the dominant colours: how far red runs ahead of blue, as a
+  // fraction of the channel range. Crude and adequate — the question is only
+  // "is this footage already warm", not "what is its colour temperature".
+  let warmth = 0;
+  let counted = 0;
+  for (const frame of frames) {
+    for (const colour of frame.colors.slice(0, 3)) {
+      const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(colour);
+      if (!match) continue;
+      const r = parseInt(match[1], 16);
+      const b = parseInt(match[3], 16);
+      warmth += (r - b) / 255;
+      counted += 1;
+    }
+  }
+  if (counted) warmth /= counted;
+
+  const reasons: string[] = [];
+  const adjust: Partial<GradeSpec> = {};
+
+  // Exposure. The thresholds are wide on purpose: a grade that corrects every
+  // frame that is not exactly mid-grey is a grade that flattens everything.
+  if (brightness < 0.28) {
+    adjust.exposure = Math.min(0.25, (0.34 - brightness) * 1.2);
+    reasons.push(`under-exposed at ${brightness.toFixed(2)} — lift it`);
+  } else if (brightness > 0.68) {
+    adjust.exposure = Math.max(-0.2, (0.62 - brightness) * 1.1);
+    reasons.push(`hot at ${brightness.toFixed(2)} — pull it down`);
+  }
+
+  // Contrast. Flat footage is the single most common thing wrong with a
+  // phone-shot talking head, and the cheapest thing to fix.
+  if (contrast < 0.2) {
+    adjust.contrast = Math.min(0.3, (0.28 - contrast) * 1.6);
+    reasons.push(`flat at ${contrast.toFixed(2)} — it needs contrast`);
+  } else if (contrast > 0.55) {
+    reasons.push(`already contrasty at ${contrast.toFixed(2)} — do not add more`);
+  }
+
+  // White balance, and only when it is obvious. A small cast is a look; a
+  // large one is a mistake, and the difference is roughly this threshold.
+  if (warmth > 0.22) {
+    adjust.temperature = -Math.min(0.25, (warmth - 0.16) * 0.8);
+    reasons.push(`warm cast (${warmth.toFixed(2)}) — cool it slightly`);
+  } else if (warmth < -0.14) {
+    adjust.temperature = Math.min(0.25, (-0.08 - warmth) * 0.8);
+    reasons.push(`cool cast (${warmth.toFixed(2)}) — warm it slightly`);
+  }
+
+  // The preset is the conservative one unless the footage is genuinely flat
+  // and cool, which is the one case where a stronger look is a correction
+  // rather than a decision.
+  const preset = contrast < 0.16 && warmth < -0.05 ? "warmFilm" : "clean";
+  if (!reasons.length) {
+    reasons.push(
+      `well exposed (${brightness.toFixed(2)}) with normal contrast (${contrast.toFixed(2)}) — nothing needs correcting`
+    );
+  }
+
+  return { preset, adjust, reasons };
+}
+
+/** The reading as a line for the brief. */
+export function describeGradeReading(reading: GradeReading | null): string {
+  if (!reading) return "";
+  const nudges = Object.entries(reading.adjust)
+    .map(([key, value]) => `${key} ${value > 0 ? "+" : ""}${value.toFixed(2)}`)
+    .join(", ");
+  return [
+    `  The footage measures: ${reading.reasons.join("; ")}.`,
+    nudges
+      ? `  So the corrective grade is "${reading.preset}" with ${nudges}. Anything beyond that is a look, not a correction — only apply one if they asked for it.`
+      : `  So "${reading.preset}" is all it needs. Anything stronger is a look they did not ask for.`,
+  ].join("\n");
+}

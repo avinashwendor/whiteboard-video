@@ -11,13 +11,15 @@
  * by a person mid-edit. That every template is *usable over footage* without
  * further tuning, which is the only thing that makes a preset list worth
  * having. And that the list the agent is given matches the list the executor
- * accepts: the prompt names these templates in prose, and prose drifts.
+ * accepts — which is now structural, since the listing is generated from the
+ * library, but the join between the two still has to be checked.
  *
  * Run with `npx tsx tests/templates-test.ts`.
  */
 
-import { readFileSync } from "node:fs";
+import { SYSTEM } from "../src/lib/ai/rescript-agent";
 import {
+  describeTemplates,
   TEMPLATE_IDS,
   TEXT_TEMPLATES,
   templatesByCategory,
@@ -235,30 +237,44 @@ const SIZE = { width: 1280, height: 720 };
 /* --------------------------- the prompt's listing --------------------------- */
 
 {
-  // The prompt names every template in prose. Prose drifts: a template added
-  // here and not there is invisible to the agent, and one removed here and left
-  // there is an operation it will confidently plan and the executor will
-  // quietly ignore.
-  const prompt = readFileSync("src/lib/ai/rescript-agent.ts", "utf8");
+  // The prompt has to name every template, and only real ones.
+  //
+  // It used to say them in prose, with this test holding the two lists in step.
+  // That was the right worry and the wrong mechanism: a library and a
+  // description of it will drift eventually whatever a test says. The listing
+  // is now generated from TEXT_TEMPLATES by `describeTemplates()`, so what is
+  // checked here is the join — that the generated block is actually *in* the
+  // prompt the model receives, and that the generator covers the library. A
+  // template that exists and is never mentioned is invisible to the agent; a
+  // name mentioned that does not exist is an operation it plans confidently and
+  // the executor quietly ignores.
+  const listing = describeTemplates();
 
   for (const id of TEMPLATE_IDS) {
     assert(
-      new RegExp(`\\b${id}\\b`).test(prompt),
-      `template "${id}" exists but the agent is never told about it`
+      new RegExp(`\\b${id}\\b`).test(listing),
+      `template "${id}" exists but is missing from describeTemplates()`
+    );
+    assert(
+      new RegExp(`\\b${id}\\b`).test(SYSTEM),
+      `template "${id}" never reaches the prompt the model is given`
     );
   }
 
-  // …and the other way round. Every id-looking word in the listing block must
-  // be a real template.
-  const block = /PREFER "template" over[\s\S]*?Pick by what the words are doing/.exec(prompt);
-  assert(block, "the template listing is missing from the prompt");
-  const named = block![0].match(/\b[a-z][a-zA-Z0-9]{3,}\b/g) ?? [];
+  const named = listing.match(/\b[a-z][a-zA-Z0-9]{3,}\b/g) ?? [];
   const known = new Set<string>(TEMPLATE_IDS);
-  // Only words that look like camelCase ids are candidates; ordinary prose in
-  // the block is lower-case throughout.
   for (const word of named) {
     if (!/[A-Z]/.test(word)) continue;
-    assert(known.has(word), `the prompt names "${word}", which is not a template`);
+    assert(known.has(word), `the listing names "${word}", which is not a template`);
+  }
+
+  // Every category reaches the model with something in it, or a whole shelf of
+  // the library is unreachable by name.
+  for (const group of templatesByCategory()) {
+    assert(
+      group.templates.length > 0 && listing.includes(group.templates[0].id),
+      `category "${group.category}" is not represented in the listing`
+    );
   }
 }
 

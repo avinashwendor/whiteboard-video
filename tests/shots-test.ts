@@ -596,7 +596,7 @@ function words(spec: { text: string; start: number; end: number; speaker?: numbe
   // about five seconds a zoom stops being emphasis and becomes a fault.
   const dense: Beat[] = [];
   for (let i = 0; i < 200; i += 1) {
-    dense.push({ at: i * 0.5, score: 100 - i, word: `w${i}` });
+    dense.push({ at: i * 0.5, score: 100 - i, word: `w${i}`, reason: "pause" });
   }
   const placed = placePunchIns(dense, { duration: 120, perMinute: 2.5 });
 
@@ -632,7 +632,7 @@ const world: PlanWorld = {
   subtitlesOn: false,
   subtitlePosition: "bottom",
   transcript: "[00:00] this is what was said in the video",
-  can: { generateImage: true, photoSearch: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
 };
 
 {

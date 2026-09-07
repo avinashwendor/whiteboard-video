@@ -47,7 +47,7 @@ export interface PlanWorld {
   subtitlePosition: "top" | "center" | "bottom";
   /** The transcript of the current cut, for phrase checks. */
   transcript: string;
-  can: { generateImage: boolean; photoSearch: boolean };
+  can: { generateImage: boolean; photoSearch: boolean; music: boolean; sfx: boolean };
 }
 
 /** Which third of the frame a named position lands in. */
@@ -135,6 +135,9 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
   /** Shot windows the plan lays down, so overlaps between them can be caught. */
   const shotWindows: { op: string; start: number; end: number }[] = [];
   let autoPunches = 0;
+  let autoSfxRuns = 0;
+  /** Where a hand-placed effect lands, so two cannot share a frame. */
+  const sfxAt: number[] = [];
   /** Whole-video grades. A second one silently replaces the first. */
   let gradeCount = 0;
   /** Music beds the plan lays down. More than one is never meant. */
@@ -279,6 +282,12 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
 
       case "deletePhrase":
         cutSeen = true;
+        // A deleted phrase leaves a jump cut exactly as a removed filler does,
+        // and a jump cut is a boundary. Without this, a plan that tightens with
+        // deletePhrase and then asks for a transition was told there was
+        // nowhere to put one — and the model's fix for that is to stop asking
+        // for the transition, which makes the edit worse.
+        boundaries = Math.max(boundaries, 1);
         if (!saysIt(world.transcript, op.text)) {
           problems.push(
             `deletePhrase "${op.text}" — those words are not in the transcript, so nothing would be cut.`
@@ -288,6 +297,7 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
 
       case "deleteRange": {
         cutSeen = true;
+        boundaries = Math.max(boundaries, 1);
         if (op.to <= op.from) {
           problems.push(`deleteRange ${op.from}–${op.to} ends before it starts.`);
           break;
@@ -305,6 +315,9 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
 
       case "keepOnly": {
         cutSeen = true;
+        // Two kept spans with a gap between them meet at a boundary; one span
+        // with material dropped off either end does not.
+        if (op.ranges.length > 1) boundaries = Math.max(boundaries, op.ranges.length - 1);
         let previousEnd = -1;
         for (const range of op.ranges) {
           if (range.to <= range.from) {
@@ -350,6 +363,20 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
         break;
 
       case "addMusic":
+        // Caught here rather than at execution: a plan that names a track and
+        // then cannot fetch one has already told the person it added music.
+        if (!world.can.music && op.kind !== "sfx") {
+          problems.push(
+            "addMusic — no music catalogue is configured on this deployment, so nothing can be fetched."
+          );
+          break;
+        }
+        if (op.kind === "sfx" && !world.can.sfx) {
+          problems.push(
+            "addMusic with kind \"sfx\" — no sound-effect catalogue is configured on this deployment."
+          );
+          break;
+        }
         if (op.start !== undefined && op.start >= remaining) {
           problems.push(
             `addMusic at ${op.start.toFixed(1)}s is past the end of the finished video.`
@@ -370,6 +397,48 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
 
       case "setMusicLevel":
       case "removeMusic":
+        break;
+
+      case "addSfx":
+        if (!world.can.sfx) {
+          problems.push(
+            "addSfx — no sound-effect catalogue is configured on this deployment, so nothing can be fetched."
+          );
+          break;
+        }
+        if (op.at >= remaining) {
+          problems.push(
+            `addSfx at ${op.at.toFixed(1)}s is past the end of the finished video.`
+          );
+          break;
+        }
+        // Two effects on the same frame are one muddy event, and the second is
+        // always the one nobody meant. Guarded here rather than in the mixer
+        // because the fix — move one, or drop it — is an editorial decision.
+        if (sfxAt.some((at) => Math.abs(at - op.at) < 0.4)) {
+          problems.push(
+            `Two sound effects land within half a second of each other at ${op.at.toFixed(1)}s; they will read as one glitch.`
+          );
+        }
+        sfxAt.push(op.at);
+        break;
+
+      case "autoSfx":
+        if (!world.can.sfx) {
+          problems.push(
+            "autoSfx — no sound-effect catalogue is configured on this deployment, so nothing can be fetched."
+          );
+          break;
+        }
+        if (autoSfxRuns > 0) {
+          problems.push(
+            "autoSfx is in the plan more than once; the second pass would double every effect the first placed."
+          );
+        }
+        autoSfxRuns += 1;
+        break;
+
+      case "removeSfx":
         break;
 
       case "setGrade":
@@ -502,15 +571,13 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
     }
   }
 
-  // Density is judged against the video that comes out, not the one that went
-  // in: four captions is restraint across nine minutes and a slideshow across
-  // thirty seconds, and a plan that makes a Short does both in one breath.
-  const added = placed.length;
-  if (remaining > 0 && added > Math.max(4, remaining / 12)) {
-    problems.push(
-      `${added} things are added to a ${Math.round(remaining)}s video. That reads as a slideshow — one title, three or four kinetic captions and two or three pictures is a produced edit.`
-    );
-  }
+  // Density used to be checked here as well as in `checkCraft`, with two
+  // different thresholds, and they disagreed the moment one of them learned
+  // that a vertical cut carries more on screen than a widescreen one. It also
+  // never belonged here: this function asks whether a plan would *run*, and
+  // "five captions in fifty seconds" runs perfectly. Whether it should have
+  // been made is `checkCraft`'s question, and it is the one that knows the
+  // format. One rule, in the file whose job it is.
 
   // Duplicates help nobody; the same fault found twice is still one fault.
   return [...new Set(problems)];

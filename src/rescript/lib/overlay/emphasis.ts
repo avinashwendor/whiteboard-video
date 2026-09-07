@@ -20,6 +20,7 @@
 
 import { getCutRanges, isWordCutOut, originalToEdited } from "../edits";
 import type { ManualCut, Word } from "../types";
+import type { CameraKind } from "./types";
 
 export interface Beat {
   /** Output-clock second the emphasis lands on. */
@@ -30,6 +31,15 @@ export interface Beat {
   word: string;
   /** Where in the source picture the interest is, when we can tell. 0..1. */
   focusX?: number;
+  /**
+   * What earned it: the largest single contributor to the score.
+   *
+   * The scoring already knew this and threw it away, which is why every
+   * automatic move this editor made was the same move. A new speaker and a
+   * figure are both worth landing on and an editor does not land on them the
+   * same way — the first is a new shot, the second is emphasis.
+   */
+  reason: "pause" | "sentence" | "figure" | "name" | "speaker";
 }
 
 /* --------------------------------- scoring --------------------------------- */
@@ -78,32 +88,59 @@ export function findBeats(
     if (!clean) continue;
 
     let score = 0;
+    // Tracked alongside the total so the winning contributor can be named. The
+    // score alone says *whether* to move the camera; only this says *how*.
+    const parts: Partial<Record<Beat["reason"], number>> = {};
 
     // The speaker paused, then said this. They are doing the emphasis; the
     // camera is only agreeing with them.
     const gap = previous ? word.start - previous.end : 0;
-    if (gap >= MEANINGFUL_PAUSE_S) score += 3 + Math.min(2, gap - MEANINGFUL_PAUSE_S);
+    if (gap >= MEANINGFUL_PAUSE_S) {
+      parts.pause = 3 + Math.min(2, gap - MEANINGFUL_PAUSE_S);
+      score += parts.pause;
+    }
 
     // The first word of a new sentence is a new thought.
-    if (previous && endsSentence(previous.text)) score += 2;
+    if (previous && endsSentence(previous.text)) {
+      parts.sentence = 2;
+      score += 2;
+    }
 
     // A figure is a fact, and a fact is worth landing on.
-    if (NUMERIC.test(word.text)) score += 2.5;
+    if (NUMERIC.test(word.text)) {
+      parts.figure = 2.5;
+      score += 2.5;
+    }
 
     // A capital mid-sentence is a name or a product — usually the subject.
-    if (previous && !endsSentence(previous.text) && /^[A-Z]/.test(word.text)) score += 1.5;
+    if (previous && !endsSentence(previous.text) && /^[A-Z]/.test(word.text)) {
+      parts.name = 1.5;
+      score += 1.5;
+    }
 
     // A new speaker is a new shot in every edit ever made.
-    if (previous && previous.speaker !== word.speaker && word.speaker >= 0) score += 3;
+    if (previous && previous.speaker !== word.speaker && word.speaker >= 0) {
+      parts.speaker = 3;
+      score += 3;
+    }
 
     // …but not on a word that carries nothing, whatever else it scored.
     if (WEAK_OPENERS.has(clean)) score *= 0.25;
 
     if (score <= 0) continue;
+    // A speaker change outranks everything even when a pause scored higher:
+    // whatever else is true of the moment, it is a new shot.
+    const reason: Beat["reason"] = parts.speaker
+      ? "speaker"
+      : ((Object.entries(parts) as [Beat["reason"], number][]).sort(
+          (a, b) => b[1] - a[1]
+        )[0]?.[0] ?? "sentence");
+
     beats.push({
       at: originalToEdited(word.start, cuts),
       score,
       word: word.text,
+      reason,
     });
   }
 
@@ -131,12 +168,31 @@ export interface PlacementOptions {
   perMinute?: number;
   /** Total runtime of the finished video, in output seconds. */
   duration: number;
+  /**
+   * How the camera behaves.
+   *
+   * "steady" is the original behaviour and every move is a punch-in. It is
+   * still the right default for a talking head, and it is also why every
+   * automatic edit this tool made moved the camera the same way ten times.
+   *
+   * "varied" picks the move from what earned the beat: a new speaker is a new
+   * shot, a figure is emphasis, and after a run of pushes the frame opens back
+   * up. "energetic" is the short-form treatment — hard cuts to tighter, no
+   * travel at all.
+   *
+   * None of them ever mixes `push` with `punchIn`. One is atmosphere and the
+   * other is emphasis, and together they read as an accident rather than as a
+   * choice — which is a rule the prompt states and this has to honour.
+   */
+  style?: "steady" | "varied" | "energetic";
 }
 
 export interface PlacedPunch {
   start: number;
   end: number;
   beat: Beat;
+  /** The move to put on this shot. */
+  camera: CameraKind;
 }
 
 /**
@@ -155,6 +211,7 @@ export function placePunchIns(
 
   const perMinute = options.perMinute ?? 2.5;
   const budget = Math.max(1, Math.round((duration / 60) * perMinute));
+  const style = options.style ?? "steady";
 
   const taken: PlacedPunch[] = [];
   for (const beat of beats) {
@@ -169,8 +226,44 @@ export function placePunchIns(
     const tooClose = taken.some((p) => Math.abs(p.start - start) < MIN_GAP_S);
     if (tooClose) continue;
 
-    taken.push({ start, end, beat });
+    taken.push({ start, end, beat, camera: "punchIn" });
   }
 
-  return taken.sort((a, b) => a.start - b.start);
+  const ordered = taken.sort((a, b) => a.start - b.start);
+  if (style === "steady") return ordered;
+
+  // The move is chosen after the placement, not during it: which beats survive
+  // is a question about spacing and strength, and it should not change because
+  // somebody asked for a different look.
+  let sincePunchOut = 0;
+  for (let i = 0; i < ordered.length; i += 1) {
+    const { beat } = ordered[i];
+
+    if (style === "energetic") {
+      // A hard cut to tighter, no travel. On a beat with nothing particular
+      // behind it, holding is better than snapping for the sake of it.
+      ordered[i].camera = beat.reason === "sentence" ? "punchIn" : "snap";
+      continue;
+    }
+
+    if (beat.reason === "speaker") {
+      // A new speaker is a new shot, and a shot change does not travel.
+      ordered[i].camera = "snap";
+      sincePunchOut += 1;
+      continue;
+    }
+
+    // After a run of pushes the frame has to open up, or the video only ever
+    // gets tighter and the last third of it is a close-up nobody chose.
+    if (sincePunchOut >= 2 && beat.reason !== "figure") {
+      ordered[i].camera = "punchOut";
+      sincePunchOut = 0;
+      continue;
+    }
+
+    ordered[i].camera = "punchIn";
+    sincePunchOut += 1;
+  }
+
+  return ordered;
 }

@@ -294,7 +294,7 @@ function clip(over: Partial<AudioClip> = {}): AudioClip {
     subtitlesOn: false,
     subtitlePosition: "bottom",
     transcript: "[00:00] something was said",
-    can: { generateImage: true, photoSearch: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true },
   };
 
   assert(

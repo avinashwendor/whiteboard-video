@@ -173,7 +173,7 @@ const world: PlanWorld = {
   subtitlesOn: false,
   subtitlePosition: "bottom",
   transcript: "[0:04] We shipped it three times faster than last year.",
-  can: { generateImage: true, photoSearch: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
 };
 
 /** Parse through the real schema, so the verifier only ever sees valid ops. */
@@ -308,7 +308,7 @@ function complainsAbout(raw: unknown[], needle: string, w: PlanWorld = world) {
   complainsAbout(
     [{ op: "addImage", query: "a bridge", start: 1, duration: 3 }],
     "photo search is not configured",
-    { ...world, can: { generateImage: true, photoSearch: false } }
+    { ...world, can: { generateImage: true, photoSearch: false, music: true, sfx: true } }
   );
 
   // The clock shrinks as the plan cuts, and later times are judged against what

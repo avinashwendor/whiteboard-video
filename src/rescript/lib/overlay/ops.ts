@@ -20,8 +20,10 @@ import { findBeats, placePunchIns } from "./emphasis";
 import { shotAt } from "./shots";
 import { gradePreset, NEUTRAL_GRADE } from "./grade";
 import { textTemplate } from "./templates";
+import { typefaceStack } from "./typefaces";
 import { knownShape } from "./shapes";
 import { defaultGainFor } from "./audio";
+import { momentsFrom, planSfx, soundEffect, type PlacedSfx } from "./sfx";
 import { cuesFromStyle, SUBTITLE_PRESETS } from "./subtitles";
 import {
   IMAGE_SIZE,
@@ -44,6 +46,7 @@ import {
   type AnimationSpec,
   type OverlayElement,
   type Plate,
+  type ImageMotionKind,
   type Rect,
   type SubtitleStyle,
   type TextElement,
@@ -73,6 +76,31 @@ export interface OpResult {
 }
 
 const DEFAULT_ELEMENT_SECONDS = 3;
+
+/**
+ * Which way the next still moves.
+ *
+ * Rotated across a session rather than chosen at random. Random gives you two
+ * identical drifts in a row about a third of the time, which is exactly the
+ * thing the variation exists to avoid; and a counter is reproducible, which
+ * random is not.
+ */
+let motionCursor = 0;
+const MOTION_CYCLE = ["zoomIn", "panRight", "zoomOut", "panLeft"] as const;
+
+function imageMotion(
+  asked: "auto" | "none" | "zoomIn" | "zoomOut" | "panLeft" | "panRight" | undefined
+): ImageMotionKind {
+  if (asked && asked !== "auto") return asked;
+  const kind = MOTION_CYCLE[motionCursor % MOTION_CYCLE.length];
+  motionCursor += 1;
+  return kind;
+}
+
+/** Testing seam, and called when a project is opened. */
+export function resetImageMotion() {
+  motionCursor = 0;
+}
 
 /* --------------------------------- helpers --------------------------------- */
 
@@ -135,6 +163,7 @@ type Placement = PositionName | { x: number; y: number } | undefined;
 function resolveTextLook(op: {
   template?: string;
   style?: Parameters<typeof textStyleFields>[0];
+  typeface?: string;
   size?: SizeName;
   position?: Placement;
   enter?: AnimationKind;
@@ -148,11 +177,15 @@ function resolveTextLook(op: {
   exit: AnimationSpec;
 } {
   const template = op.template ? textTemplate(op.template) : null;
+  // A named face beats whatever the template or the style would have set. The
+  // two are orthogonal — "a badge, in Bungee" is a sentence, and the operation
+  // has to be able to say it.
+  const face = op.typeface ? { fontFamily: typefaceStack(op.typeface) } : {};
 
   if (!template) {
     const styleName = op.style ?? "plain";
     return {
-      fields: textStyleFields(styleName),
+      fields: { ...textStyleFields(styleName), ...face },
       scale: textStyleScale(styleName),
       size: op.size ?? "l",
       position: op.position,
@@ -163,7 +196,7 @@ function resolveTextLook(op: {
 
   const { sizeScale, ...look } = template.style;
   return {
-    fields: look as ReturnType<typeof textStyleFields>,
+    fields: { ...look, ...face } as ReturnType<typeof textStyleFields>,
     scale: sizeScale ?? 1,
     size: op.size ?? template.size,
     position: op.position ?? template.position,
@@ -339,6 +372,98 @@ export function regenerateCues(style?: Partial<SubtitleStyle>) {
   return cues.length;
 }
 
+/**
+ * Run tasks with a ceiling on how many are in flight.
+ *
+ * `autoSfx` places up to half a dozen effects, and each one is a catalogue
+ * search followed by a proxy fetch — twelve round trips. Serially that is ten
+ * to twenty seconds of an edit doing nothing visible, which on a feature whose
+ * whole pitch is "one call and the video is sounded" is most of the experience.
+ *
+ * Not unbounded, though, and the reason is in the original comment this
+ * replaces: firing all six at once is how one upstream rate limit becomes six
+ * failures instead of one retry. Three is the compromise — most of the speed,
+ * and a burst small enough that a catalogue does not push back.
+ *
+ * Results come back in input order regardless of what finished when, because
+ * the log line reads chronologically and a sound at 4s reported after one at
+ * 31s reads as a bug in the placement.
+ */
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      out[index] = await run(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * Fetch a named effect and put it on the timeline so it *lands* on `at`.
+ *
+ * The lead is the whole reason this is a function rather than three lines at
+ * each call site. A riser that starts on the cut is announcing something that
+ * has already happened; it has to be most of the way through by the time the
+ * frame arrives. Every effect carries its own lead and every path has to
+ * respect it, including the automatic one.
+ */
+async function placeEffect(
+  placed: PlacedSfx,
+  ctx: OpsContext,
+  gain: number | undefined,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; message: string }> {
+  const { effect } = placed;
+  const start = Math.max(0, Math.min(placed.at + effect.lead, Math.max(0, ctx.duration - 0.1)));
+  const end = Math.min(ctx.duration || start + effect.hold, start + effect.hold);
+  if (end - start < 0.05) {
+    return { ok: false, message: `There is no room for a ${effect.label} at ${placed.at.toFixed(1)}s.` };
+  }
+
+  const found = await findMedia(effect.query, "sfx", signal);
+  if (!found) {
+    return { ok: false, message: `No usable ${effect.label} came back from the catalogue.` };
+  }
+  const src = await proxyMedia(found.downloadUrl, found.title, signal);
+  if (!src) return { ok: false, message: `“${found.title}” could not be fetched.` };
+
+  useOverlayStore.getState().addAudio({
+    kind: "sfx",
+    name: `${effect.label} — ${placed.reason}`,
+    src,
+    start,
+    end,
+    trimIn: 0,
+    gain: gain ?? effect.gain,
+    fadeIn: 0,
+    // A hard stop on a tail that is still ringing is more obvious than the
+    // effect itself. Short, and never more than a third of the clip.
+    fadeOut: Math.min(0.25, (end - start) / 3),
+    duck: false,
+    loop: false,
+    muted: false,
+    credit: {
+      title: found.title,
+      artist: found.artist,
+      licence: found.licence.name,
+      url: found.pageUrl,
+      attributionRequired: found.licence.attributionRequired,
+    },
+  });
+
+  return { ok: true, message: `${effect.label} ${placed.reason}, at ${placed.at.toFixed(1)}s` };
+}
+
 /* -------------------------------- execution -------------------------------- */
 
 async function runOne(
@@ -369,6 +494,18 @@ async function runOne(
         ...(op.background !== undefined ? { background: op.background } : {}),
         ...(op.align ? { align: op.align } : {}),
         ...(op.uppercase !== undefined ? { uppercase: op.uppercase } : {}),
+        ...(op.tracking !== undefined ? { letterSpacing: op.tracking } : {}),
+        ...(op.stroke !== undefined
+          ? {
+              strokeWidth: op.stroke,
+              // An outline with no colour draws in the fill colour and
+              // disappears, which reads as the stroke silently not working.
+              strokeColor: op.strokeColor ?? "#000000",
+            }
+          : op.strokeColor
+            ? { strokeColor: op.strokeColor, strokeWidth: 0.08 }
+            : {}),
+        ...(op.rotation !== undefined ? { rotation: op.rotation } : {}),
         enter: look.enter,
         exit: look.exit,
       });
@@ -405,6 +542,7 @@ async function runOne(
         origin: op.prompt ? "generated" : "search",
         enter: animation(op.enter, "pop"),
         exit: animation(op.exit, "fade"),
+        motion: { kind: imageMotion(op.motion), amount: 1 },
       });
       void fitImageHeight(id, image.url, ctx.aspect);
       return {
@@ -465,6 +603,10 @@ async function runOne(
           patch.text = op.text;
           patch.name = op.text.slice(0, 28);
         }
+        // Before `style`, so a request that names both a style and a face gets
+        // the style's weight and box with the face on top rather than the
+        // style's face back.
+        if (op.typeface) patch.fontFamily = typefaceStack(op.typeface);
         if (op.color) patch.color = op.color;
         if (op.background !== undefined) patch.background = op.background;
         if (op.align) patch.align = op.align;
@@ -473,6 +615,7 @@ async function runOne(
         if (op.italic !== undefined) patch.italic = op.italic;
         if (op.style) {
           Object.assign(patch, textStyleFields(op.style));
+          if (op.typeface) patch.fontFamily = typefaceStack(op.typeface);
           const scale = textStyleScale(op.style);
           if (scale !== 1) {
             patch.fontSize = (element as TextElement).fontSize * scale;
@@ -639,6 +782,18 @@ async function runOne(
       if (op.uppercase !== undefined) patch.uppercase = op.uppercase;
       if (op.maxCharsPerLine) patch.maxCharsPerLine = op.maxCharsPerLine;
       if (op.maxLines) patch.maxLines = op.maxLines;
+      if (op.wordsPerCue !== undefined) patch.maxWords = op.wordsPerCue;
+      if (op.typeface) patch.fontFamily = typefaceStack(op.typeface);
+      if (op.emphasis) patch.emphasis = op.emphasis;
+      if (op.keywords) {
+        // Matched against words stripped of punctuation and case, so they are
+        // stored the same way — otherwise "Rescript." never matches "rescript".
+        patch.keywords = op.keywords
+          .map((word) => word.replace(/[^\p{L}\p{N}']/gu, "").toLowerCase())
+          .filter(Boolean);
+      }
+      if (op.emphasisColor) patch.emphasisColor = op.emphasisColor;
+      if (op.activeScale !== undefined) patch.activeScale = op.activeScale;
       if (op.size) {
         patch.fontSize = subtitleSize(op.size, overlay.subtitles.style.fontSize);
       }
@@ -647,8 +802,14 @@ async function runOne(
 
       // Line-length changes alter where cues break, so the cues are rebuilt
       // whenever they are turned on, asked for, or re-shaped.
+      // Anything that changes where a cue *breaks*. Colour and weight do not;
+      // words-per-cue does, and it is the one people notice when it is missed —
+      // asking for one word at a time and getting the old two-line cues
+      // restyled looks like the operation was ignored.
       const shapeChanged =
-        patch.maxCharsPerLine !== undefined || patch.maxLines !== undefined;
+        patch.maxCharsPerLine !== undefined ||
+        patch.maxLines !== undefined ||
+        patch.maxWords !== undefined;
       const needCues =
         op.action === "regenerate" ||
         shapeChanged ||
@@ -944,6 +1105,7 @@ async function runOne(
       const placed = placePunchIns(beats, {
         perMinute: op.perMinute,
         duration: ctx.duration,
+        style: op.style,
       });
 
       if (placed.length === 0) {
@@ -955,7 +1117,7 @@ async function runOne(
 
       for (const punch of placed) {
         const camera = fitCamera(
-          cameraFor({ kind: "punchIn", amount: op.amount }),
+          cameraFor({ kind: punch.camera, amount: op.amount }),
           punch.end - punch.start
         );
         overlay.addShot({
@@ -966,9 +1128,19 @@ async function runOne(
         });
       }
 
+      // Named per kind rather than counted as "punch-ins", because with a
+      // varied style they are not all punch-ins and a log line that said so
+      // would be describing an edit that did not happen.
+      const kinds = new Map<string, number>();
+      for (const punch of placed) {
+        kinds.set(punch.camera, (kinds.get(punch.camera) ?? 0) + 1);
+      }
+      const described = [...kinds.entries()]
+        .map(([kind, n]) => `${n} ${kind}`)
+        .join(", ");
       return {
         ok: true,
-        message: `${placed.length} punch-in${placed.length === 1 ? "" : "s"}, on the beats in the delivery`,
+        message: `${described}, on the beats in the delivery`,
       };
     }
 
@@ -1083,6 +1255,91 @@ async function runOne(
           op.duck === false ? ", no ducking" : ""
         }`,
       };
+    }
+
+    case "addSfx": {
+      const effect = soundEffect(op.effect);
+      if (!effect) return { ok: false, message: `There is no effect called “${op.effect}”.` };
+      return placeEffect(
+        { at: op.at, effect, reason: "as asked" },
+        ctx,
+        op.gain,
+        signal
+      );
+    }
+
+    case "autoSfx": {
+      // Read off the edit, not off the transcript. A boundary is a cut because
+      // somebody cut there; a shot with a camera on it is a push because
+      // somebody pushed. Neither is guessable from words, which is why this
+      // exists rather than the model placing them one at a time.
+      const boundaries = ctx.timeline.boundaries.map((b) => b.outTime);
+      const pushes = overlay.shots
+        .filter((shot) => shot.plates.some((plate) => plate.camera && plate.camera.kind !== "hold"))
+        .map((shot) => shot.start);
+      const captions = overlay.elements
+        .filter((element) => element.kind === "text")
+        .map((element) => ({
+          at: element.start,
+          // The biggest type in the video is its title, whatever it was called
+          // when it was added.
+          isTitle:
+            (element as TextElement).fontSize >=
+            Math.max(
+              ...overlay.elements
+                .filter((e) => e.kind === "text")
+                .map((e) => (e as TextElement).fontSize)
+            ),
+        }));
+
+      const placed = planSfx(momentsFrom({ boundaries, pushes, captions }), {
+        style: op.style,
+        perMinute: op.perMinute,
+        duration: ctx.duration,
+      });
+
+      if (!placed.length) {
+        return {
+          ok: false,
+          message:
+            "There is nothing to sound yet — no cuts, no camera moves and no captions. Do the edit first, then add the effects.",
+        };
+      }
+
+      // Three at a time. Serially this was twelve round trips and most of a
+      // slow edit; all at once it is one rate limit away from failing whole.
+      const results = await mapWithLimit(placed, 3, (one) =>
+        placeEffect(one, ctx, undefined, signal)
+      );
+      const done = results.filter((r) => r.ok).map((r) => r.message);
+      const failed = results.filter((r) => !r.ok).map((r) => r.message);
+
+      if (!done.length) {
+        return { ok: false, message: `No effects could be fetched — ${failed[0]}` };
+      }
+      return {
+        ok: true,
+        message: `${done.length} effect${done.length === 1 ? "" : "s"}: ${done.join("; ")}${
+          failed.length ? ` (${failed.length} could not be fetched)` : ""
+        }`,
+      };
+    }
+
+    case "removeSfx": {
+      const effects = overlay.audio.filter((clip) => clip.kind === "sfx");
+      if (!effects.length) return { ok: false, message: "There are no sound effects to remove." };
+
+      if (op.at === undefined) {
+        for (const clip of effects) overlay.removeAudio(clip.id);
+        return { ok: true, message: `Removed ${effects.length} sound effect${effects.length === 1 ? "" : "s"}` };
+      }
+
+      const at = op.at;
+      const nearest = effects.reduce((best, clip) =>
+        Math.abs(clip.start - at) < Math.abs(best.start - at) ? clip : best
+      );
+      overlay.removeAudio(nearest.id);
+      return { ok: true, message: `Removed “${nearest.name}”` };
     }
 
     case "removeMusic": {

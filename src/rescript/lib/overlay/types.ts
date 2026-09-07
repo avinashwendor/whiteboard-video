@@ -164,6 +164,33 @@ export interface ImageElement extends Common {
   /** Fraction of the shorter side. */
   radius: number;
   shadow: boolean;
+  /**
+   * A slow move across the picture, for its whole life on screen.
+   *
+   * A still held motionless over moving footage reads as dead — it is the one
+   * thing that makes a b-roll insert look pasted on rather than cut in, and it
+   * is why every documentary since 1990 has done this. Named for Ken Burns
+   * because that is what everybody calls it.
+   *
+   * Absent means no move, which is what every image saved before this existed
+   * has, so an old project opens looking exactly as it did.
+   */
+  motion?: ImageMotion;
+}
+
+/**
+ * How a still moves while it is up.
+ *
+ * Deliberately tiny amounts. The move has to be below the threshold where
+ * anybody notices it as an effect — what should be noticed is that the picture
+ * feels alive, and a still that visibly slides is a slideshow transition.
+ */
+export type ImageMotionKind = "none" | "zoomIn" | "zoomOut" | "panLeft" | "panRight";
+
+export interface ImageMotion {
+  kind: ImageMotionKind;
+  /** Multiplier on the house amount. 1 is the tuned value. */
+  amount: number;
 }
 
 /**
@@ -197,7 +224,7 @@ export type OverlayElement = TextElement | ImageElement | ShapeElement;
 /* -------------------------------- subtitles -------------------------------- */
 
 export type SubtitlePosition = "bottom" | "center" | "top";
-export type SubtitleAnimation = "none" | "fade" | "pop" | "karaoke";
+export type SubtitleAnimation = "none" | "fade" | "pop" | "karaoke" | "bounce";
 
 export interface SubtitleStyle {
   fontFamily: string;
@@ -216,7 +243,37 @@ export interface SubtitleStyle {
   margin: number;
   maxCharsPerLine: number;
   maxLines: number;
+  /**
+   * Hard ceiling on words in one cue. 0 leaves it to the line budget.
+   *
+   * This is what "one word at a time" is, and it is not a styling nicety: a
+   * cue of one word changes every 300ms, which is the entire reason short-form
+   * captions hold attention. The line budget cannot express it — a one-word
+   * cue is nowhere near the character limit, so the grouper keeps going.
+   */
+  maxWords: number;
   animation: SubtitleAnimation;
+  /**
+   * How much the spoken word grows, as a multiplier. 1 is off.
+   *
+   * Only does anything with per-word timings. Kept separate from the animation
+   * kind because it composes with all of them — a bounce on the live word is
+   * as right under "pop" as under "karaoke".
+   */
+  activeScale: number;
+  /**
+   * Stress the words that carry the meaning.
+   *
+   * "auto" picks them out by shape — anything with a digit in it, a currency
+   * amount, a percentage, a word written in capitals — which is a decent proxy
+   * for what a person would emphasise and costs nothing. "off" is the plain
+   * track. Either way `keywords` are always stressed.
+   */
+  emphasis: "off" | "auto";
+  /** Words that always take the emphasis colour, lower-cased and bare. */
+  keywords: string[];
+  /** Colour for a stressed word. Falls back to `highlight` when null. */
+  emphasisColor: string | null;
 }
 
 export interface SubtitleWord {
@@ -257,7 +314,12 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   margin: 0.08,
   maxCharsPerLine: 38,
   maxLines: 2,
+  maxWords: 0,
   animation: "fade",
+  activeScale: 1,
+  emphasis: "off",
+  keywords: [],
+  emphasisColor: null,
 };
 
 /* ------------------------------- transitions ------------------------------- */

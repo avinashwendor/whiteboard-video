@@ -6,6 +6,7 @@ import { paintFrame } from "./frame";
 import { audibleClips, type AudioClip } from "./audio";
 import { buildMixGraph } from "./mix";
 import { preloadComposition } from "./render";
+import { ensureTypefaces } from "./fonts";
 import {
   transitionAt,
   transitionWindows,
@@ -261,7 +262,9 @@ export async function composeOverlays({
     }
 
     onProgress?.(0.02, "Loading pictures");
-    await preloadComposition(composition);
+    // Images and type both: a face the canvas has not been asked to load
+    // draws in the fallback, silently, and the file ships that way.
+    await Promise.all([preloadComposition(composition), ensureTypefaces()]);
 
     const canvas = document.createElement("canvas");
     canvas.width = width;

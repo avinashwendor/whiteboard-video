@@ -13,6 +13,7 @@ import { getCutRanges, originalToEdited } from "@/rescript/lib/edits";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import { paintFrame } from "@/rescript/lib/overlay/frame";
 import { loadImage } from "@/rescript/lib/overlay/render";
+import { ensureTypefaces } from "@/rescript/lib/overlay/fonts";
 import { transitionAt } from "@/rescript/lib/overlay/timeline";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
 import { useAudioMix } from "@/rescript/hooks/useAudioMix";
@@ -101,6 +102,19 @@ export default function OverlayStage({
     x: [],
     y: [],
   });
+
+  /**
+   * Ask the browser for the display faces.
+   *
+   * Canvas2D does not trigger a font load — it draws in whatever is already
+   * available and says nothing — so without this a title set in Anton renders
+   * in Geist, correctly in every other respect, and only *sometimes*: whenever
+   * some panel happened to use the face in the DOM first. Once, on mount, well
+   * before anybody has typed anything to put on screen.
+   */
+  useEffect(() => {
+    void ensureTypefaces();
+  }, []);
 
   // Live values for the animation frame, which must not re-subscribe per frame.
   const live = useRef({ elements, subtitles, transitions, frame, shots, grade, audio, timeline, words, duration, manualCuts });

@@ -9,6 +9,7 @@
  */
 
 import { isWordCutOut, originalToEdited } from "../edits";
+import { typefaceStack } from "./typefaces";
 import type { TimeRange, Word } from "../types";
 import type {
   SubtitleCue,
@@ -49,6 +50,8 @@ function cueId(start: number, index: number): string {
 export interface CueOptions {
   maxCharsPerLine: number;
   maxLines: number;
+  /** Hard ceiling on words per cue. 0 leaves it to the character budget. */
+  maxWords?: number;
 }
 
 /**
@@ -61,7 +64,7 @@ export interface CueOptions {
 export function buildCues(
   words: Word[],
   cuts: TimeRange[],
-  { maxCharsPerLine, maxLines }: CueOptions
+  { maxCharsPerLine, maxLines, maxWords = 0 }: CueOptions
 ): SubtitleCue[] {
   const budget = Math.max(8, maxCharsPerLine * Math.max(1, maxLines));
 
@@ -78,7 +81,7 @@ export function buildCues(
     kept.push({ text, start, end: Math.max(end, start) });
   }
   if (!kept.length) return [];
-  return groupIntoCues(kept, budget);
+  return groupIntoCues(kept, budget, maxWords);
 }
 
 /**
@@ -91,7 +94,11 @@ export function buildCues(
  * vertical cut than in the master, which is exactly what re-wrapping is
  * supposed to prevent.
  */
-function groupIntoCues(kept: SubtitleWord[], budget: number): SubtitleCue[] {
+function groupIntoCues(
+  kept: SubtitleWord[],
+  budget: number,
+  maxWords = 0
+): SubtitleCue[] {
   const cues: SubtitleCue[] = [];
   let group: SubtitleWord[] = [];
 
@@ -99,7 +106,13 @@ function groupIntoCues(kept: SubtitleWord[], budget: number): SubtitleCue[] {
     if (!group.length) return;
     const start = group[0].start;
     const rawEnd = group[group.length - 1].end;
-    const end = Math.max(rawEnd, start + MIN_CUE_S);
+    // The minimum hold exists so a two-word cue is not a flash. It cannot
+    // apply to a deliberately dense track: one word is spoken in about 0.3s,
+    // so padding every cue to 0.6s makes each one overlap the next, and the
+    // de-overlap pass below then trims them all back to nothing. A track that
+    // asked for one word at a time gets the word's own length.
+    const floor = maxWords > 0 && maxWords <= 2 ? 0.12 : MIN_CUE_S;
+    const end = Math.max(rawEnd, start + floor);
     cues.push({
       id: cueId(start, cues.length),
       start,
@@ -121,6 +134,11 @@ function groupIntoCues(kept: SubtitleWord[], budget: number): SubtitleCue[] {
       if (
         gap >= GAP_BREAK_S ||
         span >= MAX_CUE_S ||
+        // The word ceiling, which the character budget cannot express: a
+        // one-word cue is nowhere near 76 characters, so without this the
+        // grouper simply keeps going and "one word at a time" silently
+        // produces ordinary two-line captions.
+        (maxWords > 0 && group.length >= maxWords) ||
         length + word.text.length > budget ||
         endsSentence(previous.text) ||
         // Break on a clause only once the cue is already substantial, or every
@@ -174,6 +192,7 @@ export function cuesFromStyle(
   return buildCues(words, cuts, {
     maxCharsPerLine: fittedCharsPerLine(style, aspect),
     maxLines: style.maxLines,
+    maxWords: style.maxWords,
   });
 }
 
@@ -212,7 +231,7 @@ export function rewrapCues(
   const words = track.cues.flatMap((cue) => cue.words ?? []);
   if (words.length === 0) return track;
 
-  const cues = groupIntoCues(words, budget);
+  const cues = groupIntoCues(words, budget, style.maxWords);
   return cues.length ? { ...track, cues } : track;
 }
 
@@ -231,6 +250,10 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     label: "Clean",
     description: "White type on a soft slab. Reads anywhere.",
     style: {
+      fontFamily: typefaceStack("sans"),
+      maxWords: 0,
+      activeScale: 1,
+      emphasis: "off",
       color: "#ffffff",
       background: "rgba(0,0,0,0.55)",
       outline: false,
@@ -246,6 +269,10 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     label: "Broadcast",
     description: "Outlined, no box — the television default.",
     style: {
+      fontFamily: typefaceStack("sans"),
+      maxWords: 0,
+      activeScale: 1,
+      emphasis: "off",
       color: "#ffffff",
       background: null,
       outline: true,
@@ -261,6 +288,11 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     label: "Shorts",
     description: "Big, capitalised, one line at a time.",
     style: {
+      fontFamily: typefaceStack("anton"),
+      maxWords: 0,
+      activeScale: 1,
+      emphasis: "auto",
+      emphasisColor: "#ffd60a",
       color: "#ffffff",
       background: null,
       outline: true,
@@ -279,6 +311,10 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     label: "Word pop",
     description: "The spoken word lights up as it is said.",
     style: {
+      fontFamily: typefaceStack("grotesk"),
+      maxWords: 0,
+      activeScale: 1.05,
+      emphasis: "off",
       color: "#ffffff",
       highlight: "#ffd60a",
       background: null,
@@ -297,6 +333,7 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     label: "Minimal",
     description: "Light weight, low contrast, sits back.",
     style: {
+      fontFamily: typefaceStack("sans"),
       color: "#f4f4f5",
       background: null,
       outline: false,
@@ -304,7 +341,161 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
       uppercase: false,
       fontWeight: 400,
       fontSize: 0.042,
+      maxWords: 0,
+      activeScale: 1,
+      emphasis: "off",
       animation: "fade",
     },
   },
+
+  /* ------------------------- the loud half of the list ---------------------- */
+  //
+  // Everything above is a *subtitle*: something you read while watching
+  // something else. Everything below is a *caption* in the short-form sense —
+  // it is the thing you are watching, it changes every few hundred
+  // milliseconds, and it is why a viewer's thumb does not move. They are
+  // different jobs and the list needed both; it only had the first.
+  {
+    id: "oneWord",
+    label: "One word",
+    description: "A single word at a time, huge, in the middle. The short-form default.",
+    style: {
+      fontFamily: typefaceStack("anton"),
+      color: "#ffffff",
+      highlight: "#ffd60a",
+      background: null,
+      outline: true,
+      shadow: false,
+      uppercase: true,
+      fontWeight: 400,
+      fontSize: 0.105,
+      maxCharsPerLine: 14,
+      maxLines: 1,
+      // The whole preset, in one number.
+      maxWords: 1,
+      position: "center",
+      animation: "pop",
+      activeScale: 1,
+      emphasis: "auto",
+      emphasisColor: "#ffd60a",
+    },
+  },
+  {
+    id: "punch",
+    label: "Punch",
+    description: "Two or three words, bouncing on the beat, figures in the accent.",
+    style: {
+      fontFamily: typefaceStack("archivo"),
+      color: "#ffffff",
+      highlight: "#ffd60a",
+      background: null,
+      outline: true,
+      shadow: false,
+      uppercase: true,
+      fontWeight: 400,
+      fontSize: 0.082,
+      maxCharsPerLine: 20,
+      maxLines: 1,
+      maxWords: 3,
+      position: "center",
+      animation: "bounce",
+      // The live word grows a little as it is spoken. Small on purpose: the
+      // difference between this reading as energy and as a wobble is about
+      // four percent.
+      activeScale: 1.12,
+      emphasis: "auto",
+      emphasisColor: "#4ade80",
+    },
+  },
+  {
+    id: "neonKaraoke",
+    label: "Neon karaoke",
+    description: "Word-by-word highlight in a hot colour, on a dark slab.",
+    style: {
+      fontFamily: typefaceStack("grotesk"),
+      color: "#f5f3ff",
+      highlight: "#f472b6",
+      background: "rgba(10,4,20,0.62)",
+      outline: false,
+      shadow: true,
+      uppercase: false,
+      fontWeight: 700,
+      fontSize: 0.06,
+      maxCharsPerLine: 24,
+      maxLines: 2,
+      maxWords: 0,
+      position: "bottom",
+      animation: "karaoke",
+      activeScale: 1.06,
+      emphasis: "off",
+    },
+  },
+  {
+    id: "documentary",
+    label: "Documentary",
+    description: "Serif, sparse, low in frame. For a piece that is not shouting.",
+    style: {
+      fontFamily: typefaceStack("instrument"),
+      color: "#ffffff",
+      background: null,
+      outline: false,
+      shadow: true,
+      uppercase: false,
+      fontWeight: 400,
+      fontSize: 0.048,
+      maxCharsPerLine: 44,
+      maxLines: 2,
+      maxWords: 0,
+      position: "bottom",
+      animation: "fade",
+      activeScale: 1,
+      emphasis: "off",
+    },
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    description: "Monospace on a black slab. For a demo or a screen recording.",
+    style: {
+      fontFamily: typefaceStack("mono"),
+      color: "#e5e7eb",
+      highlight: "#4ade80",
+      background: "rgba(6,8,10,0.82)",
+      outline: false,
+      shadow: false,
+      uppercase: false,
+      fontWeight: 500,
+      fontSize: 0.042,
+      maxCharsPerLine: 46,
+      maxLines: 2,
+      maxWords: 0,
+      position: "bottom",
+      animation: "none",
+      activeScale: 1,
+      emphasis: "auto",
+      emphasisColor: "#4ade80",
+    },
+  },
 ];
+
+export type SubtitlePresetId = (typeof SUBTITLE_PRESETS)[number]["id"];
+
+/**
+ * The preset ids, for the schema's enum.
+ *
+ * Derived rather than restated. `ops-schema.ts` held its own copy of this list
+ * for a year, and the moment the library grew the schema went on rejecting the
+ * new names — an operation the prompt taught, the executor understood, and the
+ * validator threw away before either saw it.
+ */
+export const SUBTITLE_PRESET_IDS = SUBTITLE_PRESETS.map((p) => p.id) as [
+  string,
+  ...string[],
+];
+
+/** The presets as the agent is shown them, quietest first. */
+export function describeSubtitlePresets(): string {
+  return SUBTITLE_PRESETS.map(
+    (preset) => `    ${preset.id.padEnd(13)}${preset.description.replace(/\.$/, "")}`
+  ).join("\n");
+}

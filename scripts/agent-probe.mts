@@ -20,6 +20,56 @@ for (const line of readFileSync(".env.local", "utf8").split("\n")) {
 process.env.RESCRIPT_AGENT_DEBUG = "/dev/stderr";
 
 const { planRescriptEdit } = await import("../src/lib/ai/rescript-agent.js");
+const { readFrame, toWire } = await import("../src/rescript/lib/overlay/vision.js");
+
+/**
+ * A measured survey, synthesised.
+ *
+ * The probe's whole value is that it exercises the harness without a browser,
+ * and the measurements are the newest and largest thing the harness carries —
+ * a prompt block, two tools, and a grade recommendation, none of which the
+ * probe touched. So the frames are painted here instead: a person left of
+ * centre against a wall that gets busy in the lower half, which is the ordinary
+ * case and the one where the right answer (put type upper-right, not in the
+ * lower third) differs from the default instinct.
+ */
+function syntheticVision(duration: number, count = 8) {
+  const EDGE = 96;
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+
+  const reads = [];
+  let previous = null;
+  for (let i = 0; i < count; i += 1) {
+    const data = new Uint8ClampedArray(EDGE * EDGE * 4);
+    // The subject drifts slowly rightward across the video, so a position that
+    // is safe at the start is not safe at the end — which is the case
+    // where_text_fits exists for.
+    const faceX = 0.16 + (i / count) * 0.22;
+    for (let y = 0; y < EDGE; y += 1) {
+      for (let x = 0; x < EDGE; x += 1) {
+        const fx = x / EDGE;
+        const fy = y / EDGE;
+        const onFace = fx > faceX && fx < faceX + 0.3 && fy > 0.2 && fy < 0.85;
+        // Busy shelving across the bottom third; flat wall above it.
+        const busy = fy > 0.62 ? (rand() - 0.5) * 90 : 0;
+        const p = (y * EDGE + x) * 4;
+        data[p] = Math.max(0, Math.min(255, (onFace ? 208 : 54) + busy));
+        data[p + 1] = Math.max(0, Math.min(255, (onFace ? 162 : 60) + busy));
+        data[p + 2] = Math.max(0, Math.min(255, (onFace ? 134 : 78) + busy));
+        data[p + 3] = 255;
+      }
+    }
+    const read = readFrame(
+      { width: EDGE, height: EDGE, data } as ImageData,
+      ((i + 1) * duration) / (count + 1),
+      { aspect: 16 / 9, previous }
+    );
+    previous = read;
+    reads.push(toWire(read));
+  }
+  return reads;
+}
 
 const SENTENCES = [
   "So the first thing we did was rip out the old pipeline entirely.",
@@ -73,9 +123,11 @@ async function main() {
       fillerCount: 37, fillerSeconds: 9.4, silenceCount: 22, silenceSeconds: 18.2,
       longestPauses: [{ at: 212, seconds: 2.4 }], clipCount: 1, runsLong: true,
     },
+    // VISION=0 turns it off, for comparing against the blind behaviour.
+    ...(process.env.VISION === "0" ? {} : { vision: syntheticVision(t) }),
     aspect: 16 / 9,
     frame: { aspect: "source", fit: "cover", zoom: 1 },
-    can: { generateImage: true, photoSearch: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true },
   },
 });
   console.log("\n=== PLAN ===");

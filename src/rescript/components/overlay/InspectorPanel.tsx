@@ -12,6 +12,12 @@ import {
   TEXT_STYLE_LABELS,
   textBoxHeight,
 } from "@/rescript/lib/overlay/presets";
+import {
+  TYPEFACES,
+  typefaceOf,
+  typefaceStack,
+  type TypefaceId,
+} from "@/rescript/lib/overlay/typefaces";
 import { POSITIONS, type TextStyleName } from "@/rescript/lib/overlay/ops-schema";
 import { useOutputTime } from "@/rescript/hooks/useOverlayTimeline";
 import type {
@@ -144,6 +150,22 @@ function TextSection({ element }: { element: TextElement }) {
           }
         />
       </div>
+
+      <Row label="Typeface" hint="The face the words are set in. The first thing anyone notices about type">
+        <Select
+          value={typefaceOf(element.fontFamily) ?? ("" as TypefaceId)}
+          options={[
+            ...(typefaceOf(element.fontFamily)
+              ? []
+              : [{ value: "" as TypefaceId, label: "Custom" }]),
+            ...TYPEFACES.map((face) => ({ value: face.id, label: face.label })),
+          ]}
+          onChange={(id) => {
+            if (!id) return;
+            update({ fontFamily: typefaceStack(id) } as Partial<OverlayElement>);
+          }}
+        />
+      </Row>
 
       <Row label="Look">
         <Select

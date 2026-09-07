@@ -12,6 +12,12 @@ import {
 } from "@/rescript/lib/overlay/subtitles";
 import type { SubtitleAnimation } from "@/rescript/lib/overlay/types";
 import {
+  TYPEFACES,
+  typefaceOf,
+  typefaceStack,
+  type TypefaceId,
+} from "@/rescript/lib/overlay/typefaces";
+import {
   Button,
   ColorInput,
   Empty,
@@ -201,8 +207,74 @@ export default function SubtitlesPanel() {
               { value: "fade" as SubtitleAnimation, label: "Fade" },
               { value: "pop" as SubtitleAnimation, label: "Pop" },
               { value: "karaoke" as SubtitleAnimation, label: "Word pop" },
+              { value: "bounce" as SubtitleAnimation, label: "Bounce" },
             ]}
             onChange={(animation) => setStyle({ animation })}
+          />
+        </Row>
+        <Row label="Typeface" hint="Captions are type. A condensed face fits twice the words">
+          <Select
+            value={typefaceOf(subtitles.style.fontFamily) ?? ("" as TypefaceId)}
+            options={[
+              ...(typefaceOf(subtitles.style.fontFamily)
+                ? []
+                : [{ value: "" as TypefaceId, label: "Custom" }]),
+              ...TYPEFACES.map((face) => ({ value: face.id, label: face.label })),
+            ]}
+            onChange={(id) => {
+              if (!id) return;
+              setStyle({ fontFamily: typefaceStack(id) });
+            }}
+          />
+        </Row>
+        <Row
+          label="Words a cue"
+          hint="1-3 is the short-form look. Auto lets the line length decide"
+        >
+          <Slider
+            value={subtitles.style.maxWords}
+            min={0}
+            max={8}
+            step={1}
+            onChange={(maxWords) => setStyle({ maxWords })}
+            // The cue *breaks* change, so the track has to be rebuilt — unlike
+            // colour or weight, which only restyle what is already there.
+            onCommit={() => regenerate()}
+            format={(v) => (v === 0 ? "auto" : `${v}`)}
+          />
+        </Row>
+        <Row
+          label="Stress"
+          hint="Colours figures, amounts and shouted words as they go by"
+        >
+          <Segmented
+            value={subtitles.style.emphasis}
+            onChange={(emphasis) => setStyle({ emphasis })}
+            options={[
+              { value: "off" as const, label: "Off" },
+              { value: "auto" as const, label: "Auto" },
+            ]}
+          />
+        </Row>
+        {subtitles.style.emphasis === "auto" ? (
+          <Row label="Stress colour">
+            <ColorInput
+              value={subtitles.style.emphasisColor ?? subtitles.style.highlight}
+              onChange={(emphasisColor) => setStyle({ emphasisColor })}
+            />
+          </Row>
+        ) : null}
+        <Row
+          label="Grow on speech"
+          hint="How much the spoken word swells. Above 1.2 it wobbles"
+        >
+          <Slider
+            value={subtitles.style.activeScale}
+            min={1}
+            max={1.3}
+            step={0.01}
+            onChange={(activeScale) => setStyle({ activeScale })}
+            format={(v) => (v <= 1.001 ? "off" : `${v.toFixed(2)}×`)}
           />
         </Row>
         <Row label="Line length">

@@ -45,8 +45,8 @@ import {
 } from "@/rescript/lib/feedback/retrieve";
 import {
   reviewTimes,
-  takeGlances,
-  takeReviewGlances,
+  surveyFootage,
+  surveyForReview,
 } from "@/rescript/lib/overlay/glance";
 import { currentComposition } from "@/rescript/lib/overlay/store";
 import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
@@ -309,6 +309,22 @@ export default function AiPanel() {
   const reviewAtRef = useRef<{ start?: number; at?: number }[]>([]);
   /** Whether there is applied work worth watching back. Drives the button. */
   const [reviewable, setReviewable] = useState(false);
+  /**
+   * Whether the edit that was just run is big enough to watch back unasked.
+   *
+   * The review has always been offered rather than automatic, and the reasoning
+   * was right for the case it was written against: it costs a request with
+   * composited frames in it, and an edit somebody accepted step by step is
+   * usually fine. Making them ask kept a reviewer from becoming a tax on every
+   * "make that bigger".
+   *
+   * It is the wrong default for the other case. "Edit this for me end to end"
+   * accepts six steps and thirty operations in one click; nobody has looked at
+   * any of it, and the half of an editor's job that is *watching the cut back*
+   * is exactly the half being skipped. So the tax is charged where it buys
+   * something — a plan large enough that nobody has really read it.
+   */
+  const autoReviewRef = useRef(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -345,7 +361,20 @@ export default function AiPanel() {
     [words, duration, manualCuts, sceneBoundaries]
   );
 
-  const [can, setCan] = useState({ generateImage: true, photoSearch: false });
+  /**
+   * What this deployment can reach.
+   *
+   * Sound defaults to false and image generation to true, which looks
+   * inconsistent and is not: images have a keyless fallback tier, and the audio
+   * catalogues do not. Guessing "yes" about sound produces an agent that plans
+   * a soundtrack on every edit and delivers none of it.
+   */
+  const [can, setCan] = useState({
+    generateImage: true,
+    photoSearch: false,
+    music: false,
+    sfx: false,
+  });
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
   /** "" means the server picks, which is what this panel always did before. */
   const [model, setModel] = useState<string>(() => loadAgentModel());
@@ -359,12 +388,18 @@ export default function AiPanel() {
       .then((json: {
         image?: { providers?: Array<{ id: string; configured?: boolean }> };
         visual?: { configured?: boolean };
+        media?: { kinds?: Record<string, boolean> };
       }) => {
         if (!alive) return;
         const providers = json.image?.providers ?? [];
+        const kinds = json.media?.kinds ?? {};
         setCan({
           generateImage: providers.some((p) => p.configured !== false),
           photoSearch: json.visual?.configured ?? true,
+          // The same field the music panel reads, so the picker and the agent
+          // cannot disagree about whether there is a catalogue to search.
+          music: kinds.music === true,
+          sfx: kinds.sfx === true,
         });
       })
       .catch(() => {
@@ -555,19 +590,22 @@ export default function AiPanel() {
     // audio — there is nothing to look at — and skipped on a repair, which is
     // the same request again and has already been shown them.
     const media = useEditorStore.getState();
-    const glances =
+    const survey =
       repair || media.mediaKind !== "video" || !media.mediaUrl
-        ? []
+        ? { glances: [], vision: [] }
         : mode === "review"
-          ? // Composited: a review of the raw footage would be a review of a
-            // video nobody is going to watch.
-            await takeReviewGlances(
+          ? // Composited pictures: a review of the raw footage would be a
+            // review of a video nobody is going to watch. The measurements
+            // still come off the clean frame — what was *behind* each caption
+            // is what decides whether it can be read.
+            await surveyForReview(
               media.mediaUrl,
               timeline,
               currentComposition(),
               reviewTimes(reviewAtRef.current, timeline.duration)
             )
-          : await takeGlances(media.mediaUrl, timeline);
+          : await surveyFootage(media.mediaUrl, timeline, currentComposition());
+    const { glances, vision } = survey;
 
     // A review with nothing to look at is a review of nothing, and the model
     // will fill the silence with plausible-sounding findings.
@@ -627,6 +665,10 @@ export default function AiPanel() {
             fit: overlay.frame.fit,
             zoom: overlay.frame.zoom,
           },
+          // Omitted rather than empty on audio and on a repair, so the agent's
+          // "say nothing about how it looks" branch fires instead of it being
+          // handed an empty survey and reading it as a clear frame.
+          ...(vision.length ? { vision } : {}),
           can,
         },
         mode,
@@ -902,6 +944,12 @@ export default function AiPanel() {
         }))
       );
       setReviewable(true);
+      // Big edits get watched back without being asked. The threshold is a
+      // count rather than a flag on the request, so it catches any large plan —
+      // including one the person built up themselves out of several steps —
+      // rather than only the whole-edit button.
+      const touched = accepted.reduce((n, step) => n + step.ops.length, 0);
+      autoReviewRef.current = accepted.length >= 4 || touched >= 12;
     } catch (err) {
       if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
       else append("fail", err instanceof Error ? err.message : "Something went wrong.");
@@ -914,18 +962,35 @@ export default function AiPanel() {
   /**
    * Watch the cut back.
    *
-   * Offered rather than automatic: it costs a request with three composited
-   * frames in it, and an edit somebody has just accepted step by step is
-   * usually right. Making them ask is the difference between a reviewer and a
-   * tax on every plan.
+   * Offered on a small edit, automatic on a large one — see `autoReviewRef`.
+   * It costs a request with composited frames in it, so it is charged where it
+   * buys something rather than on every plan.
    */
   const review = useCallback(() => {
+    setReviewable(false);
+    autoReviewRef.current = false;
     void submitRef.current?.(
       "Watch this back and tell me what is wrong with it.",
       "review",
       { silent: true }
     );
   }, []);
+
+  /**
+   * Fire the automatic review once the run has actually finished.
+   *
+   * Deferred to an effect rather than awaited at the end of the run: the review
+   * has to plan against the composition the run *left behind*, and inside the
+   * run the stores have been written but the frames the survey will paint have
+   * not been asked for yet. Waiting for `busy` to fall is waiting for the whole
+   * thing to settle.
+   */
+  useEffect(() => {
+    if (busy || proposal || !autoReviewRef.current) return;
+    autoReviewRef.current = false;
+    append("note", "Watching it back…");
+    review();
+  }, [busy, proposal, review, append]);
 
   const ready = status === "ready";
 

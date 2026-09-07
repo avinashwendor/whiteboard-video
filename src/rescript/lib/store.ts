@@ -61,6 +61,8 @@ import {
 } from "./projects";
 import type { Composition } from "./overlay/types";
 import { useOverlayStore } from "./overlay/store";
+import { forgetFrames } from "./overlay/glance";
+import { resetImageMotion } from "./overlay/ops";
 import { useChatStore } from "./chat/store";
 import {
   addSpeaker as addSpeakerEntry,
@@ -481,6 +483,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (imported && imported.length === 0) return;
     const prev = get().mediaUrl;
     if (prev) URL.revokeObjectURL(prev);
+    // Decoded frames are keyed by media URL, and a revoked blob URL can be
+    // handed straight back out for different bytes — so a survivor here would
+    // be a picture of the previous video, measured as if it were this one.
+    forgetFrames();
+    resetImageMotion();
     // Captions, overlays, transitions and the frame belong to the project that
     // was open, not to the editor. Loading different media without this is what
     // put the last video's subtitles over the new one. The conversation goes
@@ -542,6 +549,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const file = fileFromProject(record);
     const prev = get().mediaUrl;
     if (prev) URL.revokeObjectURL(prev);
+    // Decoded frames are keyed by media URL, and a revoked blob URL can be
+    // handed straight back out for different bytes — so a survivor here would
+    // be a picture of the previous video, measured as if it were this one.
+    forgetFrames();
+    resetImageMotion();
     // Clear first, then restore: a project saved before the composition layer
     // existed has no composition, and "no composition" must mean an empty one
     // rather than whatever happened to be on screen a moment ago.
@@ -1137,6 +1149,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   reset: () => {
     useOverlayStore.getState().reset();
     useChatStore.getState().reset();
+    forgetFrames();
+    resetImageMotion();
     saveLastProjectId(null);
     const { mediaUrl, exportUrl } = get();
     if (mediaUrl) URL.revokeObjectURL(mediaUrl);
