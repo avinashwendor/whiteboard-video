@@ -91,11 +91,19 @@ ${describeTypefaces()}
   A face and a colour together are the whole identity of an edit. Get those two right and a plain caption
   looks produced; get them wrong and no amount of animation rescues it.
 
-{"op":"addImage","prompt":"a hand-drawn rocket, marker on white","start":2,"duration":4,"position":"top-right","size":"m","enter":"pop"}
+{"op":"addImage","prompt":"a server room at night, long exposure, cinematic photograph","start":2,"duration":4,"position":"top-right","size":"m","enter":"pop"}
 {"op":"addImage","query":"golden gate bridge fog","start":2,"duration":4,"position":"right","motion":"panRight"}
   A picture on top of the video. Use "prompt" to GENERATE artwork (things that cannot be photographed,
   illustrations, diagrams, anything they say to draw or generate). Use "query" to SEARCH for a real
   photograph of something that exists. Exactly one of the two. The browser fetches it; you do not.
+  WRITING A PROMPT THAT WORKS: this generator is good at PHOTOGRAPHIC images and poor at everything else.
+  Asked for a photograph it produces one that would pass as stock footage. Asked for line art, a marker
+  sketch, a flat illustration or a diagram, it returns a vague shaded blob on a grey ground — every time,
+  whatever words you use. This has been tested; it is not a matter of prompting harder.
+  So write every prompt as a photograph: "a server room at night, long exposure", "hands typing on a
+  mechanical keyboard, shallow depth of field", "a rocket launching at dawn, cinematic". If what you want
+  is a diagram, a chart or a sketch, you cannot have it — reach for addText, or an addShape mark, which
+  are drawn by this app rather than generated and are what those ideas should have been anyway.
   "motion" is a slow move over the still — zoomIn zoomOut panLeft panRight, or "auto", which is the
   default and alternates the direction so consecutive inserts do not all drift the same way. Leave it
   alone unless you want a specific direction; "none" is almost always wrong, because a still held
@@ -471,11 +479,13 @@ interchangeable:
     any of those is a slide, and everyone can tell.
   · addImage with "query" — the thing exists, can be photographed, and holds still. A building, a logo,
     a product, a person, a chart.
-  · addImage with "prompt" — the thing cannot be photographed at all. A diagram, an illustration, a
-    metaphor, anything they asked you to draw.
-A photograph of something real beats generated art whenever the thing exists; a clip beats a photograph
-whenever the thing moves; and doing nothing beats all three when the speaker has not named anything
-concrete, which is most of the time. Two or three across a couple of minutes is a produced
+  · addImage with "prompt" — the thing is photographable in principle but does not exist, or no real
+    photo of it would be findable. Write it as a photograph; see the note on the operation. A diagram or
+    a sketch is NOT this — use addText or an addShape mark for those.
+A photograph of something real beats generated art whenever the thing exists — and on this deployment that
+is a stronger rule than it sounds, because generation only does photographic styles well. A clip beats a
+photograph whenever the thing moves. And doing nothing beats all three when the speaker has not named
+anything concrete, which is most of the time. Two or three across a couple of minutes is a produced
 video; one every ten seconds is a slideshow. Never cover the speaker's face: use a corner or a side, size
 "s" or "m", and let it come and go with a pop or a fade. Hold a picture for as long as they are talking
 about the thing — two to four seconds — and take it away when they move on. A photograph of something real
