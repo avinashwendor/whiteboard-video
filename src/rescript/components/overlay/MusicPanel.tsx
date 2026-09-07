@@ -68,6 +68,15 @@ export default function MusicPanel() {
   /** The automatic pass, which is several catalogue fetches and takes a moment. */
   const [sounding, setSounding] = useState<"subtle" | "energetic" | "comedic" | null>(null);
   const [sounded, setSounded] = useState<string | null>(null);
+  /**
+   * Where audio comes from.
+   *
+   * Offered only when both are actually available — a choice between one thing
+   * and a thing that is not configured is not a choice, it is a disabled
+   * control that needs explaining.
+   */
+  const [source, setSource] = useState<"generated" | "catalogue">("generated");
+  const [canGenerate, setCanGenerate] = useState<Record<string, boolean>>({});
 
   const clips = useOverlayStore((s) => s.audio);
   const addAudio = useOverlayStore((s) => s.addAudio);
@@ -86,9 +95,19 @@ export default function MusicPanel() {
     let alive = true;
     fetch("/api/capabilities")
       .then((r) => r.json())
-      .then((json: { media?: { kinds?: Record<string, boolean> } }) => {
-        if (alive) setCan(json.media?.kinds ?? {});
-      })
+      .then(
+        (json: {
+          media?: { kinds?: Record<string, boolean>; generate?: Record<string, boolean> };
+        }) => {
+          if (!alive) return;
+          setCan(json.media?.kinds ?? {});
+          const generate = json.media?.generate ?? {};
+          setCanGenerate(generate);
+          // Fall back to the catalogue when nothing can be generated, so the
+          // default is always something this deployment can actually do.
+          if (!generate.sfx && !generate.music) setSource("catalogue");
+        }
+      )
       .catch(() => {});
     return () => {
       alive = false;
@@ -117,12 +136,72 @@ export default function MusicPanel() {
 
   useEffect(() => () => auditioning?.pause(), [auditioning]);
 
+  /** Both available for this kind, so the choice is a real one. */
+  const choosable =
+    kind !== "video" &&
+    (canGenerate[kind] ?? false) &&
+    (can[kind] ?? false);
+
   const search = useCallback(async () => {
     const text = query.trim();
     if (!text || busy) return;
     setBusy(true);
     setError(null);
     try {
+      // Generation returns one thing that did not exist a moment ago, so there
+      // is nothing to browse: it goes straight onto the timeline. Searching a
+      // catalogue and choosing from results is the other shape entirely, and
+      // conflating them would give a result list of one with a Place button
+      // that regenerates every time it is pressed.
+      if (choosable && source === "generated") {
+        const audioKind = kind as AudioKind;
+        const isBed = FULL_LENGTH_KINDS.has(audioKind);
+        const start = isBed ? 0 : playhead;
+        const end = isBed
+          ? timeline.duration
+          : Math.min(timeline.duration, playhead + 2.5);
+        const res = await fetch("/api/media", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "generate",
+            kind: audioKind,
+            prompt: text,
+            seconds: Math.max(1, end - start),
+          }),
+        });
+        const json = (await res.json()) as {
+          success?: boolean;
+          url?: string;
+          error?: { message?: string };
+        };
+        if (!json.success || !json.url) {
+          throw new Error(json.error?.message ?? "That couldn't be generated.");
+        }
+        addAudio({
+          kind: audioKind,
+          name: `${text} (generated)`,
+          src: json.url,
+          start,
+          end: Math.max(start + 0.2, end),
+          trimIn: 0,
+          gain: defaultGainFor(audioKind),
+          fadeIn: isBed ? 1.5 : 0,
+          fadeOut: isBed ? 2 : 0,
+          duck: isBed,
+          loop: false,
+          muted: false,
+          credit: {
+            title: text,
+            artist: "Generated",
+            licence: "Generated — no attribution required",
+            attributionRequired: false,
+          },
+        });
+        setResults([]);
+        return;
+      }
+
       const res = await fetch("/api/media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -144,7 +223,7 @@ export default function MusicPanel() {
     } finally {
       setBusy(false);
     }
-  }, [query, kind, busy]);
+  }, [query, kind, busy, choosable, source, addAudio, playhead, timeline.duration]);
 
   /** Proxy the file onto our origin, then put it on the timeline. */
   const place = useCallback(
@@ -305,6 +384,23 @@ export default function MusicPanel() {
 
       <Section title="Find">
         <Segmented value={kind} options={KINDS} onChange={setKind} />
+        {choosable && (
+          <div className="mt-2">
+            <Row
+              label="Source"
+              hint="Generated audio matches the description exactly and needs no credit"
+            >
+              <Segmented
+                value={source}
+                onChange={setSource}
+                options={[
+                  { value: "generated" as const, label: "Generated" },
+                  { value: "catalogue" as const, label: "Catalogue" },
+                ]}
+              />
+            </Row>
+          </div>
+        )}
         {can[kind] === false && (
           <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-600">
             {kind === "sfx"

@@ -409,6 +409,41 @@ async function mapWithLimit<T, R>(
 }
 
 /**
+ * Make an effect rather than find one.
+ *
+ * Preferred over the catalogue when generation is configured, and the reason is
+ * in `sfx.ts`: every entry there already carries a plain-words query — "riser
+ * build up sweep", "deep boom bass drop" — written so a catalogue search would
+ * match it, which turns out to be exactly the right generation prompt. So the
+ * same library serves both paths with no second vocabulary.
+ *
+ * Generated audio also carries no licence, which removes the one thing that
+ * makes catalogue sound awkward in a client's video.
+ *
+ * Returns null when generation is unavailable or fails, and the caller falls
+ * back to searching — a worse effect is better than no effect.
+ */
+async function makeAudio(
+  kind: "sfx" | "music",
+  prompt: string,
+  seconds: number,
+  signal?: AbortSignal
+): Promise<string | null> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "generate", kind, prompt, seconds }),
+      signal,
+    });
+    const json = (await res.json()) as { success?: boolean; url?: string };
+    return json.success && json.url ? json.url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch a named effect and put it on the timeline so it *lands* on `at`.
  *
  * The lead is the whole reason this is a function rather than three lines at
@@ -430,12 +465,19 @@ async function placeEffect(
     return { ok: false, message: `There is no room for a ${effect.label} at ${placed.at.toFixed(1)}s.` };
   }
 
-  const found = await findMedia(effect.query, "sfx", signal);
-  if (!found) {
-    return { ok: false, message: `No usable ${effect.label} came back from the catalogue.` };
+  // Generated first, catalogue second. The generated one matches its own
+  // description exactly and owes nobody a credit; the catalogue is the fallback
+  // for a deployment without a generation key.
+  let src = await makeAudio("sfx", effect.query, effect.hold, signal);
+  let credit: FoundMedia | null = null;
+  if (!src) {
+    credit = await findMedia(effect.query, "sfx", signal);
+    if (!credit) {
+      return { ok: false, message: `No usable ${effect.label} could be made or found.` };
+    }
+    src = await proxyMedia(credit.downloadUrl, credit.title, signal);
+    if (!src) return { ok: false, message: `“${credit.title}” could not be fetched.` };
   }
-  const src = await proxyMedia(found.downloadUrl, found.title, signal);
-  if (!src) return { ok: false, message: `“${found.title}” could not be fetched.` };
 
   useOverlayStore.getState().addAudio({
     kind: "sfx",
@@ -452,16 +494,29 @@ async function placeEffect(
     duck: false,
     loop: false,
     muted: false,
-    credit: {
-      title: found.title,
-      artist: found.artist,
-      licence: found.licence.name,
-      url: found.pageUrl,
-      attributionRequired: found.licence.attributionRequired,
-    },
+    // A generated sound owes no attribution, and recording that is more use
+    // than recording nothing: the credit block is what somebody pastes into a
+    // description, and it should say what actually has to be credited.
+    credit: credit
+      ? {
+          title: credit.title,
+          artist: credit.artist,
+          licence: credit.licence.name,
+          url: credit.pageUrl,
+          attributionRequired: credit.licence.attributionRequired,
+        }
+      : {
+          title: effect.label,
+          artist: "Generated",
+          licence: "Generated — no attribution required",
+          attributionRequired: false,
+        },
   });
 
-  return { ok: true, message: `${effect.label} ${placed.reason}, at ${placed.at.toFixed(1)}s` };
+  return {
+    ok: true,
+    message: `${effect.label} ${placed.reason}, at ${placed.at.toFixed(1)}s${credit ? "" : " (generated)"}`,
+  };
 }
 
 /* -------------------------------- execution -------------------------------- */
@@ -1227,25 +1282,38 @@ async function runOne(
         return { ok: false, message: "That is too short a stretch to put sound under." };
       }
 
-      // Searched here rather than by the model: it cannot know what is in a
-      // catalogue, and a URL it invented would fail the proxy's allowlist —
-      // correctly, but with an error nobody could act on.
-      const found = await findMedia(op.query, op.kind, signal);
-      if (!found) {
+      // Generated first unless the catalogue was asked for by name. A bed made
+      // to the description matches it exactly and owes no credit; a searched
+      // one is somebody else's recording with a licence attached.
+      const wants = op.source ?? "auto";
+      let src: string | null = null;
+      let found: FoundMedia | null = null;
+
+      if (wants !== "catalogue") {
+        src = await makeAudio(op.kind, op.query, end - start, signal);
+      }
+      if (!src && wants !== "generated") {
+        // Searched here rather than by the model: it cannot know what is in a
+        // catalogue, and a URL it invented would fail the proxy's allowlist —
+        // correctly, but with an error nobody could act on.
+        found = await findMedia(op.query, op.kind, signal);
+        if (found) src = await proxyMedia(found.downloadUrl, found.title, signal);
+      }
+      if (!src) {
         return {
           ok: false,
-          message: `Nothing usable came back for “${op.query}”. A broader word usually helps.`,
+          message:
+            wants === "generated"
+              ? `That couldn't be generated. Check ELEVENLABS_API_KEY, or leave "source" out to fall back to the catalogue.`
+              : `Nothing usable came back for “${op.query}”. A broader word usually helps.`,
         };
-      }
-
-      const src = await proxyMedia(found.downloadUrl, found.title, signal);
-      if (!src) {
-        return { ok: false, message: `“${found.title}” could not be fetched.` };
       }
 
       overlay.addAudio({
         kind: op.kind,
-        name: `${found.title} — ${found.artist}`,
+        // A generated bed has no title and no artist; the description it was
+        // made from is the only honest name for it.
+        name: found ? `${found.title} — ${found.artist}` : `${op.query} (generated)`,
         src,
         start,
         end,
@@ -1254,19 +1322,30 @@ async function runOne(
         fadeIn: isBed ? 1.5 : 0,
         fadeOut: isBed ? 2 : 0,
         duck: isBed,
-        loop: isBed && (found.duration ?? 0) < end - start,
+        // A generated bed is made to length, so it never needs looping.
+        loop: isBed && !!found && (found.duration ?? 0) < end - start,
         muted: false,
-        credit: {
-          title: found.title,
-          artist: found.artist,
-          licence: found.licence.name,
-          url: found.pageUrl,
-          attributionRequired: found.licence.attributionRequired,
-        },
+        credit: found
+          ? {
+              title: found.title,
+              artist: found.artist,
+              licence: found.licence.name,
+              url: found.pageUrl,
+              attributionRequired: found.licence.attributionRequired,
+            }
+          : {
+              title: op.query,
+              artist: "Generated",
+              licence: "Generated — no attribution required",
+              attributionRequired: false,
+            },
       });
 
       // The licence is named in the log, not buried: it is the thing that
       // decides whether the person can publish what was just added.
+      if (!found) {
+        return { ok: true, message: `Generated “${op.query}” — no credit required` };
+      }
       const owed = found.licence.attributionRequired ? ", credit required" : "";
       return {
         ok: true,

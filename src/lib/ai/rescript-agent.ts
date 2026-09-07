@@ -239,10 +239,14 @@ ${describeSubtitlePresets()}
 {"op":"removeShot","at":12}
   Drops whatever framing covers that second, back to the footage as shot.
 
-{"op":"addMusic","query":"calm piano","kind":"music"}
+{"op":"addMusic","query":"calm piano","kind":"music","source":"auto"}
   Puts music under the whole video. Say what it should SOUND like — "calm piano", "driving drums", "warm
   acoustic" — not a title or an artist; the browser searches a licensed catalogue and takes the best usable
   result. It defaults to the full length, ducks under speech and fades at both ends.
+  "source" is where it comes from: "auto" (the default — generated when this deployment can, a catalogue
+  otherwise), "generated", or "catalogue". Leave it on auto. A generated bed is made to the description
+  and to the exact length, and owes nobody a credit; ask for the catalogue only if somebody wants a real
+  recording by a named artist.
   Only add music if it was asked for, or if the video is plainly a montage with nothing being said: a bed
   under a talking head that did not ask for one is the most common way an automatic edit is made worse.
 

@@ -47,7 +47,8 @@
     "test:agentvision": "tsx tests/agent-vision-test.mts",
     "test:camera": "tsx tests/camera-variety-test.ts",
     "test:kenburns": "tsx tests/ken-burns-test.ts",
-    "test:broll": "tsx tests/broll-test.ts"
+    "test:broll": "tsx tests/broll-test.ts",
+    "probe:media": "tsx scripts/probe-media.mts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

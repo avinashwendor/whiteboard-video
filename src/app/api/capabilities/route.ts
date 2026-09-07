@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { resolveTts } from "@/lib/ai/tts";
+import { resolveTts, ttsProviders } from "@/lib/ai/tts";
 import { omega } from "@/lib/ai/omega";
 import { isConfigured as tavilyConfigured } from "@/lib/ai/image/tavily";
 import { allProviders, providersFor } from "@/lib/media/registry";
+import { isConfigured as elevenLabsConfigured } from "@/lib/ai/elevenlabs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,10 +55,29 @@ export function GET() {
         gif: providersFor("gif").length > 0,
         video: providersFor("video").length > 0,
       },
+      /**
+       * Audio this deployment can make rather than find.
+       *
+       * Reported separately from `kinds` because it is a different answer to a
+       * different question: `kinds.sfx` says a catalogue can be searched,
+       * `generate.sfx` says a sound can be made to order. A deployment can have
+       * either, both or neither, and the panel offers a choice only when it has
+       * both.
+       */
+      generate: {
+        sfx: elevenLabsConfigured(),
+        music: elevenLabsConfigured(),
+      },
     },
     voice: (() => {
       const engine = resolveTts();
-      return { provider: engine.id, configured: engine.isConfigured() };
+      return {
+        provider: engine.id,
+        configured: engine.isConfigured(),
+        // Every engine, so a picker can offer the choice rather than showing
+        // whichever one happened to win the preference order.
+        providers: ttsProviders(),
+      };
     })(),
   });
 }

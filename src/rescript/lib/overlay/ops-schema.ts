@@ -37,6 +37,16 @@ export const POSITIONS = [
 ] as const;
 export type PositionName = (typeof POSITIONS)[number];
 
+/**
+ * Where a music bed or an effect comes from.
+ *
+ * "auto" is the default and means generated when that is configured, catalogue
+ * otherwise — the right answer nearly always, since a generated bed matches the
+ * description exactly and owes no credit. Naming one explicitly is for the case
+ * where somebody wants a real recording, or wants to hear the difference.
+ */
+export const AUDIO_SOURCES = ["auto", "generated", "catalogue"] as const;
+
 export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
 export type SizeName = (typeof SIZES)[number];
 
@@ -617,6 +627,8 @@ export const addMusicOp = z.object({
   end: seconds.optional(),
   /** 0..1. Leave it alone unless asked — the defaults are chosen levels. */
   gain: z.number().min(0).max(1).optional(),
+  /** Generated, from a catalogue, or whichever is configured. */
+  source: z.enum(AUDIO_SOURCES).optional(),
 });
 
 export const setMusicLevelOp = z.object({

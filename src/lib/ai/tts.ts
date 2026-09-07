@@ -1,5 +1,6 @@
 import { cartesia } from "./cartesia";
 import { deepgram } from "./deepgram";
+import { elevenlabs } from "./elevenlabs";
 import type { TTSProvider } from "./types";
 
 /**
@@ -11,15 +12,45 @@ import type { TTSProvider } from "./types";
  * actually funded.
  */
 
-export type TTSProviderId = "deepgram" | "cartesia";
+export type TTSProviderId = "deepgram" | "cartesia" | "elevenlabs";
 
-const PROVIDERS: Record<TTSProviderId, TTSProvider> = { deepgram, cartesia };
+const PROVIDERS: Record<TTSProviderId, TTSProvider> = {
+  deepgram,
+  cartesia,
+  elevenlabs,
+};
 
-/** Preference order, filtered down to whatever has a key. */
-const ORDER: TTSProviderId[] = ["deepgram", "cartesia"];
+/**
+ * Preference order, filtered down to whatever has a key.
+ *
+ * ElevenLabs leads when it is configured. All three report word timings, so
+ * the tie-break is the voices: it is the one whose catalogue a person is
+ * likely to have picked a specific voice from, and picking a voice is the
+ * whole reason anybody chooses a speech vendor. Deepgram stays ahead of
+ * Cartesia beneath it for the reason it always did.
+ *
+ * `TTS_PROVIDER` overrides the order, and an explicit request from the caller
+ * overrides both — which is what the picker in the UI sends.
+ */
+const ORDER: TTSProviderId[] = ["elevenlabs", "deepgram", "cartesia"];
 
-export function ttsProviders(): Array<{ id: TTSProviderId; configured: boolean }> {
-  return ORDER.map((id) => ({ id, configured: PROVIDERS[id].isConfigured() }));
+/** Shown in the picker. Kept here so the label and the id cannot drift. */
+export const TTS_PROVIDER_LABELS: Record<TTSProviderId, string> = {
+  elevenlabs: "ElevenLabs",
+  deepgram: "Deepgram",
+  cartesia: "Cartesia",
+};
+
+export function ttsProviders(): Array<{
+  id: TTSProviderId;
+  label: string;
+  configured: boolean;
+}> {
+  return ORDER.map((id) => ({
+    id,
+    label: TTS_PROVIDER_LABELS[id],
+    configured: PROVIDERS[id].isConfigured(),
+  }));
 }
 
 export function resolveTts(requested?: string): TTSProvider {

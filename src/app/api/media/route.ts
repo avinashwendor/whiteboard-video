@@ -19,6 +19,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { searchMedia } from "@/lib/media/registry";
 import { fetchWithTimeout } from "@/lib/utils/http";
+import {
+  generateMusic,
+  generateSfx,
+  isConfigured as elevenLabsConfigured,
+} from "@/lib/ai/elevenlabs";
 import { assetUrl, putAsset } from "@/lib/utils/asset-store";
 import { toAppError } from "@/lib/utils/errors";
 import {
@@ -109,6 +114,29 @@ const ALLOWED_TYPES = ["audio/", "image/", "video/"];
 /** 40MB. A music bed is a few; nothing legitimate here is larger. */
 const MAX_BYTES = 40 * 1024 * 1024;
 
+/**
+ * Generate audio rather than search for it.
+ *
+ * A catalogue answers "what is the closest whoosh somebody has uploaded";
+ * this answers "make me a whoosh". For sound effects that is strictly better —
+ * the effect matches its description exactly, and a generated sound carries no
+ * licence, which is the one thing that makes catalogue audio awkward in a
+ * client's video.
+ *
+ * Deliberately its own action rather than a provider in the registry. Every
+ * provider there answers a *search*, returning results to choose between; this
+ * returns one thing that did not exist a second ago, and pretending that is a
+ * search would mean a result list of one and a Place button that regenerates.
+ */
+const generateSchema = z.object({
+  action: z.literal("generate"),
+  kind: z.enum(["sfx", "music"]),
+  prompt: z.string().trim().min(2).max(400),
+  /** Seconds. Clamped by the provider to what it will actually produce. */
+  seconds: z.number().min(0.5).max(300).optional(),
+  filename: z.string().trim().max(60).optional(),
+});
+
 export async function POST(req: Request) {
   // `acquire` throws when the bucket is empty rather than returning a status,
   // which is the convention every other route here follows.
@@ -129,6 +157,54 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as Record<string, unknown>;
+
+    if (body.action === "generate") {
+      const input = generateSchema.parse(body);
+      if (!elevenLabsConfigured()) {
+        return NextResponse.json(
+          {
+            success: false as const,
+            error: {
+              code: "missing_key",
+              message: "Generated audio needs ELEVENLABS_API_KEY on the server.",
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      const made =
+        input.kind === "sfx"
+          ? await generateSfx(input.prompt, input.seconds ?? 2, req.signal)
+          : await generateMusic(input.prompt, input.seconds ?? 30, req.signal);
+
+      const bytes = new Uint8Array(made.bytes);
+      if (bytes.byteLength > MAX_BYTES) {
+        return NextResponse.json(
+          {
+            success: false as const,
+            error: { code: "provider_error", message: "That came back too large to use." },
+          },
+          { status: 502 }
+        );
+      }
+
+      const asset = putAsset(
+        bytes,
+        made.contentType,
+        input.filename || input.prompt.slice(0, 40)
+      );
+      return NextResponse.json({
+        success: true as const,
+        url: assetUrl(asset),
+        contentType: made.contentType,
+        // Named so the log line and the credit block can say where it came
+        // from. A generated sound owes no attribution, and saying so is more
+        // use than saying nothing.
+        generated: true as const,
+        provider: "elevenlabs",
+      });
+    }
 
     if (body.action === "fetch") {
       const input = fetchSchema.parse(body);

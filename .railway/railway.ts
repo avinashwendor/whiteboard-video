@@ -14,6 +14,21 @@ export default defineRailway(() => {
       DEEPGRAM_API_KEY: preserve(),
       OMEGA_API_KEY: preserve(),
       TAVILY_API_KEY: preserve(),
+      POLLINATIONS_API_KEY: preserve(),
+
+      // Audio and b-roll. Each one is optional and each one is reported
+      // through /api/capabilities, so a deployment missing any of them tells
+      // the agent not to plan that operation rather than failing at execution.
+      //
+      //   ELEVENLABS — speech, plus generated sound effects and music.
+      //   FREESOUND  — the sound-effect catalogue, used when generation is off.
+      //   PEXELS     — stock video for moving b-roll.
+      //
+      // `preserve()` reads whatever is set in Railway without writing it here,
+      // which is what keeps every one of these out of the repository.
+      ELEVENLABS_API_KEY: preserve(),
+      FREESOUND_API_KEY: preserve(),
+      PEXELS_API_KEY: preserve(),
 
       // Object storage holding the locally-exported ONNX speech models. The
       // weights are far too large for the repository — the Telugu decoder alone
