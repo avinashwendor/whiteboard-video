@@ -56,24 +56,30 @@ export async function flushProjectAutosave(): Promise<void> {
 }
 
 /**
- * Pull the bytes back out of every `blob:` overlay image.
+ * Pull the bytes back out of every `blob:` overlay source.
  *
  * Those URLs die with the page, so the composition alone would restore an
  * uploaded picture as a placeholder. A fetch of a live blob URL is a memory
  * read, not a network call.
+ *
+ * Images and clips both. B-roll fetched from a catalogue is served from
+ * `/api/asset`, which is same-origin and survives a reload on its own, so this
+ * only bites something dragged in from disk — but writing it for images alone
+ * was the shape of a trap rather than a decision, and the fix is one predicate.
  */
 async function collectAssets(
   elements: ReturnType<typeof useOverlayStore.getState>["elements"]
 ): Promise<Record<string, Blob> | undefined> {
   const wanted = elements.filter(
-    (e) => e.kind === "image" && e.src.startsWith("blob:")
+    (e) =>
+      (e.kind === "image" || e.kind === "video") && e.src.startsWith("blob:")
   );
   if (!wanted.length) return undefined;
 
   const assets: Record<string, Blob> = {};
   await Promise.all(
     wanted.map(async (element) => {
-      if (element.kind !== "image") return;
+      if (element.kind !== "image" && element.kind !== "video") return;
       try {
         const res = await fetch(element.src);
         assets[element.id] = await res.blob();

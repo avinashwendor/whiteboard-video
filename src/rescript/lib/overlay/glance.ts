@@ -26,7 +26,7 @@ import type { OutputTimeline } from "./timeline";
 import { outputToOriginal } from "./timeline";
 import { paintFrame } from "./frame";
 import { subtitleBand } from "./layout";
-import { preloadComposition } from "./render";
+import { preloadComposition, seekClips } from "./render";
 import { ensureTypefaces } from "./fonts";
 import {
   readFrame,
@@ -398,7 +398,9 @@ export async function surveyFootage(
       const source = outputToOriginal(at, timeline.keepRanges);
       if (!Number.isFinite(source)) continue;
 
-      const sources = { live: await frameAt(video, mediaUrl, source), freeze: null };
+      const live = await frameAt(video, mediaUrl, source);
+      await seekClips(composition, at);
+      const sources = { live, freeze: null };
       try {
         gridCtx.clearRect(0, 0, SAMPLE_EDGE, SAMPLE_EDGE);
         paintFrame(

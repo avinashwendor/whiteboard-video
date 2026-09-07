@@ -166,7 +166,13 @@ export function checkCraft(ops: AgentOp[], ctx: CraftContext): CraftFinding[] {
   const minutes = Math.max(ctx.duration, 1) / 60;
 
   /* density */
-  const placed = ops.filter((op) => TEXT_OPS.has(op.op) || op.op === "addImage" || op.op === "addShape");
+  const placed = ops.filter(
+    (op) =>
+      TEXT_OPS.has(op.op) ||
+      op.op === "addImage" ||
+      op.op === "addBroll" ||
+      op.op === "addShape"
+  );
   // A plan that reframes to vertical is judged as a vertical cut, whatever the
   // footage arrived as — the ceiling is a property of the deliverable.
   const goesVertical = ops.some(
@@ -253,6 +259,28 @@ export function checkCraft(ops: AgentOp[], ctx: CraftContext): CraftFinding[] {
       rule: "effects",
       severity: "warning",
       message: "An energetic transition mixed with others reads as an accident rather than a choice.",
+    });
+  }
+
+  /* b-roll costs something */
+  //
+  // A still is a fetch and a draw. A clip is a download, a decoder, and a seek
+  // on every exported frame — so it is worth two or three times in a video and
+  // not eight, and the limit is about the export as much as about taste. The
+  // density rule above already counts them; this is the one that says *why*
+  // they are different from a photograph.
+  const brolls = ops.filter((op) => op.op === "addBroll");
+  if (brolls.length > 4) {
+    findings.push({
+      rule: "broll",
+      severity: "error",
+      message: `${brolls.length} moving b-roll clips. Each one is a download and a seek per exported frame — two or three is a produced video, this is a montage.`,
+    });
+  } else if (brolls.length > 2 && ctx.duration < 60) {
+    findings.push({
+      rule: "broll",
+      severity: "warning",
+      message: `${brolls.length} clips in ${ctx.duration.toFixed(0)}s. On something this short they will run into each other.`,
     });
   }
 

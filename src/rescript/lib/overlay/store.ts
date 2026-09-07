@@ -13,6 +13,7 @@ import {
   type ImageElement,
   type OverlayElement,
   type ShapeElement,
+  type VideoElement,
   type SubtitleCue,
   type SubtitleStyle,
   type TextElement,
@@ -29,7 +30,7 @@ import {
 import { normaliseShots } from "./shots";
 import { withGradeDefaults, type GradeSpec } from "./grade";
 import type { AudioClip } from "./audio";
-import { forgetImage, loadImage } from "./render";
+import { forgetClip, forgetImage, loadClip, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
 
 /**
@@ -91,6 +92,7 @@ export interface OverlayState extends Composition {
   addElement: (element: OverlayElement) => string;
   addText: (partial?: Partial<TextElement>) => string;
   addImage: (src: string, partial?: Partial<ImageElement>) => string;
+  addVideo: (src: string, partial?: Partial<VideoElement>) => string;
   addShape: (partial?: Partial<ShapeElement>) => string;
   updateElement: (id: string, patch: Partial<OverlayElement>) => void;
   /**
@@ -384,6 +386,64 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       return get().addElement(element);
     },
 
+    /**
+     * Cut a clip of other footage in over the video.
+     *
+     * The source length is not known when the element is made — it comes from
+     * the decoder — so it is written back once the clip loads. Everything that
+     * needs it (looping, and knowing whether a trim is inside the material)
+     * treats 0 as "not yet known" and behaves as though the clip were long
+     * enough, which is the safe reading: the alternative is a clip that loops
+     * every frame because its length reads as zero.
+     */
+    addVideo: (src, partial = {}) => {
+      void loadClip(src)
+        .then((el) => {
+          const length = Number.isFinite(el.duration) ? el.duration : 0;
+          if (!length) return;
+          // Found by id rather than captured, because the element may have been
+          // moved, retimed or deleted while the clip was loading.
+          const found = get().elements.find(
+            (e) => e.kind === "video" && e.src === src && e.sourceDuration === 0
+          );
+          if (found) get().updateElement(found.id, { sourceDuration: length });
+        })
+        .catch(() => null);
+
+      const aspect = get().aspect;
+      const w = partial.rect?.w ?? 0.34;
+      const h = partial.rect?.h ?? w * aspect;
+      const element: VideoElement = {
+        id: nextId("video"),
+        kind: "video",
+        name: partial.name ?? "Clip",
+        start: partial.start ?? 0,
+        end: partial.end ?? (partial.start ?? 0) + 4,
+        rect: partial.rect ?? { x: 0.06, y: 0.1, w, h: Math.min(h, 0.6) },
+        rotation: 0,
+        opacity: 1,
+        z: 0,
+        locked: false,
+        hidden: false,
+        enter: partial.enter ?? { kind: "fade", duration: 0.35, easing: "easeOut" },
+        exit: partial.exit ?? { ...DEFAULT_EXIT },
+        src,
+        trimIn: 0,
+        sourceDuration: 0,
+        // `cover` unlike a still: stock footage arrives in whatever shape the
+        // shooter framed it, and letterboxing a b-roll insert inside its own
+        // box is the thing that makes it look like a slideshow.
+        fit: "cover",
+        radius: 0.03,
+        shadow: true,
+        rate: 1,
+        loop: true,
+        muted: true,
+        ...partial,
+      };
+      return get().addElement(element);
+    },
+
     addShape: (partial = {}) => {
       // A mark is a drawn gesture and a rectangle is a plate to put something
       // on, so their defaults are opposites: one wants ink and no fill, the
@@ -453,14 +513,18 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       const gone = elements.find((e) => e.id === id);
       commit({ elements: elements.filter((e) => e.id !== id) });
       if (selectedId === id) set({ selectedId: null });
-      // Only drop the decoded bitmap when nothing else points at it.
-      if (gone?.kind === "image") {
+      // Only drop the decoded media when nothing else points at it. A clip
+      // matters more here than a still does: a decoded video holds a buffer
+      // pool rather than one bitmap, and a handful of leaked ones is the
+      // difference between a long session and a killed tab.
+      if (gone?.kind === "image" || gone?.kind === "video") {
         const stillUsed = get().elements.some(
-          (e) => e.kind === "image" && e.src === gone.src
+          (e) => (e.kind === "image" || e.kind === "video") && e.src === gone.src
         );
         if (!stillUsed && gone.src.startsWith("blob:")) {
           URL.revokeObjectURL(gone.src);
-          forgetImage(gone.src);
+          if (gone.kind === "image") forgetImage(gone.src);
+          else forgetClip(gone.src);
         }
       }
     },
@@ -746,10 +810,11 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       // project switch leaks the whole overlay image set for the life of the
       // tab — and a decoded 4K still is not a small thing to leak.
       for (const element of get().elements) {
-        if (element.kind !== "image") continue;
+        if (element.kind !== "image" && element.kind !== "video") continue;
         if (!element.src.startsWith("blob:")) continue;
         URL.revokeObjectURL(element.src);
-        forgetImage(element.src);
+        if (element.kind === "image") forgetImage(element.src);
+        else forgetClip(element.src);
       }
       const fresh = emptyComposition();
       set({

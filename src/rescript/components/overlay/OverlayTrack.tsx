@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Camera, Captions, Image as ImageIcon, Shapes, Type } from "lucide-react";
+import { Camera, Captions, Film, Image as ImageIcon, Shapes, Type } from "lucide-react";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import {
   outputRangeToSource,
@@ -46,12 +46,19 @@ const TONE: Record<OverlayElement["kind"], { bar: string; ring: string }> = {
     bar: "bg-amber-500/85 hover:bg-amber-500",
     ring: "ring-amber-300 dark:ring-amber-400",
   },
+  // Distinct from `image`, which is the still version of the same idea: on a
+  // dense timeline the only thing that tells them apart is the colour.
+  video: {
+    bar: "bg-sky-500/85 hover:bg-sky-500",
+    ring: "ring-sky-300 dark:ring-sky-400",
+  },
 };
 
 const ICON: Record<OverlayElement["kind"], typeof Type> = {
   text: Type,
   image: ImageIcon,
   shape: Shapes,
+  video: Film,
 };
 
 export interface OverlayTrackProps {

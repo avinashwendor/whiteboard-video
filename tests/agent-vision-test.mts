@@ -91,7 +91,7 @@ const base: RescriptAgentContext = {
   transitions: [],
   transcript: "[0:04] We shipped it three times faster than last year.",
   aspect: 16 / 9,
-  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
 };
 
 const PLAN = JSON.stringify({
@@ -301,6 +301,7 @@ async function ask(call: object, context: RescriptAgentContext) {
     photoSearch: true,
     music: false,
     sfx: false,
+    video: false,
   });
   assert(/Music \(addMusic\): NOT configured/.test(off), "the brief does not rule out music");
   assert(
@@ -313,9 +314,15 @@ async function ask(call: object, context: RescriptAgentContext) {
     photoSearch: true,
     music: true,
     sfx: true,
+    video: true,
   });
   assert(/Music \(addMusic\): available/.test(on), "a configured deployment is told so");
   assert(/Sound effects \(autoSfx, addSfx\): available/.test(on), "and for effects too");
+  assert(
+    /Moving b-roll \(addBroll\): NOT configured/.test(off),
+    "the brief does not rule out moving b-roll"
+  );
+  assert(/Moving b-roll \(addBroll\): available/.test(on), "nor allow it when it is there");
   console.log("✓ the agent is told what this deployment can actually reach");
 }
 

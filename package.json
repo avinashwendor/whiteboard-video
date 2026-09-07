@@ -46,7 +46,8 @@
     "test:sfx": "tsx tests/sfx-test.ts",
     "test:agentvision": "tsx tests/agent-vision-test.mts",
     "test:camera": "tsx tests/camera-variety-test.ts",
-    "test:kenburns": "tsx tests/ken-burns-test.ts"
+    "test:kenburns": "tsx tests/ken-burns-test.ts",
+    "test:broll": "tsx tests/broll-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

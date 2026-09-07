@@ -5,7 +5,7 @@ import { getFFmpeg } from "../ffmpeg";
 import { paintFrame } from "./frame";
 import { audibleClips, type AudioClip } from "./audio";
 import { buildMixGraph } from "./mix";
-import { preloadComposition } from "./render";
+import { preloadComposition, seekClips } from "./render";
 import { ensureTypefaces } from "./fonts";
 import {
   transitionAt,
@@ -309,6 +309,10 @@ export async function composeOverlays({
 
       const t = i / fps;
       await seekTo(video, Math.min(t, Math.max(0, duration - 1e-3)));
+      // B-roll is positioned by awaiting, never by hoping. The preview can
+      // paint a clip a frame behind the playhead and nobody sees it; a frame
+      // from the wrong moment here is in the file forever.
+      await seekClips(composition, t);
 
       const active = transitionAt(t, timeline, composition.transitions);
       const freeze =

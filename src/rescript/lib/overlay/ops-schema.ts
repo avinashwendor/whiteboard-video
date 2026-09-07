@@ -194,6 +194,30 @@ export const addImageOp = z.object({
   exit: animationField.optional(),
 });
 
+/**
+ * A moving b-roll insert.
+ *
+ * Separate from `addImage` rather than a flag on it, because the decision is
+ * separate: a photograph of a bridge and three seconds of traffic crossing it
+ * are different edits, and which one is right depends on whether the thing being
+ * talked about *moves*. Collapsing them into one operation with a boolean is how
+ * you get a model that always picks the default.
+ */
+export const addBrollOp = z.object({
+  op: z.literal("addBroll"),
+  /** What to find. Plain words: this searches a stock catalogue, not a model. */
+  query: z.string().min(2).max(200),
+  start: seconds.optional(),
+  end: seconds.optional(),
+  duration: z.number().min(0.1).max(600).optional(),
+  position: position.optional(),
+  size: z.enum(SIZES).optional(),
+  /** Playback rate. 0.5-1 reads as deliberate; above 1 reads as a mistake. */
+  rate: z.number().min(0.25).max(2).optional(),
+  enter: animationField.optional(),
+  exit: animationField.optional(),
+});
+
 export const addShapeOp = z.object({
   op: z.literal("addShape"),
   shape: z.enum(["rect", "ellipse", "line", "path"]).default("rect"),
@@ -674,6 +698,7 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   addMusicOp,
   setMusicLevelOp,
   removeMusicOp,
+  addBrollOp,
   addSfxOp,
   autoSfxOp,
   removeSfxOp,

@@ -52,6 +52,7 @@ export function GET() {
         sfx: providersFor("sfx").length > 0,
         image: providersFor("image").length > 0,
         gif: providersFor("gif").length > 0,
+        video: providersFor("video").length > 0,
       },
     },
     voice: (() => {

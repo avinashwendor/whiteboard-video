@@ -101,6 +101,20 @@ ${describeTypefaces()}
   alone unless you want a specific direction; "none" is almost always wrong, because a still held
   motionless over moving footage is the clearest sign a picture was pasted on rather than cut in.
 
+{"op":"addBroll","query":"city traffic at night","start":18,"duration":3.5,"position":"right","size":"m","rate":0.8}
+  A CLIP of other footage, cut in over the video. The moving version of the same idea, from a stock
+  catalogue — plain search words, not a prompt.
+  Choose between them by whether the thing being talked about MOVES. A logo, a chart, a headshot, a
+  building, a product on a table: those are stills, and addImage is better because it is instant and
+  costs nothing. Traffic, rain, a crowd, a machine running, hands working, water, a city: those are
+  clips, and a still of any of them reads as a slide.
+  "rate" slows it down. 0.7-0.9 is the whole trick with a short insert — three seconds of slightly slow
+  footage reads as deliberate, and the same three seconds at speed reads as clipped. Above 1 is almost
+  always wrong.
+  It costs a download, so it is worth it two or three times in a video, not eight. Everything the still
+  rules say about placement applies unchanged: to a side or a corner, never over the speaker's face, and
+  hold it only for as long as they are talking about the thing.
+
 {"op":"addShape","shape":"rect","position":"bottom","size":"l","fill":"rgba(0,0,0,0.6)"}
   A plain block — usually a scrim so text over busy footage stays readable. shape: rect ellipse line
 
@@ -447,8 +461,17 @@ not.
 
 B-ROLL
 When the speaker names something concrete and visual — a place, an object, a company, a chart, a person —
-put a picture over it for the seconds they are talking about it. Use "query" for things that exist and can
-be photographed and "prompt" for things that cannot. Two or three across a couple of minutes is a produced
+put a picture over it for the seconds they are talking about it. Three choices, and they are not
+interchangeable:
+  · addBroll — the thing MOVES. Traffic, weather, a crowd, a machine, hands working, water. A still of
+    any of those is a slide, and everyone can tell.
+  · addImage with "query" — the thing exists, can be photographed, and holds still. A building, a logo,
+    a product, a person, a chart.
+  · addImage with "prompt" — the thing cannot be photographed at all. A diagram, an illustration, a
+    metaphor, anything they asked you to draw.
+A photograph of something real beats generated art whenever the thing exists; a clip beats a photograph
+whenever the thing moves; and doing nothing beats all three when the speaker has not named anything
+concrete, which is most of the time. Two or three across a couple of minutes is a produced
 video; one every ten seconds is a slideshow. Never cover the speaker's face: use a corner or a side, size
 "s" or "m", and let it come and go with a pop or a fade. Hold a picture for as long as they are talking
 about the thing — two to four seconds — and take it away when they move on. A photograph of something real
@@ -804,6 +827,8 @@ export interface RescriptAgentContext {
     photoSearch: boolean;
     music: boolean;
     sfx: boolean;
+    /** Stock video, for b-roll that moves. */
+    video: boolean;
   };
 }
 
@@ -1328,7 +1353,7 @@ function describe(
       context.vision?.length
         ? describeVision(context.vision, context.aspect ?? 16 / 9)
         : "",
-      `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}\n  - Music (addMusic): ${context.can.music ? "available" : "NOT configured — do not plan it"}\n  - Sound effects (autoSfx, addSfx): ${context.can.sfx ? "available" : "NOT configured — do not plan it, and say so in the summary if they asked for sound"}`,
+      `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}\n  - Music (addMusic): ${context.can.music ? "available" : "NOT configured — do not plan it"}\n  - Sound effects (autoSfx, addSfx): ${context.can.sfx ? "available" : "NOT configured — do not plan it, and say so in the summary if they asked for sound"}\n  - Moving b-roll (addBroll): ${context.can.video ? "available" : "NOT configured — do not plan it; use addImage with a \"query\" for a still instead"}`,
       transcriptBlock,
     ]
       .filter(Boolean)

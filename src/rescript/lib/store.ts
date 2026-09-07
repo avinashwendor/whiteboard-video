@@ -426,7 +426,7 @@ function rehydrateComposition(record: ProjectRecord): Composition {
   return {
     ...composition,
     elements: composition.elements.map((element) => {
-      if (element.kind !== "image") return element;
+      if (element.kind !== "image" && element.kind !== "video") return element;
       if (!element.src.startsWith("blob:")) return element;
       const bytes = assets[element.id];
       if (!bytes) return element;

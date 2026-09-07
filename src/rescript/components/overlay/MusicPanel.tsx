@@ -46,8 +46,18 @@ interface Result {
 /** A bed runs under everything unless told otherwise. */
 const FULL_LENGTH_KINDS = new Set<AudioKind>(["music"]);
 
+/**
+ * What this panel can search.
+ *
+ * Video is not an `AudioKind` and never will be, but the *panel* is a media
+ * search — one query box, one licence-bearing result list, one Place button —
+ * and b-roll wants exactly that. Splitting it into a second panel would mean
+ * two copies of the licence handling, which is the part that must not drift.
+ */
+type SearchKind = AudioKind | "video";
+
 export default function MusicPanel() {
-  const [kind, setKind] = useState<AudioKind>("music");
+  const [kind, setKind] = useState<SearchKind>("music");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Result[]>([]);
   const [busy, setBusy] = useState(false);
@@ -61,6 +71,7 @@ export default function MusicPanel() {
 
   const clips = useOverlayStore((s) => s.audio);
   const addAudio = useOverlayStore((s) => s.addAudio);
+  const addVideo = useOverlayStore((s) => s.addVideo);
   const updateAudio = useOverlayStore((s) => s.updateAudio);
   const removeAudio = useOverlayStore((s) => s.removeAudio);
   const timeline = useOutputTimeline();
@@ -159,7 +170,24 @@ export default function MusicPanel() {
           throw new Error(json.error?.message ?? "That file couldn't be fetched.");
         }
 
-        const isBed = FULL_LENGTH_KINDS.has(kind);
+        if (kind === "video") {
+          // Three seconds from the playhead: a b-roll insert is a punctuation
+          // mark, and a clip that runs its full fifteen seconds over a talking
+          // head has stopped being b-roll and become the video.
+          const start = playhead;
+          const end = Math.min(timeline.duration, start + 3.5);
+          addVideo(json.url, {
+            name: query.trim().slice(0, 28) || result.title.slice(0, 28),
+            query: query.trim(),
+            start,
+            end: Math.max(start + 0.5, end),
+            // Down the right by default, clear of a centred speaker.
+            rect: { x: 0.56, y: 0.1, w: 0.38, h: (0.38 * aspect) / (16 / 9) },
+          });
+          return;
+        }
+
+        const isBed = FULL_LENGTH_KINDS.has(kind as AudioKind);
         // A bed runs the length of the video from where you are; an effect is a
         // moment. Placing a sting across the whole cut is never what anyone
         // meant, and placing a bed as a three-second snippet never is either.
@@ -169,13 +197,13 @@ export default function MusicPanel() {
           : Math.min(timeline.duration, playhead + (result.duration ?? 2));
 
         addAudio({
-          kind,
+          kind: kind as AudioKind,
           name: `${result.title} — ${result.artist}`,
           src: json.url,
           start,
           end: Math.max(start + 0.2, end),
           trimIn: 0,
-          gain: defaultGainFor(kind),
+          gain: defaultGainFor(kind as AudioKind),
           // A bed that starts and stops dead is the giveaway of an automatic
           // edit; a sting does not want a fade at all.
           fadeIn: isBed ? 1.5 : 0,
@@ -197,15 +225,16 @@ export default function MusicPanel() {
         setPlacing(null);
       }
     },
-    [addAudio, kind, playhead, timeline.duration]
+    [addAudio, addVideo, aspect, kind, query, playhead, timeline.duration]
   );
 
   const credits = useMemo(() => creditText(clips), [clips]);
   const mediaKind = useEditorStore((s) => s.mediaKind);
 
-  const KINDS: { value: AudioKind; label: string }[] = [
+  const KINDS: { value: SearchKind; label: string }[] = [
     { value: "music", label: "Music" },
     { value: "sfx", label: "Effects" },
+    { value: "video", label: "B-roll" },
   ];
 
   /**
@@ -280,7 +309,9 @@ export default function MusicPanel() {
           <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-600">
             {kind === "sfx"
               ? "Sound effects need FREESOUND_API_KEY on the server."
-              : "No catalogue is configured for this."}
+              : kind === "video"
+                ? "B-roll clips need PEXELS_API_KEY on the server. Free from pexels.com/api."
+                : "No catalogue is configured for this."}
           </p>
         )}
         <div className="mt-2 flex items-center gap-1.5">
@@ -288,7 +319,13 @@ export default function MusicPanel() {
           <TextInput
             value={query}
             onChange={setQuery}
-            placeholder={kind === "music" ? "calm piano, upbeat…" : "whoosh, click…"}
+            placeholder={
+              kind === "music"
+                ? "calm piano, upbeat…"
+                : kind === "sfx"
+                  ? "whoosh, click…"
+                  : "city traffic, rain, hands typing…"
+            }
           />
           <Button onClick={() => void search()} disabled={busy || !query.trim()}>
             {busy ? <Loader2 size={12} className="animate-spin" /> : "Go"}
@@ -307,18 +344,31 @@ export default function MusicPanel() {
           <ul className="divide-y divide-zinc-100 overflow-hidden rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-700">
             {results.map((result) => (
               <li key={`${result.provider}-${result.id}`} className="flex items-center gap-1 p-1.5">
-                <button
-                  type="button"
-                  title="Listen"
-                  onClick={() => audition(result)}
-                  className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                >
-                  {auditioning?.dataset.id === result.id ? (
-                    <Square size={12} />
-                  ) : (
-                    <Play size={12} />
-                  )}
-                </button>
+                {result.kind === "video" ? (
+                  // A clip's preview is its poster frame, not a sound. Feeding
+                  // an MP4 to `new Audio` decodes an audio track most stock
+                  // footage does not have, and reports "that preview wouldn't
+                  // play" for a clip that is perfectly fine.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={result.previewUrl}
+                    alt=""
+                    className="h-7 w-10 shrink-0 rounded-md bg-zinc-200 object-cover dark:bg-zinc-800"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    title="Listen"
+                    onClick={() => audition(result)}
+                    className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  >
+                    {auditioning?.dataset.id === result.id ? (
+                      <Square size={12} />
+                    ) : (
+                      <Play size={12} />
+                    )}
+                  </button>
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[11px] font-medium text-zinc-800 dark:text-zinc-100">
                     {result.title}

@@ -96,7 +96,7 @@ export const DEFAULT_EXIT: AnimationSpec = {
   easing: "easeIn",
 };
 
-export type ElementKind = "text" | "image" | "shape";
+export type ElementKind = "text" | "image" | "shape" | "video";
 
 interface Common {
   id: string;
@@ -219,7 +219,64 @@ export interface ShapeElement extends Common {
   pathName?: string;
 }
 
-export type OverlayElement = TextElement | ImageElement | ShapeElement;
+/**
+ * A clip of other footage, cut in over the main video.
+ *
+ * B-roll, in the sense an editor means it: a second picture that plays. The
+ * still version (`ImageElement`) covers "put a photo of the bridge up", and it
+ * is the right answer surprisingly often — but a shot of traffic moving over a
+ * line about traffic is a different thing from a photograph of it, and until
+ * now this editor could not do the first at all.
+ *
+ * Deliberately its own kind rather than a flag on `ImageElement`. A still is
+ * drawn; this has to be *seeked* before it can be drawn, which is a different
+ * contract for every caller — the preview seeks opportunistically and paints
+ * whatever arrived, the exporter has to await each one, and neither of those is
+ * a thing you want to discover from a boolean.
+ */
+export interface VideoElement extends Common {
+  kind: "video";
+  /**
+   * Same-origin URL, for the same reason images are: a cross-origin frame
+   * taints the canvas and the export throws at the first `VideoFrame`.
+   */
+  src: string;
+  /** What was searched for, so the layer list says something useful. */
+  query?: string;
+  /** Seconds into the source that the element's `start` corresponds to. */
+  trimIn: number;
+  /** Length of the source, once known. 0 until it has loaded. */
+  sourceDuration: number;
+  fit: ImageFit;
+  /** Fraction of the shorter side. */
+  radius: number;
+  shadow: boolean;
+  /**
+   * Play it back at a different rate. 1 is as shot.
+   *
+   * B-roll is usually cut in for a few seconds out of a clip that runs much
+   * longer, and slowing it slightly is the oldest trick there is for making a
+   * short insert feel deliberate rather than clipped.
+   */
+  rate: number;
+  /** Repeat when the element outlives its source. */
+  loop: boolean;
+  /**
+   * Whether the clip's own audio is heard.
+   *
+   * Off, always, at present. B-roll under a talking head with its own sound up
+   * is the most reliable way to ruin a mix, and the audio graft in `compose.ts`
+   * has one video track to work with — so this is honest about a limit rather
+   * than pretending to a control that does nothing.
+   */
+  muted: true;
+}
+
+export type OverlayElement =
+  | TextElement
+  | ImageElement
+  | ShapeElement
+  | VideoElement;
 
 /* -------------------------------- subtitles -------------------------------- */
 

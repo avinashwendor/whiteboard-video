@@ -47,7 +47,13 @@ export interface PlanWorld {
   subtitlePosition: "top" | "center" | "bottom";
   /** The transcript of the current cut, for phrase checks. */
   transcript: string;
-  can: { generateImage: boolean; photoSearch: boolean; music: boolean; sfx: boolean };
+  can: {
+    generateImage: boolean;
+    photoSearch: boolean;
+    music: boolean;
+    sfx: boolean;
+    video: boolean;
+  };
 }
 
 /** Which third of the frame a named position lands in. */
@@ -213,6 +219,17 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
 
       case "addImage": {
         elements += 1;
+        // The same check `addText` has had all along, and its absence here was
+        // an oversight rather than a decision: a picture planned past the end
+        // of the cut is fetched, paid for, placed where nobody will see it, and
+        // reported as a success.
+        if (op.start !== undefined && op.start >= remaining) {
+          problems.push(
+            cutSeen
+              ? `addImage starts at ${op.start.toFixed(1)}s, but after the cuts in this plan the video is at most ${remaining.toFixed(1)}s long.`
+              : `addImage starts at ${op.start.toFixed(1)}s but the video is ${remaining.toFixed(1)}s long.`
+          );
+        }
         if (!op.prompt && !op.query) {
           problems.push("addImage needs either a prompt (to generate) or a query (to search), and has neither.");
         }
@@ -230,6 +247,28 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
         addPlaced(op.start, op.end, op.duration, op.position, "image");
         break;
       }
+
+      case "addBroll":
+        elements += 1;
+        if (op.start !== undefined && op.start >= remaining) {
+          problems.push(
+            cutSeen
+              ? `addBroll "${op.query.slice(0, 30)}" starts at ${op.start.toFixed(1)}s, but after the cuts in this plan the video is at most ${remaining.toFixed(1)}s long.`
+              : `addBroll "${op.query.slice(0, 30)}" starts at ${op.start.toFixed(1)}s but the video is ${remaining.toFixed(1)}s long.`
+          );
+          break;
+        }
+        if (!world.can.video) {
+          problems.push(
+            "addBroll — no stock-video catalogue is configured on this deployment. Use addImage with a \"query\" for a still instead."
+          );
+          break;
+        }
+        // Recorded exactly as an image is: a clip takes up the same space and
+        // collides with the same things, and the only difference between them
+        // is that one moves.
+        addPlaced(op.start, op.end, op.duration, op.position, "b-roll");
+        break;
 
       case "addShape":
         elements += 1;

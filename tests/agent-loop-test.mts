@@ -36,7 +36,7 @@ const context: RescriptAgentContext = {
     longestPauses: [], clipCount: 1, runsLong: false,
   },
   aspect: 16 / 9,
-  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
 };
 
 const SAME_LOOK = JSON.stringify({

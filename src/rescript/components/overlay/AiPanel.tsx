@@ -374,6 +374,7 @@ export default function AiPanel() {
     photoSearch: false,
     music: false,
     sfx: false,
+    video: false,
   });
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
   /** "" means the server picks, which is what this panel always did before. */
@@ -400,6 +401,7 @@ export default function AiPanel() {
           // cannot disagree about whether there is a catalogue to search.
           music: kinds.music === true,
           sfx: kinds.sfx === true,
+          video: kinds.video === true,
         });
       })
       .catch(() => {

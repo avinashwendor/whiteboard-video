@@ -16,7 +16,7 @@
  * the ones that solve the actual problem — music you are allowed to publish.
  */
 
-export type MediaKind = "music" | "sfx" | "image" | "gif";
+export type MediaKind = "music" | "sfx" | "image" | "gif" | "video";
 
 /**
  * What a licence obliges, reduced to the two questions that change behaviour.

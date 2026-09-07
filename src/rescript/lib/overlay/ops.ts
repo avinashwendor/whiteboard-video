@@ -229,7 +229,7 @@ interface FoundMedia {
  */
 async function findMedia(
   query: string,
-  kind: "music" | "sfx",
+  kind: "music" | "sfx" | "video",
   signal?: AbortSignal
 ): Promise<FoundMedia | null> {
   try {
@@ -550,6 +550,42 @@ async function runOne(
         message: op.prompt
           ? `Generated “${op.prompt.slice(0, 40)}”`
           : `Found a photo of “${op.query!.slice(0, 40)}”`,
+      };
+    }
+
+    case "addBroll": {
+      const { start, end } = resolveWindow(op, ctx);
+      const w = IMAGE_SIZE[op.size ?? "m"];
+      // Sixteen-by-nine inside its own box: stock footage is shot wide, and a
+      // square hole for a wide clip crops the thing that was searched for.
+      const rect = resolveRect(op.position, w, (w * ctx.aspect) / (16 / 9), "right");
+
+      const found = await findMedia(op.query, "video", signal);
+      if (!found) {
+        return {
+          ok: false,
+          message: `No usable clip came back for “${op.query}”. A broader word usually helps.`,
+        };
+      }
+      const src = await proxyMedia(found.downloadUrl, found.title, signal);
+      if (!src) {
+        return { ok: false, message: `That clip could not be fetched.` };
+      }
+
+      overlay.addVideo(src, {
+        name: op.query.slice(0, 28),
+        query: op.query,
+        start,
+        end,
+        rect,
+        rate: op.rate ?? 1,
+        enter: animation(op.enter, "fade"),
+        exit: animation(op.exit, "fade"),
+      });
+      const owed = found.licence.attributionRequired ? ", credit required" : "";
+      return {
+        ok: true,
+        message: `Cut in “${op.query.slice(0, 40)}” — ${found.artist} (${found.licence.name}${owed})`,
       };
     }
 

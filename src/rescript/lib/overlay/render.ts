@@ -23,6 +23,7 @@ import type {
   Composition,
   ImageElement,
   ImageMotion,
+  VideoElement,
   OverlayElement,
   ShapeElement,
   SubtitleCue,
@@ -102,20 +103,192 @@ export function imageFailed(src: string): boolean {
   return failed.has(src);
 }
 
-/** Warm every image in a composition. Used before an export starts. */
+/** Warm every image and clip in a composition. Used before an export starts. */
 export async function preloadComposition(c: Composition): Promise<void> {
-  const srcs = c.elements
+  const images = c.elements
     .filter((e): e is ImageElement => e.kind === "image")
     .map((e) => e.src);
-  await Promise.all(
-    srcs.map((src) => loadImage(src).catch(() => null))
-  );
+  const videos = c.elements
+    .filter((e): e is VideoElement => e.kind === "video")
+    .map((e) => e.src);
+  await Promise.all([
+    ...images.map((src) => loadImage(src).catch(() => null)),
+    ...videos.map((src) => loadClip(src).catch(() => null)),
+  ]);
 }
 
 export function forgetImage(src: string) {
   images.delete(src);
   pending.delete(src);
   failed.delete(src);
+}
+
+
+/* ------------------------------ video registry ------------------------------ */
+
+/**
+ * B-roll clips, decoded and held.
+ *
+ * The same shape as the image registry above and a different contract, which is
+ * the whole reason it is separate: an image is *drawn*, a clip has to be
+ * *seeked first*. Everything that composites a frame therefore has to position
+ * these before it paints, and the two callers do it differently on purpose —
+ * the preview sets `currentTime` and paints whatever has arrived, because a
+ * preview that awaited a seek would drop to the seek rate; the exporter awaits
+ * every one, because a frame painted from the wrong moment is in the file
+ * forever.
+ *
+ * `muted` and `playsInline` are set on creation rather than at play time: iOS
+ * refuses to decode an unmuted video without a gesture, and the failure is a
+ * black element rather than an error.
+ */
+const clips = new Map<string, HTMLVideoElement>();
+const clipsPending = new Map<string, Promise<HTMLVideoElement>>();
+const clipsFailed = new Set<string>();
+
+export function loadClip(src: string): Promise<HTMLVideoElement> {
+  const done = clips.get(src);
+  if (done) return Promise.resolve(done);
+  const inflight = clipsPending.get(src);
+  if (inflight) return inflight;
+
+  const p = new Promise<HTMLVideoElement>((resolve, reject) => {
+    const el = document.createElement("video");
+    el.muted = true;
+    el.playsInline = true;
+    el.preload = "auto";
+    // Never played: every frame comes from a seek, so autoplay policy, which is
+    // about playback, never applies.
+    el.onloadeddata = () => {
+      clips.set(src, el);
+      clipsPending.delete(src);
+      resolve(el);
+    };
+    el.onerror = () => {
+      clipsPending.delete(src);
+      clipsFailed.add(src);
+      reject(new Error(`Could not load clip: ${src}`));
+    };
+    // A clip that never fires either event would hang an export indefinitely.
+    setTimeout(() => {
+      if (clips.has(src)) return;
+      clipsPending.delete(src);
+      clipsFailed.add(src);
+      reject(new Error(`Timed out loading clip: ${src}`));
+    }, 20_000);
+    el.src = src;
+  });
+  clipsPending.set(src, p);
+  return p;
+}
+
+/** Already-decoded clip, or null. Never blocks. */
+export function peekClip(src: string): HTMLVideoElement | null {
+  return clips.get(src) ?? null;
+}
+
+export function clipFailed(src: string): boolean {
+  return clipsFailed.has(src);
+}
+
+export function forgetClip(src: string) {
+  const el = clips.get(src);
+  if (el) {
+    el.src = "";
+    el.removeAttribute("src");
+    el.load();
+  }
+  clips.delete(src);
+  clipsPending.delete(src);
+  clipsFailed.delete(src);
+}
+
+/**
+ * Where inside its source a clip should be at output second `t`.
+ *
+ * Loops when the element outlives its source, which is the common case: stock
+ * footage runs ten to twenty seconds and an insert is up for three, but the
+ * reverse happens whenever somebody stretches one and the alternative is a
+ * frozen last frame that reads as a stall.
+ */
+export function clipTimeAt(el: VideoElement, t: number): number {
+  const into = Math.max(0, t - el.start) * (el.rate || 1);
+  const source = el.trimIn + into;
+  const length = el.sourceDuration;
+  if (!el.loop || !(length > 0)) return source;
+  const span = Math.max(0.05, length - el.trimIn);
+  return el.trimIn + ((source - el.trimIn) % span);
+}
+
+/**
+ * Position every clip that is on screen at `t`.
+ *
+ * Awaited by the exporter, fired and forgotten by the preview. Returns once
+ * every seek has landed, or once they have had long enough that waiting is
+ * worse than painting the frame they are on.
+ */
+export async function seekClips(
+  composition: Composition,
+  t: number,
+  timeoutMs = 2_000
+): Promise<void> {
+  const wanted = composition.elements.filter(
+    (e): e is VideoElement =>
+      e.kind === "video" && t >= e.start && t < e.end && !e.hidden
+  );
+  if (!wanted.length) return;
+
+  await Promise.all(
+    wanted.map(async (element) => {
+      const el = peekClip(element.src) ?? (await loadClip(element.src).catch(() => null));
+      if (!el) return;
+      const want = clipTimeAt(element, t);
+      const duration = Number.isFinite(el.duration) ? el.duration : 0;
+      const target = duration > 0 ? Math.min(want, duration - 1e-3) : want;
+      if (Math.abs(el.currentTime - target) < 1e-3) return;
+
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          el.removeEventListener("seeked", done);
+          clearTimeout(timer);
+          resolve();
+        };
+        // A seek that never lands must not wedge an export. Painting the frame
+        // it happens to be on is a wrong frame; hanging is no file at all.
+        const timer = setTimeout(done, timeoutMs);
+        el.addEventListener("seeked", done);
+        try {
+          el.currentTime = Math.max(0, target);
+        } catch {
+          done();
+        }
+      });
+    })
+  );
+}
+
+/** Nudge every on-screen clip towards `t` without waiting. For the preview. */
+export function nudgeClips(composition: Composition, t: number): void {
+  for (const element of composition.elements) {
+    if (element.kind !== "video" || element.hidden) continue;
+    if (t < element.start || t >= element.end) continue;
+    const el = peekClip(element.src);
+    if (!el || el.seeking) continue;
+    const want = clipTimeAt(element, t);
+    const duration = Number.isFinite(el.duration) ? el.duration : 0;
+    const target = duration > 0 ? Math.min(want, duration - 1e-3) : want;
+    // A tolerance, or the preview issues a seek every frame and the decoder
+    // spends its whole budget starting seeks it never finishes.
+    if (Math.abs(el.currentTime - target) < 0.05) continue;
+    try {
+      el.currentTime = Math.max(0, target);
+    } catch {
+      /* a clip that will not seek simply holds its frame */
+    }
+  }
 }
 
 /* --------------------------------- helpers --------------------------------- */
@@ -585,6 +758,65 @@ function drawShape(
   ctx.restore();
 }
 
+
+/**
+ * Draw a b-roll clip.
+ *
+ * Deliberately the same geometry as a still — the fit, the rounded corners, the
+ * shadow, the placeholder — because to the person watching it is the same
+ * thing: a picture cut in over the footage. The one difference is the source,
+ * and it is a source that may not have arrived at the frame it was asked for.
+ *
+ * When it has not, the last decoded frame is drawn rather than nothing. That is
+ * the right trade in a preview (a clip lagging the playhead by a frame is
+ * invisible) and it is why the exporter awaits `seekClips` instead of relying
+ * on this — there, a frame from the wrong moment is in the file forever.
+ */
+function drawClipElement(
+  ctx: CanvasRenderingContext2D,
+  el: VideoElement,
+  box: Px
+) {
+  const clip = peekClip(el.src);
+  const radius = el.radius * Math.min(box.w, box.h);
+  const ready = clip && clip.readyState >= 2 && clip.videoWidth > 0;
+
+  if (!ready) {
+    // Same placeholder as a still, so an element whose media has not landed
+    // reads as "not arrived yet" rather than as a hole in the composition.
+    ctx.save();
+    roundRect(ctx, box.x, box.y, box.w, box.h, radius);
+    ctx.fillStyle = clipFailed(el.src) ? "rgba(220,38,38,0.18)" : "rgba(255,255,255,0.10)";
+    ctx.fill();
+    ctx.strokeStyle = clipFailed(el.src)
+      ? "rgba(248,113,113,0.7)"
+      : "rgba(255,255,255,0.35)";
+    ctx.lineWidth = Math.max(1, box.h * 0.006);
+    ctx.setLineDash([box.h * 0.04, box.h * 0.03]);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  if (el.shadow) {
+    ctx.shadowColor = "rgba(0,0,0,0.45)";
+    ctx.shadowBlur = Math.min(box.w, box.h) * 0.08;
+    ctx.shadowOffsetY = Math.min(box.w, box.h) * 0.02;
+  }
+  roundRect(ctx, box.x, box.y, box.w, box.h, radius);
+  ctx.clip();
+
+  const scale =
+    el.fit === "cover"
+      ? Math.max(box.w / clip.videoWidth, box.h / clip.videoHeight)
+      : Math.min(box.w / clip.videoWidth, box.h / clip.videoHeight);
+  const dw = clip.videoWidth * scale;
+  const dh = clip.videoHeight * scale;
+  ctx.drawImage(clip, box.x + (box.w - dw) / 2, box.y + (box.h - dh) / 2, dw, dh);
+  ctx.restore();
+}
+
 /** Draw one element with its animation state applied. */
 export function paintElement(
   ctx: CanvasRenderingContext2D,
@@ -633,6 +865,9 @@ export function paintElement(
       drawImageElement(ctx, element, box, (t - element.start) / life);
       break;
     }
+    case "video":
+      drawClipElement(ctx, element, box);
+      break;
     case "shape":
       drawShape(ctx, element, size, box, state);
       break;

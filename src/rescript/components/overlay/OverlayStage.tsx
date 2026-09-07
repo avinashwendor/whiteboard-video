@@ -12,7 +12,7 @@ import { useEditorStore } from "@/rescript/lib/store";
 import { getCutRanges, originalToEdited } from "@/rescript/lib/edits";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import { paintFrame } from "@/rescript/lib/overlay/frame";
-import { loadImage } from "@/rescript/lib/overlay/render";
+import { loadImage, nudgeClips } from "@/rescript/lib/overlay/render";
 import { ensureTypefaces } from "@/rescript/lib/overlay/fonts";
 import { transitionAt } from "@/rescript/lib/overlay/timeline";
 import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
@@ -226,21 +226,30 @@ export default function OverlayStage({
       // callback, no further frame was ever scheduled, and the canvas simply
       // froze on whatever it had last painted. Canvas2D throws on any non-finite geometry,
       // so the loop keeps going and reports instead.
+      const composition = {
+        elements: state.elements,
+        subtitles: state.subtitles,
+        transitions: state.transitions,
+        frame: state.frame,
+        shots: state.shots,
+        grade: state.grade,
+        audio: state.audio,
+      };
+
+      // B-roll clips are pushed towards the playhead and then painted with
+      // whatever has arrived. Awaiting the seek here would peg the preview to
+      // the decoder's seek rate — a frame or two of lag on an insert is
+      // invisible, and a preview running at four frames a second is not. The
+      // exporter awaits instead, where being exactly right is what matters.
+      nudgeClips(composition, t);
+
       try {
         paintFrame(
           ctx,
           size,
           { live: video && video.videoWidth ? video : null, freeze },
           active,
-          {
-            elements: state.elements,
-            subtitles: state.subtitles,
-            transitions: state.transitions,
-            frame: state.frame,
-            shots: state.shots,
-            grade: state.grade,
-            audio: state.audio,
-          },
+          composition,
           t
         );
         paintFailures = 0;

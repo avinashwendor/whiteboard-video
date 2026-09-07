@@ -127,7 +127,7 @@ async function main() {
     ...(process.env.VISION === "0" ? {} : { vision: syntheticVision(t) }),
     aspect: 16 / 9,
     frame: { aspect: "source", fit: "cover", zoom: 1 },
-    can: { generateImage: true, photoSearch: true, music: true, sfx: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
   },
 });
   console.log("\n=== PLAN ===");

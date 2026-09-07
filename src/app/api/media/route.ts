@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
 
 const searchSchema = z.object({
   query: z.string().trim().min(1).max(120),
-  kind: z.enum(["music", "sfx", "image", "gif"]),
+  kind: z.enum(["music", "sfx", "image", "gif", "video"]),
   limit: z.number().int().min(1).max(40).optional(),
   /**
    * Opt *out* of the commercial filter, never in.
@@ -81,6 +81,11 @@ const ALLOWED_HOSTS = [
   // Tenor
   "media.tenor.com",
   "c.tenor.com",
+  // Pexels. Video files are served from videos.pexels.com and its numbered
+  // shards (player.vimeo.com is *not* used for the direct file links this
+  // provider returns, so it is deliberately not here).
+  "videos.pexels.com",
+  "images.pexels.com",
 ];
 
 function hostAllowed(raw: string): boolean {

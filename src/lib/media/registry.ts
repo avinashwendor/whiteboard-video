@@ -10,11 +10,12 @@
 import { freesound } from "./freesound";
 import { jamendo } from "./jamendo";
 import { openverse } from "./openverse";
+import { pexels } from "./pexels";
 import { tenor } from "./tenor";
 import type { MediaKind, MediaProvider, MediaResult, MediaSearch } from "./types";
 
 /** Best answer first within each kind. */
-const ALL: MediaProvider[] = [jamendo, freesound, tenor, openverse];
+const ALL: MediaProvider[] = [jamendo, freesound, pexels, tenor, openverse];
 
 export function providersFor(kind: MediaKind): MediaProvider[] {
   return ALL.filter((p) => p.kinds.includes(kind) && p.isConfigured());

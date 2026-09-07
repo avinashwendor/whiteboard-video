@@ -632,7 +632,7 @@ const world: PlanWorld = {
   subtitlesOn: false,
   subtitlePosition: "bottom",
   transcript: "[00:00] this is what was said in the video",
-  can: { generateImage: true, photoSearch: true, music: true, sfx: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
 };
 
 {
