@@ -14,6 +14,13 @@ export const MIN_SILENCE_DURATION = 0.3;
 export const SILENCE_PAD = 0.05;
 
 /**
+ * Once a gap is long enough to remove, the pieces of it left over after
+ * existing cuts are removed too — down to this floor, below which a cut is
+ * shorter than the seek that would play it and only adds an edit point.
+ */
+export const MIN_FRAGMENT = 0.02;
+
+/**
  * Manual cuts that hold no words at all — what "Remove silences" leaves behind
  * (and any trim that happened to land on a pause). Restoring these brings the
  * quiet audio back without un-deleting speech, so a cut that merged with a
@@ -101,7 +108,15 @@ export function findSilenceRanges(
       { start: gap.start, end: gap.end },
       cuts
     )) {
-      if (part.end - part.start < minDuration - 1e-4) continue;
+      // The threshold is a question about the gap, not about its leftovers.
+      // Re-applying it per fragment is what made "remove the silences" leave
+      // silence behind: a cut through a long pause splits it into two shorter
+      // pieces, each individually under the threshold, and both survive — so
+      // the dead air either side of a deleted word stayed exactly where the
+      // user could hear it, and asking again did nothing, because the answer
+      // was already "no silence is long enough". The gap qualified; every part
+      // of it goes.
+      if (part.end - part.start < MIN_FRAGMENT - 1e-4) continue;
       // Only pad edges that still sit against speech (not against a prior cut).
       const padStart = gap.padStart && Math.abs(part.start - gap.start) < 1e-4;
       const padEnd = gap.padEnd && Math.abs(part.end - gap.end) < 1e-4;

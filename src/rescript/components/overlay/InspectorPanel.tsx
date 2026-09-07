@@ -1,5 +1,6 @@
 "use client";
 
+import { Copy, Trash2 } from "lucide-react";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import {
   ANIMATION_KINDS,
@@ -60,12 +61,46 @@ export default function InspectorPanel() {
 
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+      <SelectedBar element={element} />
       <TimingSection element={element} at={at} />
       {element.kind === "text" && <TextSection element={element} />}
       {element.kind === "image" && <ImageSection element={element} />}
       {element.kind === "shape" && <ShapeSection element={element} />}
       <PlacementSection element={element} />
       <AnimationSection element={element} />
+    </div>
+  );
+}
+
+/**
+ * What is selected, and the way to get rid of it.
+ *
+ * Removing an element used to live in exactly one place — a bin icon that the
+ * Layers list only draws once its row is selected — so having clicked the thing
+ * on the video, there was nothing on screen that said it could be deleted. The
+ * key is Delete; this is the button for people who look for a button.
+ */
+function SelectedBar({ element }: { element: OverlayElement }) {
+  const remove = useOverlayStore((s) => s.removeElement);
+  const duplicate = useOverlayStore((s) => s.duplicateElement);
+  const label =
+    element.kind === "text" ? element.text.trim() || "Text" : element.name || element.kind;
+
+  return (
+    <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-zinc-800 dark:text-zinc-100">
+        {label}
+      </span>
+      <Button title="Duplicate" onClick={() => duplicate(element.id)}>
+        <Copy size={12} />
+      </Button>
+      <Button
+        variant="danger"
+        title="Delete (or press Delete)"
+        onClick={() => remove(element.id)}
+      >
+        <Trash2 size={12} />
+      </Button>
     </div>
   );
 }

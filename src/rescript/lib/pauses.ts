@@ -11,7 +11,7 @@
  * neighbouring pauses simply recompute. Removing one is an ordinary cut over
  * its range, which is why nothing here mutates anything.
  */
-import type { Word } from "./types";
+import type { TimeRange, Word } from "./types";
 
 export interface Pause {
   /**
@@ -21,6 +21,12 @@ export interface Pause {
   beforeWordId: number | null;
   start: number;
   end: number;
+  /**
+   * Silence the viewer will actually hear here — the span minus anything
+   * already cut, not `end - start`. The two differ wherever a cut lands inside
+   * the gap, which is every gap beside a deleted word: the word's own span is
+   * gone, and counting it would offer to remove time that is already removed.
+   */
   duration: number;
 }
 
@@ -32,6 +38,11 @@ export interface FindPausesOptions {
   minDuration?: number;
   /** Media duration, for the trailing pause. Omit to skip it. */
   duration?: number;
+  /**
+   * Ranges already cut. Silence inside one of these is not silence any more, so
+   * it does not count towards the threshold and cannot make a pause on its own.
+   */
+  cuts?: TimeRange[];
 }
 
 /**
@@ -42,13 +53,25 @@ export interface FindPausesOptions {
  */
 export function findPauses(
   words: Word[],
-  { minDuration = DEFAULT_MIN_PAUSE_S, duration }: FindPausesOptions = {}
+  { minDuration = DEFAULT_MIN_PAUSE_S, duration, cuts }: FindPausesOptions = {}
 ): Pause[] {
   const pauses: Pause[] = [];
   if (words.length === 0) return pauses;
 
+  /** How much of [start, end) is still in the video. */
+  const audible = (start: number, end: number): number => {
+    let left = end - start;
+    for (const cut of cuts ?? []) {
+      const from = Math.max(start, cut.start);
+      const to = Math.min(end, cut.end);
+      if (to > from) left -= to - from;
+    }
+    return left;
+  };
+
   const add = (start: number, end: number, beforeWordId: number | null) => {
-    const gap = end - start;
+    if (end - start <= 0) return;
+    const gap = audible(start, end);
     // Epsilon because these are subtractions of floats: a gap the user set the
     // threshold to exactly (1.4 - 1.0 = 0.3999999999999999) must still count.
     // Also guards non-monotonic timings — overlapping words are not a pause.

@@ -32,6 +32,7 @@ import { withGradeDefaults, type GradeSpec } from "./grade";
 import type { AudioClip } from "./audio";
 import { forgetClip, forgetImage, loadClip, loadImage } from "./render";
 import { blockedFor, nudgeClear, subtitleBand, overlaps } from "./layout";
+import { useEditorStore } from "../store";
 
 /**
  * Composition state, kept deliberately separate from the transcript store.
@@ -561,7 +562,32 @@ export const useOverlayStore = create<OverlayState>((set, get) => {
       commit({ elements: elements.map((e, i) => ({ ...e, z: i + 1 })) });
     },
 
-    select: (id) => set({ selectedId: id }),
+    /**
+     * Picking up an overlay puts down whatever the transcript was holding.
+     *
+     * Both stores answer the Delete key, and both used to hold a selection at
+     * once — so pressing it after clicking a caption on the stage deleted the
+     * words that were still highlighted three panels away, or a clip, or
+     * nothing at all. Written straight into the other store rather than through
+     * its setters, which would bounce the clearing back here.
+     */
+    select: (id) => {
+      if (id !== null) {
+        const editor = useEditorStore.getState();
+        if (
+          editor.selectedWordIds.length ||
+          editor.selectedClipIndex != null ||
+          editor.selectedCutIndex != null
+        ) {
+          useEditorStore.setState({
+            selectedWordIds: [],
+            selectedClipIndex: null,
+            selectedCutIndex: null,
+          });
+        }
+      }
+      set({ selectedId: id });
+    },
 
     beginGesture: () => {
       const state = get();

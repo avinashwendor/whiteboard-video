@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AudioLines } from "lucide-react";
 import { hydratePauseThresholdPreference, useEditorStore } from "@/rescript/lib/store";
+import { getCutRanges, isWordCutOut } from "@/rescript/lib/edits";
 import {
   MAX_PAUSE_THRESHOLD_S,
   MIN_PAUSE_THRESHOLD_S,
@@ -41,10 +42,14 @@ export default function PauseThresholdControl() {
     hydratePauseThresholdPreference();
   }, []);
 
+  // The count has to agree with the chips, and the chips only offer silence
+  // that is still in the video — so it is counted against the same cuts.
+  const manualCuts = useEditorStore((s) => s.manualCuts);
   const count = useMemo(() => {
-    const kept = words.filter((w) => !w.deleted);
-    return findPauses(kept, { minDuration: threshold, duration }).length;
-  }, [words, threshold, duration]);
+    const cuts = getCutRanges(words, duration, manualCuts);
+    const kept = words.filter((w) => !isWordCutOut(w, cuts));
+    return findPauses(kept, { minDuration: threshold, duration, cuts }).length;
+  }, [words, threshold, duration, manualCuts]);
 
   return (
     <Popover open={open} onOpenChange={setOpen} placement="bottom-end" offsetMain={6}>

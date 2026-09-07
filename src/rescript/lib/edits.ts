@@ -6,7 +6,7 @@ import type {
   Word,
 } from "./types";
 
-/** Padding (s) applied when merging adjacent deleted words into one cut. */
+/** Padding (s) applied when merging near-adjacent cuts into one. */
 const MERGE_GAP = 0.35;
 
 /** Minimum kept clip length after a trim (seconds). */
@@ -17,29 +17,98 @@ export const SPLIT_EPSILON = 0.04;
 /** Tiny seek offset so playhead lands just inside a kept region. */
 export const PLAYHEAD_EPSILON_S = 0.001;
 
+/** Whether any word the viewer still hears lies inside (from, to). */
+function holdsSpeech(words: Word[], from: number, to: number): boolean {
+  if (to - from <= 1e-4) return false;
+  return words.some(
+    (w) => !w.deleted && w.end > from + 1e-4 && w.start < to - 1e-4
+  );
+}
+
 /**
- * Compute cut ranges from deleted words only (silence between adjacent deleted
- * words is included). A cut is derived purely from its words' bounds — drag a
- * word's edge in the wordbar to move the cut edge with it.
+ * Cut ranges derived from deleted words — the span removed, plus the silence
+ * the deletion orphans.
+ *
+ * The naive rule is to cut exactly [word.start, word.end], and it is wrong in a
+ * way that is obvious the moment you use it. Aligned timings bound the *sound*
+ * of a word, so a word sits between two gaps: the breath before it and the
+ * breath after. Remove only the sound and both gaps survive, back to back — the
+ * word is gone and the hole it leaves is longer than the word was. Do it to a
+ * filler and you have replaced "um" with a pause, which is the thing you were
+ * trying to remove.
+ *
+ * So a deletion takes the surrounding silence with it, and leaves one pause
+ * where there were two: the longer of them, since that is the one that was
+ * doing the work — a sentence boundary keeps its beat, a word lifted from
+ * mid-sentence closes up tight. What remains is split across the join in the
+ * proportion it arrived in, so the rhythm on each side survives the edit.
+ *
+ * Never *more* than the naive rule: the cut always covers [word.start,
+ * word.end], and max(a, b) <= a + b, so this can only ever remove silence.
+ *
+ * A run of deleted words is one cut, and the silence between them goes with it.
  */
 export function getWordCutRanges(words: Word[], duration: number): TimeRange[] {
   const ranges: TimeRange[] = [];
   for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    if (!w.deleted) continue;
-    const start = w.start;
-    let end = w.end;
-    while (i + 1 < words.length && words[i + 1].deleted) {
-      i++;
-      end = Math.max(end, words[i].end);
+    if (!words[i].deleted) continue;
+    const first = i;
+    let last = i;
+    while (last + 1 < words.length && words[last + 1].deleted) last++;
+    i = last;
+
+    const head = words[first];
+    const tail = words[last];
+    // The neighbours are the words either side of a maximal run, so neither is
+    // deleted — they are exactly the speech this cut has to join.
+    const prev = first > 0 ? words[first - 1] : null;
+    const next = last + 1 < words.length ? words[last + 1] : null;
+
+    // Clamped: ASR timings overlap often enough that a raw subtraction goes
+    // negative, and a negative gap would push the cut into a kept word.
+    const before = prev ? Math.max(0, head.start - prev.end) : 0;
+    const after = next ? Math.max(0, next.start - tail.end) : 0;
+
+    let start = head.start;
+    let end = tail.end;
+
+    if (prev && next) {
+      const total = before + after;
+      const keep = Math.max(before, after);
+      const keepBefore = total > 0 ? (keep * before) / total : 0;
+      start = Math.min(start, head.start - (before - keepBefore));
+      end = Math.max(end, tail.end + (after - (keep - keepBefore)));
+    } else if (next) {
+      // Nothing kept before it: the run opens the video, so there is no join to
+      // pace — only the gap in front of the next word, which is now dead air.
+      end = Math.max(end, next.start);
+    } else if (prev) {
+      start = Math.min(start, prev.end);
     }
+
     ranges.push({ start, end });
   }
-  return mergeCutRanges(ranges, duration);
+  // A tolerance here would reach across whatever sits between two cuts, and
+  // what sits between two cuts is usually a word. The runs above already
+  // absorbed their own gaps, so there is nothing left for one to do.
+  return mergeCutRanges(ranges, duration, 1e-4);
 }
 
-/** Merge overlapping / near-adjacent ranges and clamp to [0, duration]. */
-export function mergeCutRanges(ranges: TimeRange[], duration: number): TimeRange[] {
+/**
+ * Merge overlapping / near-adjacent ranges and clamp to [0, duration].
+ *
+ * `gap` is how far apart two cuts may sit and still become one. Pass `words` to
+ * forbid a merge that would close over speech: the tolerance exists to swallow
+ * the sliver between two cuts, and without the guard it will just as happily
+ * swallow a short word — which vanishes from the video while staying in the
+ * transcript, the one failure here nothing downstream can detect.
+ */
+export function mergeCutRanges(
+  ranges: TimeRange[],
+  duration: number,
+  gap = MERGE_GAP,
+  words?: Word[]
+): TimeRange[] {
   if (ranges.length === 0) return [];
   const sorted = [...ranges]
     .map((r) => ({
@@ -52,7 +121,8 @@ export function mergeCutRanges(ranges: TimeRange[], duration: number): TimeRange
   const merged: TimeRange[] = [];
   for (const r of sorted) {
     const last = merged[merged.length - 1];
-    if (last && r.start - last.end < MERGE_GAP) {
+    const close = last && r.start - last.end < gap;
+    if (close && !(words && holdsSpeech(words, last.end, r.start))) {
       last.end = Math.max(last.end, r.end);
     } else {
       merged.push({ ...r });
@@ -72,7 +142,12 @@ export function getCutRanges(
 ): TimeRange[] {
   const fromWords = getWordCutRanges(words, duration);
   const fromManual = manualCuts.map((c) => ({ start: c.start, end: c.end }));
-  return mergeCutRanges([...fromWords, ...fromManual], duration);
+  return mergeCutRanges(
+    [...fromWords, ...fromManual],
+    duration,
+    MERGE_GAP,
+    words
+  );
 }
 
 /** Invert cut ranges into the ranges of the original media that remain. */
@@ -395,17 +470,23 @@ export function shrinkManualCuts(
   return { cuts: out, nextId: id };
 }
 
-/** Add a manual cut and merge with existing ones that touch. */
+/**
+ * Add a manual cut and merge with existing ones that touch. Pass `words` so the
+ * merge cannot close over a word that is still in the transcript.
+ */
 export function addManualCut(
   manualCuts: ManualCut[],
   start: number,
   end: number,
-  nextId: number
+  nextId: number,
+  words?: Word[]
 ): { cuts: ManualCut[]; nextId: number } {
   if (end - start < 1e-4) return { cuts: manualCuts, nextId };
   const merged = mergeCutRanges(
     [...manualCuts.map((c) => ({ start: c.start, end: c.end })), { start, end }],
-    Number.POSITIVE_INFINITY
+    Number.POSITIVE_INFINITY,
+    MERGE_GAP,
+    words
   );
   // Rebuild with stable-ish ids: keep old ids when a merged range covers an old cut's midpoint
   let id = nextId;
@@ -522,7 +603,7 @@ export function trimEdgeResult(
   const cutting = edge === "out" ? to < from : to > from;
 
   if (cutting) {
-    const { cuts, nextId } = addManualCut(manualCuts, lo, hi, nextCutId);
+    const { cuts, nextId } = addManualCut(manualCuts, lo, hi, nextCutId, words);
     return {
       words: deleteWordsCoveredBy(words, lo, hi),
       manualCuts: cuts,

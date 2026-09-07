@@ -618,7 +618,7 @@ export default function Timeline() {
     const kept = words.filter((w) => !isWordCutOut(w, cuts));
     const t0 = scrollLeft / pps - 1;
     const t1 = (scrollLeft + width) / pps + 1;
-    return findPauses(kept, { minDuration: pauseThreshold, duration }).filter(
+    return findPauses(kept, { minDuration: pauseThreshold, duration, cuts }).filter(
       (p) =>
         p.end >= t0 &&
         p.start <= t1 &&

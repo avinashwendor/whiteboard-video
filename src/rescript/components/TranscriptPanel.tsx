@@ -226,7 +226,11 @@ export default function TranscriptPanel() {
   const pauseBeforeWordId = useMemo(() => {
     const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
     const map = new Map<number, Pause>();
-    for (const pause of findPauses(kept, { minDuration: pauseThreshold, duration })) {
+    for (const pause of findPauses(kept, {
+      minDuration: pauseThreshold,
+      duration,
+      cuts,
+    })) {
       if (pause.beforeWordId === null) continue;
       // A pause already inside a cut is silence the viewer will never hear, so
       // there is nothing left to offer removing. Without this the chip survives
@@ -243,9 +247,11 @@ export default function TranscriptPanel() {
   /** Dead air after the final word — has no following word to hang off. */
   const trailingPause = useMemo(() => {
     const kept = visibleWords.filter((w) => !cutOutIds.has(w.id));
-    const tail = findPauses(kept, { minDuration: pauseThreshold, duration }).find(
-      (p) => p.beforeWordId === null
-    );
+    const tail = findPauses(kept, {
+      minDuration: pauseThreshold,
+      duration,
+      cuts,
+    }).find((p) => p.beforeWordId === null);
     if (!tail) return null;
     const alreadyCut = cuts.some(
       (c) => c.start <= tail.start + 0.01 && c.end >= tail.end - 0.01

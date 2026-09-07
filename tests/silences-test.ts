@@ -3,6 +3,7 @@ import {
   MIN_SILENCE_DURATION,
   SILENCE_PAD,
 } from "../src/rescript/lib/silences";
+import { getWordCutRanges } from "../src/rescript/lib/edits";
 import type { ManualCut, Word } from "../src/rescript/lib/types";
 
 function nearly(a: number, b: number, eps = 1e-4): boolean {
@@ -71,18 +72,31 @@ function assert(cond: boolean, msg: string): void {
   // and the already-cut middle is not re-reported.
   const words = [w(1, 0.5, 1.0), w(2, 1.5, 2.0, true), w(3, 3.0, 3.5)];
   const ranges = findSilenceRanges(words, 3.5);
-  // Gap 1.0→3.0 minus deleted cut 1.5–2.0 → [1.0,1.5] and [2.0,3.0], each padded.
+  // The deleted word takes some of the silence either side with it, so its cut
+  // is wider than [1.5, 2.0] — read it rather than writing it down, since where
+  // exactly it lands is `getWordCutRanges`'s business and is checked there.
+  const cut = getWordCutRanges(words, 3.5)[0]!;
   assert(ranges.length === 3, `expected leading + 2 remnants, got ${ranges.length}`);
   assert(nearly(ranges[0]!.start, 0) && nearly(ranges[0]!.end, 0.5 - SILENCE_PAD), "leading");
   assert(
-    nearly(ranges[1]!.start, 1.0 + SILENCE_PAD) && nearly(ranges[1]!.end, 1.5),
+    nearly(ranges[1]!.start, 1.0 + SILENCE_PAD) && nearly(ranges[1]!.end, cut.start),
     "before deleted word (flush against existing cut)"
   );
   assert(
-    nearly(ranges[2]!.start, 2.0) && nearly(ranges[2]!.end, 3.0 - SILENCE_PAD),
+    nearly(ranges[2]!.start, cut.end) && nearly(ranges[2]!.end, 3.0 - SILENCE_PAD),
     "after deleted word"
   );
   console.log("around deleted words: ok");
+
+  // And once those are taken too, nothing is left in the gap: the fragments a
+  // deletion leaves are the whole reason "remove the silences" used to be a
+  // no-op the second time you asked.
+  const manual: ManualCut[] = ranges.map((r, i) => ({ id: i + 1, ...r }));
+  assert(
+    findSilenceRanges(words, 3.5, manual).length === 0,
+    "a second pass still found silence to remove"
+  );
+  console.log("nothing stranded around a deleted word: ok");
 }
 
 {

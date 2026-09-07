@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { useEditorStore } from "@/rescript/lib/store";
+import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import { getCutRanges, isWordCutOut } from "@/rescript/lib/edits";
 import { extractAudio, getFFmpeg, releaseFFmpeg } from "@/rescript/lib/ffmpeg";
 import { VAD_SAMPLE_RATE } from "@/rescript/lib/vad";
@@ -325,6 +326,19 @@ export default function Editor() {
         s.status === "ready" &&
         !s.exportOpen
       ) {
+        // An overlay is the most specific thing that can be selected — you
+        // pointed at one object — and the two stores keep their selections
+        // mutually exclusive, so if one is held it is what Delete means. It has
+        // to come first: for a long time it came nowhere at all, and the only
+        // way to remove a caption you had just placed was to find its row in
+        // the Layers list and hit a 24-pixel bin.
+        const overlaySelection = useOverlayStore.getState().selectedId;
+        if (overlaySelection) {
+          e.preventDefault();
+          e.stopPropagation();
+          useOverlayStore.getState().removeElement(overlaySelection);
+          return;
+        }
         // Cut region selected → restore it (also covers cut words clicked on
         // the timeline, which select their cut). Kept words → cut them. Clip
         // selected with no words → delete the clip.

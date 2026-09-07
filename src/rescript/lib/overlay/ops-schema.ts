@@ -361,7 +361,11 @@ export const removeFillersOp = z.object({ op: z.literal("removeFillers") });
 
 export const removeSilencesOp = z.object({
   op: z.literal("removeSilences"),
-  minDuration: z.number().min(0.1).max(10).optional(),
+  /**
+   * Floor of 0.05 rather than 0.1: "close every gap" is a real request, and the
+   * residue an earlier cut leaves behind is measured in tens of milliseconds.
+   */
+  minDuration: z.number().min(0.05).max(10).optional(),
 });
 
 export const deletePhraseOp = z.object({

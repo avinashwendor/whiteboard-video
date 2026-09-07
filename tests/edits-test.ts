@@ -38,7 +38,7 @@ function nearly(a: number, b: number, eps = 1e-3) {
   return Math.abs(a - b) < eps;
 }
 
-// --- Word cuts include silence between adjacent deletes ---
+// --- A deletion takes the silence it orphans with it ---
 {
   const words = [
     word(1, "hello", 0, 0.5),
@@ -47,7 +47,25 @@ function nearly(a: number, b: number, eps = 1e-3) {
   ];
   const cuts = getWordCutRanges(words, 2);
   assert(cuts.length === 1, "one cut from uh");
-  assert(nearly(cuts[0].start, 0.6) && nearly(cuts[0].end, 0.8), "uh span");
+  // 0.1s in front of "uh" and 0.2s behind it. Cutting only [0.6, 0.8] would
+  // leave both, back to back — 0.3s of hole where a 0.2s word used to be.
+  // One pause survives, the longer one, split in the proportion it arrived in.
+  assert(cuts[0].start < 0.6 && cuts[0].end > 0.8, "the cut reaches into the silence");
+  const remaining = cuts[0].start - 0.5 + (1.0 - cuts[0].end);
+  assert(nearly(remaining, 0.2), `expected 0.2s of pause left, got ${remaining}`);
+  assert(cuts[0].start >= 0.5, "and never past the word before it");
+  assert(cuts[0].end <= 1.0, "nor into the word after it");
+}
+
+// --- ...and never keeps more silence than it found ---
+{
+  const words = [
+    word(1, "a", 0, 0.5),
+    word(2, "b", 1.0, 1.2, true),
+    word(3, "c", 1.4, 2.0),
+  ];
+  const cuts = getWordCutRanges(words, 3);
+  assert(cuts[0].start <= 1.0 && cuts[0].end >= 1.2, "the word's own span is always cut");
 }
 
 // --- Manual cuts merge with word cuts ---

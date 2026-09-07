@@ -826,7 +826,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     let manualCuts = s.manualCuts;
     let nextManualCutId = s.nextManualCutId;
     for (const r of usable) {
-      const added = addManualCut(manualCuts, r.start, r.end, nextManualCutId);
+      const added = addManualCut(manualCuts, r.start, r.end, nextManualCutId, words);
       manualCuts = added.cuts;
       nextManualCutId = added.nextId;
       words = deleteWordsCoveredBy(words, r.start, r.end);
@@ -1033,25 +1033,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  setSelectedClipIndex: (selectedClipIndex) =>
+  setSelectedClipIndex: (selectedClipIndex) => {
+    if (selectedClipIndex != null) useOverlayStore.getState().select(null);
     set({
       selectedClipIndex,
       ...(selectedClipIndex != null ? { selectedCutIndex: null } : {}),
-    }),
+    });
+  },
 
-  setSelectedCutIndex: (selectedCutIndex) =>
+  setSelectedCutIndex: (selectedCutIndex) => {
+    if (selectedCutIndex != null) useOverlayStore.getState().select(null);
     set({
       selectedCutIndex,
       ...(selectedCutIndex != null ? { selectedClipIndex: null } : {}),
-    }),
+    });
+  },
 
-  setSelectedWords: (selectedWordIds) =>
+  setSelectedWords: (selectedWordIds) => {
+    // Selecting in the transcript drops the overlay selection, and selecting
+    // an overlay drops this one. There is one Delete key and two things it
+    // could mean; keeping the two selections mutually exclusive is what makes
+    // the answer never a guess.
+    if (selectedWordIds.length > 0) useOverlayStore.getState().select(null);
     set({
       selectedWordIds,
       // A fresh word selection from the transcript supersedes a prior cut pick.
       // Timeline cut-word clicks re-select the cut afterward.
       ...(selectedWordIds.length > 0 ? { selectedCutIndex: null } : {}),
-    }),
+    });
+  },
 
   beginGesture: () => {
     const s = get();

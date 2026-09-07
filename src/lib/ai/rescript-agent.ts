@@ -195,7 +195,12 @@ ${describeSubtitlePresets()}
   captions styled for a Short in a widescreen frame are not a Short.
 
 {"op":"removeFillers"}                       — cut every "um", "uh" and similar
-{"op":"removeSilences","minDuration":0.4}    — cut pauses at least this long
+{"op":"removeSilences","minDuration":0.4}    — cut every pause at least this long
+  This is also the answer to "close the gaps", "tighten it up", "get rid of the dead air" and to any
+  complaint about pauses left behind by an earlier edit. It works on the cut as it stands now, so run it
+  again after cutting words and it will close what those cuts opened. 0.35-0.5 is a natural threshold for
+  talking-head footage; go down to 0.15 when asked for something relentless, and no lower unless asked —
+  a video with no breath in it anywhere is exhausting to watch.
 {"op":"deletePhrase","text":"you know what I mean","occurrence":2}
   Cuts spoken words out of the video by deleting them from the transcript. Omit "occurrence" to cut every one.
   Only use text that actually appears in the transcript you were shown.
