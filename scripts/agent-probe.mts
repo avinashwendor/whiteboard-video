@@ -17,7 +17,10 @@ for (const line of readFileSync(".env.local", "utf8").split("\n")) {
   const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
   if (m) process.env[m[1]] = m[2];
 }
-process.env.RESCRIPT_AGENT_DEBUG = "/dev/stderr";
+// Defaults to stderr, but honours a path — the event stream that STREAM=1
+// writes also goes to stderr, and the two interleave into something that
+// cannot be parsed back apart.
+process.env.RESCRIPT_AGENT_DEBUG ||= "/dev/stderr";
 
 const { planRescriptEdit } = await import("../src/lib/ai/rescript-agent.js");
 const { readFrame, toWire } = await import("../src/rescript/lib/overlay/vision.js");

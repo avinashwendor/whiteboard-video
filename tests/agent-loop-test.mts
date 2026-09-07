@@ -147,6 +147,63 @@ function model(replies: (n: number) => string) {
   );
 }
 
+/* ------------- a spent look budget must not eat the turn limit ------------- */
+
+{
+  // The failure people actually saw: "That edit couldn't be settled — it kept
+  // looking at the footage instead of answering."
+  //
+  // The look budget being spent used to cost three further turns of being told
+  // "no" before the tools were withdrawn. A model that had used its looks
+  // legitimately then had to get a plan out inside what was left, and on a
+  // long recording it did not. The budget is spent, so the tools close at
+  // once — one turn, not four.
+  //
+  // Modelled with a stubborn stub: it asks for a look on every turn until the
+  // tools are gone from its vocabulary. That is the real behaviour, and it is
+  // why telling it to stop while still describing the tools does not work.
+  let closedAt = -1;
+  let call = 0;
+  const stub = {
+    generate: async (input: { messages: Array<{ role: string; content: unknown }> }) => {
+      call += 1;
+      const system = String(input.messages[0]?.content ?? "");
+      const toolsGone = !system.includes("read_transcript");
+      if (toolsGone) {
+        if (closedAt < 0) closedAt = call;
+        return PLAN;
+      }
+      return JSON.stringify({
+        thinking: "one more",
+        tool: "read_transcript",
+        args: { from: call * 7, to: call * 7 + 5 },
+      });
+    },
+  };
+
+  const plan = await planRescriptEdit({
+    instruction: "edit this end to end",
+    context,
+    generate: stub.generate,
+  });
+
+  assert(plan.ops.length === 1, "a plan still lands after the looks run out");
+  assert(
+    plan.trace.length === MAX_TOOL_CALLS,
+    `every look inside the budget is answered, got ${plan.trace.length}`
+  );
+  // The whole point: one turn between the budget running out and the tools
+  // being withdrawn, not several.
+  assert(
+    closedAt === MAX_TOOL_CALLS + 2,
+    `the tools should close on the first refused look (turn ${MAX_TOOL_CALLS + 2}), not turn ${closedAt}`
+  );
+  assert(
+    call < MAX_TOOL_CALLS + 5,
+    `the run should not spend extra turns discovering the budget is gone, took ${call}`
+  );
+}
+
 /* --------------------- an empty plan has to be argued for ------------------- */
 
 {
@@ -190,6 +247,68 @@ function model(replies: (n: number) => string) {
     plan.ops.length === 0 && /already tight/.test(plan.summary),
     `a justified "nothing to do" should come through, got ${JSON.stringify(plan.summary)}`
   );
+}
+
+/* ---------------- an intention is not a verdict ----------------------------- */
+
+{
+  // The failure that reached a person: asked to "edit this end to end", the
+  // model replied twice with no steps and the summary "I'm inspecting the
+  // opening to build a complete vertical short…". The old test for a
+  // deliberate "nothing to do" was any non-empty summary, so that was returned
+  // as a *successful* edit that changed nothing at all.
+  const intending = model(() =>
+    JSON.stringify({
+      thinking: "planning",
+      summary: "I'm inspecting the opening to build a complete vertical short.",
+      ops: [],
+    })
+  );
+  let threw: unknown = null;
+  try {
+    await planRescriptEdit({
+      instruction: "edit this end to end",
+      context,
+      generate: intending.generate,
+    });
+  } catch (err) {
+    threw = err;
+  }
+  assert(threw !== null, "a statement of intent must never pass as 'nothing to do'");
+
+  // The genuine verdict still comes through, on the same number of turns —
+  // the fix must not have cost the legitimate answer.
+  const verdict = model((n) =>
+    n === 0
+      ? JSON.stringify({ thinking: "looking", summary: "", ops: [] })
+      : JSON.stringify({
+          thinking: "checked",
+          summary: "The cut is already tight and there is nothing worth adding.",
+          ops: [],
+        })
+  );
+  const fine = await planRescriptEdit({
+    instruction: "tidy this up",
+    context,
+    generate: verdict.generate,
+  });
+  assert(
+    fine.ops.length === 0 && /already tight/.test(fine.summary),
+    `a real verdict must still be believed, got ${JSON.stringify(fine.summary)}`
+  );
+
+  // And a model that starts with an intention but then commits still lands.
+  const recovers = model((n) =>
+    n === 0
+      ? JSON.stringify({ thinking: "…", summary: "Let me check the transcript.", ops: [] })
+      : PLAN
+  );
+  const landed = await planRescriptEdit({
+    instruction: "cut the fillers",
+    context,
+    generate: recovers.generate,
+  });
+  assert(landed.ops.length === 1, "being challenged should let it recover, not end the run");
 }
 
 /* ------------------- a model that only ever reasons ------------------------- */

@@ -412,9 +412,10 @@ automatic edit looks automatic.
 USE THE NUMBERS, NOT THE PICTURES, FOR PLACEMENT. You cannot judge from a 384px thumbnail whether a
 background is busy enough to swallow white type; the detail figure can, and it is right in front of you.
 Specifically:
-  · Before any addText or captionPhrase that has to hold while the picture moves, call where_text_fits over
-    the seconds it is up, and put it where the answer says. A place that is clear for three of its four
-    seconds is not a place.
+  · Before placing type, call where_text_fits — ONCE, with every stretch you are about to caption in a
+    single call: {"spans":[{"from":2,"to":5},{"from":18,"to":21},{"from":34,"to":37}]}. It answers each of
+    them. Do not ask one caption at a time; you will spend the whole conversation asking and never get to
+    the plan, which is the single most common way this goes wrong.
   · Never put type where "overSubject" is high — that is somebody's face.
   · When the score says a scrim is needed, add one: background "rgba(0,0,0,0.6)", or the "badge" style, or
     an addShape rect behind it. Do not simply hope.
@@ -525,12 +526,21 @@ The tools:
   frame_at          {"at":12.5}              The picture at that second, measured: where the subject is, how tight the
                                              shot is, how busy and how bright the background is, the palette, and every
                                              named position scored 0-1 for how well type would read there.
-  where_text_fits   {"from":12,"to":16}      Where a caption can sit for that whole stretch, judged on its worst frame.
-                                             Ask this before placing anything that has to hold while the picture moves.
+  where_text_fits   {"spans":[{"from":12,"to":16},{"from":30,"to":34}]}
+                                             Where a caption can sit for each whole stretch, judged on its worst
+                                             frame. Pass EVERY stretch you plan to caption in one call — a single
+                                             {"from":12,"to":16} works too, but asking one at a time is how a
+                                             conversation ends without a plan in it.
   inspect           {}                       What is on screen now: elements, subtitles, transitions, the frame.
   measure           {}                       Counts from the footage: fillers, dead air, pace, clips.
 
-You get at most 8 looks. Do not look at something you were already shown above.
+You get plenty of looks, and they are cheap — but each one is a round trip the person waits through, and
+a tool that takes a list should be given the list. Never ask the same question twice; the answer will not
+have changed. Do not look at something you were already shown above.
+
+Aim to have looked at everything you need within four or five calls, then answer. Reading the transcript
+in ten-second slices, or checking one caption position at a time, is the failure mode: it is not thorough,
+it is a conversation that never reaches a plan.
 
 When you are ready, reply with the plan instead:
 {"thinking":"how this makes the highest-quality edit","summary":"one sentence, what you did","ops":[ ... ]}
@@ -619,7 +629,8 @@ confident guess about them is worse than silence.
 
 The tools work here too. frame_at and where_text_fits answer for these same moments, so if a caption looks
 wrong you can check what is actually behind it before saying so — and if you want to move one, ask where it
-should go rather than guessing a second time.
+should go rather than guessing a second time. Pass every moment you are checking to where_text_fits in one
+call rather than one at a time.
 
 Reply in this shape:
 {"thinking":"what you actually see",
@@ -1159,9 +1170,19 @@ function runTool(
     }
 
     case "where_text_fits": {
-      const from = num(call.args, "from") ?? 0;
-      const to = num(call.args, "to") ?? from + 4;
-      return whereTextFits(context.vision ?? [], from, to);
+      // One window or many. A plan places several captions and each one has its
+      // own stretch, so asking per caption is the natural thing to do — and it
+      // used to be the only thing possible, which meant a six-caption plan
+      // spent its whole look budget here and never got to answer. Taking a
+      // list makes the natural request a single look.
+      const spans = windowsFrom(call.args);
+      if (!spans.length) {
+        return {
+          result: "Give a window: {\"from\":12,\"to\":16}, or several as {\"spans\":[{\"from\":12,\"to\":16},{\"from\":30,\"to\":34}]}.",
+          detail: "Asked where text fits, without saying when",
+        };
+      }
+      return whereTextFits(context.vision ?? [], spans);
     }
 
     case "measure": {
@@ -1182,6 +1203,40 @@ function runTool(
 }
 
 /**
+ * The windows a `where_text_fits` call is asking about.
+ *
+ * Accepts a single `{from,to}`, a `spans` array of them, or a bare array —
+ * because a model that has been told it may ask about several will express
+ * that three different ways and none of them is wrong.
+ */
+function windowsFrom(args: Record<string, unknown>): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = [];
+
+  const push = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const row = value as Record<string, unknown>;
+    const from = typeof row.from === "number" ? row.from : null;
+    if (from === null || !Number.isFinite(from)) return;
+    const to =
+      typeof row.to === "number" && Number.isFinite(row.to)
+        ? row.to
+        : typeof row.duration === "number" && Number.isFinite(row.duration)
+          ? from + row.duration
+          : from + 4;
+    out.push({ from, to });
+  };
+
+  const list = args.spans ?? args.windows ?? args.ranges;
+  if (Array.isArray(list)) for (const entry of list) push(entry);
+  else if (Array.isArray(args)) for (const entry of args) push(entry);
+  if (typeof args.from === "number") push(args);
+
+  // Ten is far more than any plan needs and stops one call from becoming a
+  // way to dump the whole survey back out.
+  return out.slice(0, 10);
+}
+
+/**
  * Where type can live for a *stretch*, not for a moment.
  *
  * The question an editor actually has is never "is the lower third clear at
@@ -1196,9 +1251,17 @@ function runTool(
  */
 function whereTextFits(
   vision: WireFrameRead[],
-  from: number,
-  to: number
+  spans: Array<{ from: number; to: number }>
 ): { result: string; detail: string } {
+  if (spans.length > 1) {
+    const parts = spans.map((s) => whereTextFits(vision, [s]));
+    return {
+      result: parts.map((p) => p.result).join("\n\n"),
+      detail: `Checked where text fits over ${spans.length} stretches`,
+    };
+  }
+
+  const { from, to } = spans[0];
   const span = `${from.toFixed(1)}–${to.toFixed(1)}s`;
   if (!vision.length) {
     return {
@@ -1582,6 +1645,32 @@ interface ParsedReply {
 }
 
 /**
+ * Is this summary a statement of intent rather than a verdict?
+ *
+ * Deliberately narrow: first person, about to act. "I'm inspecting the
+ * opening", "let me read the transcript", "I will start by reframing". Those
+ * describe a next step, and accepting one as "nothing needs changing" reports
+ * an edit that never happened as a success — which is what shipped.
+ *
+ * A real verdict is about the video: "the cut is already tight", "this is
+ * finished". Nothing about that phrasing trips these patterns, which is the
+ * whole reason they are anchored to a first-person subject and a verb of
+ * intention rather than to tense in general. A looser test would start
+ * rejecting genuine answers, and a genuine "nothing to do" being refused is a
+ * worse failure than the one being fixed.
+ */
+function readsAsIntent(summary: string): boolean {
+  const text = summary.trim().toLowerCase();
+  if (!text) return true;
+  return (
+    /^(let me\b|i'?m (going to|about to|now )?\w+ing\b|i (will|'ll|need to|should|am going to)\b)/.test(text) ||
+    /\b(let me|i'?ll now|first,? i(?:'| a)m)\b/.test(text) ||
+    // "…to build a…", "…so that I can…": describing a purpose not yet served.
+    /\bi(?:'| a)m (inspecting|checking|reading|looking|reviewing|analysing|analyzing|examining)\b/.test(text)
+  );
+}
+
+/**
  * True when a reply carries reasoning and nothing else.
  *
  * Distinguished from a deliberate empty plan by what the model actually wrote:
@@ -1679,13 +1768,18 @@ function parseReply(text: string): ParsedReply {
 /**
  * Looks the model is allowed before it must answer.
  *
- * Eight rather than six since the picture became measurable. A plan that puts
- * type over footage has a real question to ask per placement — *does this
- * stretch carry a caption* — and a budget that made it choose between reading
- * the transcript and checking the frame was making it choose between two
- * halves of the same job.
+ * Generous on purpose. Six was right when there were three tools and all of
+ * them read text; it became actively harmful once the picture was measurable,
+ * because the prompt asks for a placement to be checked before it is made —
+ * and a plan with a title and five captions has six placements. The budget and
+ * the guidance were telling it opposite things, and what the person saw was
+ * "it kept looking at the footage instead of answering" after ninety seconds.
+ *
+ * A look costs one round trip against a request that already carries an 8k
+ * system prompt, so the marginal cost is small and the marginal value — a
+ * caption that lands somewhere legible — is the whole feature.
  */
-export const MAX_TOOL_CALLS = 8;
+export const MAX_TOOL_CALLS = 18;
 /**
  * Turns spent on a look that taught it nothing — a repeat, or one asked after
  * the budget is gone.
@@ -1700,13 +1794,21 @@ const MAX_WASTED_LOOKS = 3;
 /**
  * Empty plans tolerated before giving up.
  *
- * Two: one to catch a turn that simply went nowhere, and one more in case the
- * nudge itself was misread. Past that it is not going to produce work, and
- * saying so beats returning silence dressed as an answer.
+ * Four, since an empty plan is now never accepted for an edit request — it is
+ * always challenged, so this is the only thing bounding that exchange. Each
+ * challenge names how many looks are left and tells it to use one, which is
+ * usually what it was trying to say by answering with an intention.
  */
-const MAX_EMPTY_PLANS = 2;
-/** Total model turns, including looks, malformed retries and the repair. */
-const MAX_TURNS = 16;
+const MAX_EMPTY_PLANS = 4;
+/**
+ * Total model turns, including looks, malformed retries and the repair.
+ *
+ * Has to be comfortably above the look budget plus everything that can happen
+ * around it: a malformed reply, a truncated one, the empty-plan challenge and
+ * the repair round. When it was sixteen against a budget of eight, a run that
+ * used its looks legitimately could exhaust the turns before it ever answered.
+ */
+const MAX_TURNS = 40;
 
 export async function planRescriptEdit(
   input: RescriptAgentInput
@@ -1915,7 +2017,21 @@ still what the video is *about*.`,
     turn: number,
     squeeze = 1
   ): Promise<{ text: string; finishReason?: string }> => {
-    const maxTokens = 12_000;
+    /**
+     * Room for the answer.
+     *
+     * A whole-edit plan is thirty operations across six named steps, each with
+     * a sentence of reasoning, and it shares this budget with the model's own
+     * working-out. Twelve thousand was not enough for the case the app most
+     * wants to be good at: the reply was cut off mid-object and came back as
+     * "invalid JSON — 1 object(s) in the reply, none usable", thirty-four times
+     * in one run, with the model eventually writing "every JSON I've tried has
+     * been rejected" because from its side that is exactly what happened.
+     *
+     * Output tokens are the cheap half of a request that already carries an 8k
+     * system prompt and a transcript, and a truncated plan costs the whole run.
+     */
+    const maxTokens = 32_000;
     const budget = Math.floor(inputBudget(input.model, maxTokens) * squeeze);
     const packed = packMessages({
       pinned: messages.slice(0, PINNED),
@@ -2063,14 +2179,21 @@ still what the video is *about*.`,
             ? `You already asked that, and the answer has not changed:\n\n${seen}`
             : "You have used all of your looks.";
 
-        if (wasted >= MAX_WASTED_LOOKS) {
+        // A spent budget closes the tools immediately, rather than after three
+        // more turns of being told no. Those three turns were the actual cost:
+        // a model that had legitimately used every look then spent a third of
+        // the turn limit discovering it could not have another, and ran out
+        // before it ever answered. A *repeat* is different — that is the model
+        // going in a circle, and it is worth a nudge before the vocabulary is
+        // taken away.
+        if (spent || wasted >= MAX_WASTED_LOOKS) {
           toolsClosed = true;
           // Withdrawing the vocabulary is the part that works. Telling it to
           // stop while the tools are still described to it does not.
           messages[0] = { role: "system", content: closedSystem };
           messages.push({
             role: "user",
-            content: `${answer}\n\nThe tools are now closed. Reply with the plan itself and nothing else, using what you already know.`,
+            content: `${answer}\n\nThe tools are now closed. Reply with the plan itself and nothing else, using what you already know. You have looked at enough — everything you need is above.`,
           });
         } else {
           messages.push({
@@ -2171,15 +2294,23 @@ still what the video is *about*.`,
        * cannot even manage a sentence is asked again.
        */
       const justified = parsed.summary.trim().length > 0;
-      // A review is asked once and taken at its word.
-      //
-      // For a plan, an empty answer is usually the model stalling, so it is
-      // worth one challenge. For a review it is the *most common correct
-      // answer* — an edit accepted step by step is usually right — and pushing
-      // back on it asks a reviewer to justify finding nothing, which is how you
-      // get an invented fault. The prompt tells it not to invent one; querying
-      // the answer would tell it otherwise, louder.
-      if (justified && (queriedEmpty || reviewing)) {
+      /**
+       * "Nothing to do" is a real answer, and an intention is not.
+       *
+       * A review is asked once and taken at its word: finding nothing is the
+       * most common correct outcome there, and pushing back on it asks a
+       * reviewer to justify a clean bill of health, which is how you get an
+       * invented fault.
+       *
+       * For a plan the old test was any non-empty summary, and that was far
+       * too weak. What it let through, on "edit this for me end to end", was
+       * the summary "I'm inspecting the opening to build a complete vertical
+       * short" — the model saying what it was *about to do* — returned to the
+       * person as a successful edit that changed nothing at all. So a summary
+       * that reads as an intention no longer counts as a verdict, and the
+       * model is asked again.
+       */
+      if (justified && (reviewing || (queriedEmpty && !readsAsIntent(parsed.summary)))) {
         return {
           summary: parsed.summary,
           findings: parsed.findings,
@@ -2193,17 +2324,27 @@ still what the video is *about*.`,
 
       emptyPlans += 1;
       if (emptyPlans > MAX_EMPTY_PLANS) {
-        problem = "it returned an empty plan and could not say why";
+        problem = "it kept answering with intentions instead of operations";
         break;
       }
 
       queriedEmpty = true;
+      const left = Math.max(0, MAX_TOOL_CALLS - looks);
       messages.push({ role: "assistant", content: result.text.slice(0, 1_500) });
       messages.push({
         role: "user",
-        content: propose
-          ? "That plan has no steps in it. If you still need to look at something, use a tool. If you are ready, send the steps. If you genuinely believe nothing about this video should change, say exactly why in the summary — an empty summary is not an answer."
-          : "That plan has no operations in it. If you still need to look at something, use a tool. If you are ready, send the operations. If you genuinely believe nothing needs changing, say exactly why in the summary — an empty summary is not an answer.",
+        content: [
+          propose
+            ? "That reply had no steps in it, so nothing would happen. Saying what you are about to do is not doing it."
+            : "That reply had no operations in it, so nothing would happen. Saying what you are about to do is not doing it.",
+          toolsClosed || left === 0
+            ? "You have looked at everything you are going to. Answer now, from what is above."
+            : `If you still need to look at something, USE A TOOL — you have ${left} look${left === 1 ? "" : "s"} left, and where_text_fits takes every stretch at once.`,
+          propose
+            ? "Otherwise send the steps themselves, with the operations inside them."
+            : "Otherwise send the operations themselves.",
+          'If you truly believe this video needs no changes, say that as a verdict about the video — "the cut is already tight and there is nothing worth adding" — not as a description of what you are about to do.',
+        ].join(" "),
       });
       continue;
     }

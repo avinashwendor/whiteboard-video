@@ -200,6 +200,61 @@ async function ask(call: object, context: RescriptAgentContext) {
   console.log("✓ where_text_fits judges a stretch on its worst frame");
 }
 
+/* ------------------------------- many at once ------------------------------- */
+
+{
+  // The fix for the failure people actually saw: "it kept looking at the
+  // footage instead of answering". The prompt asks for a placement to be
+  // checked before it is made, and a plan has several placements — so asking
+  // one at a time spent the whole look budget and the conversation ended
+  // without a plan. One call has to answer for all of them.
+  const context = { ...base, vision: survey() };
+  const answer = await ask(
+    {
+      thinking: "check them all",
+      tool: "where_text_fits",
+      args: {
+        spans: [
+          { from: 0, to: 6 },
+          { from: 14, to: 20 },
+          { from: 30, to: 36 },
+        ],
+      },
+    },
+    context
+  );
+
+  const blocks = answer.match(/WHERE TYPE CAN SIT/g) ?? [];
+  assert(
+    blocks.length === 3,
+    `three stretches should get three answers in one look, got ${blocks.length}`
+  );
+  assert(/0\.0–6\.0s/.test(answer), "the first stretch is named");
+  assert(/30\.0–36\.0s/.test(answer), "and the last");
+
+  // A single window still works — the shape the prompt shows for one caption.
+  const one = await ask(
+    { thinking: "just one", tool: "where_text_fits", args: { from: 4, to: 9 } },
+    context
+  );
+  assert((one.match(/WHERE TYPE CAN SIT/g) ?? []).length === 1, "one window, one answer");
+
+  // A duration instead of an end, which is how the ops are written.
+  const dur = await ask(
+    { thinking: "by duration", tool: "where_text_fits", args: { spans: [{ from: 4, duration: 3 }] } },
+    context
+  );
+  assert(/4\.0–7\.0s/.test(dur), `a duration should resolve to an end: ${dur.slice(0, 80)}`);
+
+  // Nothing usable asks for the shape rather than answering for 0–4s.
+  const none = await ask(
+    { thinking: "oops", tool: "where_text_fits", args: {} },
+    context
+  );
+  assert(/Give a window/.test(none), "an empty call explains the shape");
+  console.log("✓ one call answers for every stretch a plan will caption");
+}
+
 /* ------------------------------- no measurements ---------------------------- */
 
 {
