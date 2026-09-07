@@ -82,8 +82,6 @@ export const en = {
   "transcript.removePause": "Remove this pause",
   "transcript.editorLabel": "Transcript",
   "transcript.slashTitle": "Insert",
-  "transcript.slashSplit": "Split here",
-  "transcript.slashSplitHint": "Start a new scene at this point",
   "transcript.joinClips": "Join clips",
   "transcript.hesitation": "Detected hesitation (not transcribed) — cut with Remove filler words",
   "tools.bulk": "Bulk transcript cleanups",

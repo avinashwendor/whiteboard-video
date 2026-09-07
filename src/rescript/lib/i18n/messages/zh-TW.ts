@@ -83,8 +83,6 @@ export const zhTW: Record<MessageKey, string> = {
   "transcript.removePause": "刪除此停頓",
   "transcript.editorLabel": "逐字稿",
   "transcript.slashTitle": "插入",
-  "transcript.slashSplit": "在此分割",
-  "transcript.slashSplitHint": "從此處開始新場景",
   "transcript.joinClips": "合併片段",
   "transcript.hesitation": "偵測到猶豫聲（未轉錄）— 可用「移除填充詞」剪除",
   "tools.bulk": "批次清理逐字稿",

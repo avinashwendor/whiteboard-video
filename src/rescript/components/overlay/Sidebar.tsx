@@ -15,6 +15,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
+import { useChatStore } from "@/rescript/lib/chat/store";
 import AiPanel from "./AiPanel";
 import ElementsPanel from "./ElementsPanel";
 import FramePanel from "./FramePanel";
@@ -79,6 +80,17 @@ export default function Sidebar() {
         if (state.selectedId && state.selectedId !== previous.selectedId) {
           setTab("style");
         }
+      }),
+    []
+  );
+
+  // "Ask for something else" in the transcript's `/` menu posts an instruction
+  // the panel has to be mounted to run, and the panel is only mounted while its
+  // own tab is showing. Bring it forward; it takes the instruction from there.
+  useEffect(
+    () =>
+      useChatStore.subscribe((state, previous) => {
+        if (state.pending && state.pending !== previous.pending) setTab("ai");
       }),
     []
   );

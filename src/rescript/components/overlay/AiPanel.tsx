@@ -856,6 +856,22 @@ export default function AiPanel() {
     submitRef.current = submitText;
   }, [submitText]);
 
+  /**
+   * An instruction posted from somewhere else — the `/` menu in the transcript,
+   * for anything it cannot express as operations of its own.
+   *
+   * Taken rather than read, so it runs exactly once however many times this
+   * panel is mounted and unmounted by the tab strip. Deliberately after the
+   * effect above: on the render where the panel first appears, `submitRef` is
+   * assigned by that effect and this one runs with it already set.
+   */
+  const pendingAsk = useChatStore((s) => s.pending);
+  useEffect(() => {
+    if (!pendingAsk || busy) return;
+    const instruction = useChatStore.getState().takePending();
+    if (instruction) void submitRef.current?.(instruction, "execute");
+  }, [pendingAsk, busy]);
+
   /** Run the steps the person kept, in order, reporting each one. */
   const applyProposal = useCallback(async () => {
     const current = proposal;

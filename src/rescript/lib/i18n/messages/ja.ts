@@ -83,8 +83,6 @@ export const ja: Record<MessageKey, string> = {
   "transcript.removePause": "この間を削除",
   "transcript.editorLabel": "文字起こし",
   "transcript.slashTitle": "挿入",
-  "transcript.slashSplit": "ここで分割",
-  "transcript.slashSplitHint": "この位置から新しいシーンを開始",
   "transcript.joinClips": "クリップを結合",
   "transcript.hesitation": "ためらい音を検出しました（文字起こしなし）— フィラー語を削除でカット",
   "tools.bulk": "文字起こしの一括クリーンアップ",

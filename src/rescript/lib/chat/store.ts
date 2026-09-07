@@ -89,6 +89,19 @@ interface ChatState extends ChatThread {
    */
   abort: (() => void) | null;
 
+  /**
+   * An instruction handed to the panel from somewhere else — today the `/`
+   * menu in the transcript, which can express most edits as operations but not
+   * all of them, and needs somewhere to send the rest.
+   *
+   * A field rather than a call, because the thing that can run an instruction
+   * is the panel, and the panel is not mounted when another tab is showing.
+   * The sidebar watches this to bring the panel forward; the panel takes it and
+   * clears it. Both are subscriptions to a change, so an instruction is acted
+   * on exactly once.
+   */
+  pending: string | null;
+
   append: (kind: LogKind, text: string) => void;
   setLog: (log: LogEntry[]) => void;
   pushTurn: (turn: ChatTurn) => void;
@@ -96,6 +109,10 @@ interface ChatState extends ChatThread {
   setLastOutcome: (outcome: string) => void;
   setProposal: (proposal: Proposal | null) => void;
   setAbort: (abort: (() => void) | null) => void;
+  /** Queue an instruction for the panel to run. */
+  ask: (instruction: string) => void;
+  /** Take it, so it runs once. */
+  takePending: () => string | null;
   /** Everything the autosave needs, and nothing it does not. */
   snapshot: () => ChatThread;
   hydrate: (thread: ChatThread | undefined) => void;
@@ -155,6 +172,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   ...emptyThread(),
   sequence: 0,
   abort: null,
+  pending: null,
 
   append: (kind, text) => {
     const sequence = get().sequence + 1;
@@ -181,6 +199,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setAbort: (abort) => set({ abort }),
 
+  ask: (instruction) => {
+    const text = instruction.trim();
+    if (text) set({ pending: text });
+  },
+
+  takePending: () => {
+    const { pending } = get();
+    if (pending) set({ pending: null });
+    return pending;
+  },
+
   snapshot: () => {
     const { turns, log, proposal } = get();
     return { turns, log, proposal };
@@ -197,6 +226,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   reset: () => {
     get().abort?.();
-    set({ ...emptyThread(), sequence: 0, abort: null });
+    set({ ...emptyThread(), sequence: 0, abort: null, pending: null });
   },
 }));

@@ -33,11 +33,20 @@ import SpeakerLabel, {
   SelectionSpeakerPopover,
 } from "./SpeakerLabel";
 import {
+  canSplitAt,
   getActiveSceneBoundaries,
   getKeepRanges,
   isWordCutOut,
   mapSplitsToWords,
+  originalToEdited,
 } from "@/rescript/lib/edits";
+import { sentenceAround, type SlashContext, type SlashResult } from "@/rescript/lib/slash";
+import TranscriptSlashMenu from "./TranscriptSlashMenu";
+import { useCapabilities } from "@/rescript/hooks/useCapabilities";
+import { useOutputTimeline } from "@/rescript/hooks/useOverlayTimeline";
+import { useOverlayStore } from "@/rescript/lib/overlay/store";
+import { useChatStore } from "@/rescript/lib/chat/store";
+import { runPlan } from "@/rescript/lib/overlay/ops";
 import { useTranscriptSelection } from "@/rescript/hooks/useTranscriptSelection";
 import { useTranscriptCaret } from "@/rescript/hooks/useTranscriptCaret";
 import { findPauses, formatPause, type Pause } from "@/rescript/lib/pauses";
@@ -184,7 +193,6 @@ export default function TranscriptPanel() {
   const correctWords = useEditorStore((s) => s.correctWords);
   const importWords = useEditorStore((s) => s.importWords);
   const removeSceneBoundary = useEditorStore((s) => s.removeSceneBoundary);
-  const splitAt = useEditorStore((s) => s.splitAt);
   const cutRanges = useEditorStore((s) => s.cutRanges);
   const selectedWordIds = useEditorStore((s) => s.selectedWordIds);
   const playing = useEditorStore((s) => s.playing);
@@ -354,17 +362,98 @@ export default function TranscriptPanel() {
     [moveCaretBy, openSlash, closeSlash, clearCaret, slashOpen]
   );
 
+  /* ------------------------------- the / menu ------------------------------- */
+
+  const can = useCapabilities();
+  const outputTimeline = useOutputTimeline();
+  const aspect = useOverlayStore((s) => s.aspect);
+
   /**
-   * `/` → Split here. The caret sits before a word, so the cut lands on that
-   * word's start and it becomes the first word of the new clip. `splitAt`
-   * refuses a point that is already a boundary or inside a cut, in which case
-   * the menu just closes.
+   * Everything a `/` command needs to know about where the caret is.
+   *
+   * The translation between the two clocks happens here, once, rather than in
+   * each command: the caret is a moment in the *source* media, and every
+   * overlay is placed on the *finished* video's clock. They are the same number
+   * only until something is cut.
    */
-  const insertSplitAtCaret = useCallback(() => {
-    const time = timeAtCaret();
-    if (time !== null) splitAt(time);
-    closeSlash();
-  }, [timeAtCaret, splitAt, closeSlash]);
+  const slashContext = useMemo<SlashContext | null>(() => {
+    const at = timeAtCaret();
+    if (at === null) return null;
+    const outAt = originalToEdited(at, cuts);
+    const outDuration = outputTimeline.duration;
+
+    const index = caretAnchorWord
+      ? visibleWords.findIndex((w) => w.id === caretAnchorWord.id)
+      : -1;
+    const run = index >= 0 ? sentenceAround(visibleWords, index) : [];
+    const sentence = run.length
+      ? {
+          ids: run.map((w) => w.id),
+          text: run.map((w) => w.text).join(" "),
+          from: originalToEdited(run[0].start, cuts),
+          to: originalToEdited(run[run.length - 1].end, cuts),
+        }
+      : null;
+
+    const found = caretAnchorWord ? pauseBeforeWordId.get(caretAnchorWord.id) : undefined;
+    const pause = found
+      ? {
+          from: originalToEdited(found.start, cuts),
+          to: originalToEdited(found.end, cuts),
+          seconds: found.duration,
+        }
+      : null;
+
+    return {
+      at,
+      outAt,
+      outDuration,
+      sentence,
+      pause,
+      canSplit: canSplitAt(at, duration, cuts, sceneBoundaries),
+      can,
+    };
+  }, [
+    timeAtCaret,
+    cuts,
+    outputTimeline.duration,
+    caretAnchorWord,
+    visibleWords,
+    pauseBeforeWordId,
+    duration,
+    sceneBoundaries,
+    can,
+  ]);
+
+  /**
+   * Run what the menu chose.
+   *
+   * Through the same executor the agent uses, so a command cannot quietly do
+   * something the agent could not — and so the log in the AI panel is a record
+   * of everything that has happened to the video, whoever asked for it.
+   */
+  const runSlash = useCallback(
+    async (result: SlashResult) => {
+      const chat = useChatStore.getState();
+      if (result.kind === "ask") {
+        chat.ask(result.prompt);
+        return;
+      }
+      const results = await runPlan(result.ops, {
+        playhead: originalToEdited(
+          useEditorStore.getState().currentTime,
+          cuts
+        ),
+        duration: outputTimeline.duration,
+        timeline: outputTimeline,
+        aspect,
+      });
+      for (const step of results) {
+        chat.append(step.ok ? "ok" : "fail", step.message);
+      }
+    },
+    [cuts, outputTimeline, aspect]
+  );
 
   const toolbarOpen = !!(selection && !correcting && !assigningSpeaker);
   const { setFloating: setToolbarFloating, floatingStyles: toolbarStyles } =
@@ -693,36 +782,22 @@ export default function TranscriptPanel() {
             </div>
           )}
 
-          {slashOpen && caretAnchorWord && (
+          {slashOpen && caretAnchorWord && slashContext && (
             <FloatingPortal>
               <div
                 ref={setSlashFloating}
                 data-transcript-slash
                 role="menu"
                 aria-label={t("transcript.slashTitle")}
-                className="z-40 w-60 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-800 dark:shadow-black/30"
+                className="z-40"
                 style={slashStyles}
                 onMouseDown={(e) => e.preventDefault()}
               >
-                <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium tracking-wide text-zinc-400 dark:text-zinc-500">
-                  {t("transcript.slashTitle")}
-                </p>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={insertSplitAtCaret}
-                  className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-700/60"
-                >
-                  <Scissors size={13} className="mt-0.5 shrink-0 text-zinc-500 dark:text-zinc-400" />
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium leading-tight text-zinc-800 dark:text-zinc-100">
-                      {t("transcript.slashSplit")}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
-                      {t("transcript.slashSplitHint")}
-                    </span>
-                  </span>
-                </button>
+                <TranscriptSlashMenu
+                  context={slashContext}
+                  onRun={runSlash}
+                  onClose={closeSlash}
+                />
               </div>
             </FloatingPortal>
           )}

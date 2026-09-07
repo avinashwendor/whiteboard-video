@@ -83,8 +83,6 @@ export const es: Record<MessageKey, string> = {
   "transcript.removePause": "Eliminar esta pausa",
   "transcript.editorLabel": "Transcripción",
   "transcript.slashTitle": "Insertar",
-  "transcript.slashSplit": "Dividir aquí",
-  "transcript.slashSplitHint": "Empezar una escena nueva en este punto",
   "transcript.joinClips": "Unir clips",
   "transcript.hesitation": "Vacilación detectada (no transcrita) — córtala con Quitar muletillas",
   "tools.bulk": "Limpiezas masivas de transcripción",

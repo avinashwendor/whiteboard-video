@@ -83,8 +83,6 @@ export const ko: Record<MessageKey, string> = {
   "transcript.removePause": "이 구간 삭제",
   "transcript.editorLabel": "자막",
   "transcript.slashTitle": "삽입",
-  "transcript.slashSplit": "여기서 분할",
-  "transcript.slashSplitHint": "이 지점에서 새 장면 시작",
   "transcript.joinClips": "클립 합치기",
   "transcript.hesitation": "머뭇거림 감지됨(자막 없음) — 필러 단어 제거로 컷",
   "tools.bulk": "자막 일괄 정리",

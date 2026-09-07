@@ -83,8 +83,6 @@ export const zhCN: Record<MessageKey, string> = {
   "transcript.removePause": "删除此停顿",
   "transcript.editorLabel": "转录稿",
   "transcript.slashTitle": "插入",
-  "transcript.slashSplit": "在此拆分",
-  "transcript.slashSplitHint": "从此处开始新场景",
   "transcript.joinClips": "合并片段",
   "transcript.hesitation": "检测到未转录的停顿语气，可用“移除语气词”剪除",
   "tools.bulk": "批量清理转录文本",
