@@ -551,7 +551,7 @@ RULES
  * all of them. The cost is one line of parsing; the benefit is that the harness
  * does not break when the model behind the id changes.
  */
-const PROTOCOL = `HOW TO REPLY
+export const PROTOCOL = `HOW TO REPLY
 
 Every reply is one JSON object and nothing else — no prose around it, no code fence.
 
@@ -585,6 +585,9 @@ it is a conversation that never reaches a plan.
 
 When you are ready, reply with the plan instead:
 {"thinking":"how this makes the highest-quality edit","summary":"one sentence, what you did","ops":[ ... ]}
+
+There is no tool for finishing. Finishing is replying with that object and no "tool" key — asking for one
+called "reply_with_plan", "submit" or "done" costs you a turn and gets you this paragraph back.
 
 "ops" must not be empty. If you are still working out what to do, use a tool — a plan with no operations
 is not a way to think out loud, it is the answer "nothing about this video needs changing", and you will be
@@ -1239,7 +1242,13 @@ function runTool(
 
     default:
       return {
-        result: `There is no tool called "${call.tool}". The tools are read_transcript, search_transcript, find_phrase, frame_at, where_text_fits, inspect and measure.`,
+        // Two different mistakes, and listing the tools only helps with one of
+        // them. A name like "reply_with_plan" is not a typo for a tool that
+        // exists — it is a reply that went looking for a tool to finish with,
+        // and telling it the tools again sends it round the same loop.
+        result: /plan|submit|finish|done|answer|respond|repl/i.test(call.tool)
+          ? `There is no tool called "${call.tool}", and none for finishing. To finish, reply with {"thinking":…,"summary":…,"ops":[…]} — the same object, with no "tool" key.`
+          : `There is no tool called "${call.tool}". The tools are read_transcript, search_transcript, find_phrase, frame_at, where_text_fits, inspect and measure.`,
         detail: `Asked for an unknown tool (${call.tool})`,
       };
   }

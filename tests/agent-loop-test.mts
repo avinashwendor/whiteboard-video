@@ -15,6 +15,7 @@
 import {
   MAX_TOOL_CALLS,
   planRescriptEdit,
+  PROTOCOL,
   type RescriptAgentContext,
 } from "../src/lib/ai/rescript-agent.js";
 
@@ -521,6 +522,25 @@ function model(replies: (n: number) => string) {
   assert(plan.steps?.length === 1, "a fix comes back as a step");
   assert(plan.findings.length === 1, "and says what it saw");
   assert(stub.calls === 1, `no repair round needed for a clean fix, took ${stub.calls}`);
+}
+
+/* --------------------------- looking for a way out --------------------------- */
+
+{
+  // A reply that goes looking for a tool to finish with. The protocol says to
+  // finish by replying with the plan and no "tool" key, and a model that has
+  // just spent six turns using tools reaches for one anyway — so the answer it
+  // gets back has to be the instruction, not the list of tools again, or the
+  // next turn is the same turn.
+  assert(
+    /There is no tool for finishing/.test(PROTOCOL),
+    "the protocol never says that finishing is not a tool call"
+  );
+  assert(
+    /reply_with_plan/.test(PROTOCOL),
+    "nor names the shape of the guess, which is the one that actually gets made"
+  );
+  console.log("✓ the protocol says finishing is not a tool");
 }
 
 console.log("ALL AGENT LOOP TESTS PASSED");
