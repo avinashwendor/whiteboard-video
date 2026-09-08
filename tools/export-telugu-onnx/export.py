@@ -4,7 +4,7 @@
     python tools/export-telugu-onnx/export.py
 
 Writes public/models/whisper-telugu-small/, which the app serves for the
-`teluguSmall` entry in src/rescript/lib/models.ts (flagged `local`). Those
+`teluguSmall` entry in src/motionscript/lib/models.ts (flagged `local`). Those
 weights are gitignored — ~310 MB — so this script is how they come back.
 
 Why each step exists, since none of it is obvious:

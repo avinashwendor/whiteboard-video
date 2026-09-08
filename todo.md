@@ -8,7 +8,7 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
 
 ### Broken navigation (nothing works right)
 - [x] "New thread" doesn't work — fix
-- [ ] Rescript name click → lands on wrong new page (bug, Avinash)
+- [ ] Editor name click → lands on wrong new page (bug, Avinash)
 - [x] History → New flow broken, connections missing — add redirects
 - [x] Click on Studio → should land on creation page
 
@@ -58,7 +58,7 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
       the paper.
 
 ### Landing page content
-- [~] Rescript UI → match website theme — defaults to dark now so crossing
+- [~] Editor UI → match website theme — defaults to dark now so crossing
       between the two apps does not flash white. Full restyle of its 107
       components not attempted; it is Avinash's app.
 - [x] Improve content: video styles, pricing, value prop, editor features ("more larp")

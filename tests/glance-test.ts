@@ -15,9 +15,9 @@
  * Run with `npx tsx tests/glance-test.ts`.
  */
 
-import { glanceTimes } from "../src/rescript/lib/overlay/glance";
-import { buildTimeline, outputToOriginal } from "../src/rescript/lib/overlay/timeline";
-import type { Word } from "../src/rescript/lib/types";
+import { glanceTimes } from "../src/motionscript/lib/overlay/glance";
+import { buildTimeline, outputToOriginal } from "../src/motionscript/lib/overlay/timeline";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

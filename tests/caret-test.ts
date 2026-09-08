@@ -6,8 +6,8 @@ import {
   moveCaret,
   wordAfterCaret,
   type CaretPos,
-} from "../src/rescript/lib/caret";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/caret";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);

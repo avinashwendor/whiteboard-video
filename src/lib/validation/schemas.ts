@@ -3,7 +3,7 @@ import { IMAGE_STYLES } from "@/lib/ai/prompt-engineering";
 import { THEME_NAMES } from "@/lib/hyperframes/theme";
 import { SCENE_ROLES_TUPLE } from "@/lib/hyperframes/roles";
 import { BOARD_STOCK_NAMES_TUPLE } from "@/lib/whiteboard/palette";
-import { POSITIONS } from "@/rescript/lib/overlay/ops-schema";
+import { POSITIONS } from "@/motionscript/lib/overlay/ops-schema";
 import { TTS_PROVIDER_IDS } from "@/lib/ai/tts";
 
 /**
@@ -163,7 +163,7 @@ const hexColour = z
   .trim()
   .regex(/^#[0-9a-fA-F]{6}$/, "must be a #rrggbb colour");
 
-export const rescriptAgentRequestSchema = z.object({
+export const motionScriptAgentRequestSchema = z.object({
   instruction: promptField,
   context: z.object({
     duration: z.number().min(0).max(24 * 3600),
@@ -355,7 +355,7 @@ export const rescriptAgentRequestSchema = z.object({
     .max(4)
     .optional(),
 });
-export type RescriptAgentRequest = z.infer<typeof rescriptAgentRequestSchema>;
+export type MotionScriptAgentRequest = z.infer<typeof motionScriptAgentRequestSchema>;
 
 export const createRequestSchema = z.object({
   prompt: promptField,

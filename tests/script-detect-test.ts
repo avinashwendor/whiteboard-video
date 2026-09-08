@@ -1,4 +1,4 @@
-import { detectLanguageFromText } from "../src/rescript/lib/scriptDetect";
+import { detectLanguageFromText } from "../src/motionscript/lib/scriptDetect";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);

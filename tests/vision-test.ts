@@ -22,7 +22,7 @@ import {
   toWire,
   SAMPLE_EDGE,
   type FrameRead,
-} from "../src/rescript/lib/overlay/vision";
+} from "../src/motionscript/lib/overlay/vision";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

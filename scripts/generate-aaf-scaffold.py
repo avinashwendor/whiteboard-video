@@ -17,8 +17,8 @@ OUT_DIR = ROOT / "assets" / "aaf"
 MAX_CLIPS = 64
 EDIT_RATE = 30
 MEDIA_FRAMES = 10_000_000
-MARKER_URL = "file:///RESCRIPT_MEDIA_PLACEHOLDER"
-MARKER_NAME = "RESCRIPT_MEDIA_PLACEHOLDER"  # 26 chars — keep in sync with lib/aaf/patchAaf.ts
+MARKER_URL = "file:///MOTIONSCRIPT_MEDIA_PLCHLDR"
+MARKER_NAME = "MOTIONSCRIPT_MEDIA_PLCHLDR"  # 26 chars — keep in sync with lib/aaf/patchAaf.ts
 
 
 def main() -> None:
@@ -52,7 +52,7 @@ def main() -> None:
             slot_id=snd.slot_id, start=0, length=MEDIA_FRAMES, media_kind="Sound"
         )
 
-        comp = f.create.CompositionMob("Rescript Edit")
+        comp = f.create.CompositionMob("MotionScript Edit")
         comp["UsageCode"].value = AUID("0d010102-0101-0700-060e-2b3404010101")
         f.content.mobs.append(comp)
 
@@ -84,7 +84,7 @@ def main() -> None:
 
     with aaf2.open(str(out), "r") as f:
         tops = [m.name for m in f.content.toplevel()]
-        if tops != ["Rescript Edit"]:
+        if tops != ["MotionScript Edit"]:
             raise SystemExit(f"expected TopLevel composition, got {tops!r}")
 
     meta_path = OUT_DIR / "scaffold.meta.json"

@@ -15,10 +15,10 @@ function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 
-const editor = readFileSync("src/rescript/components/Editor.tsx", "utf8");
-const preview = readFileSync("src/rescript/components/MediaPreview.tsx", "utf8");
-const cutStore = readFileSync("src/rescript/lib/store.ts", "utf8");
-const overlayStore = readFileSync("src/rescript/lib/overlay/store.ts", "utf8");
+const editor = readFileSync("src/motionscript/components/Editor.tsx", "utf8");
+const preview = readFileSync("src/motionscript/components/MediaPreview.tsx", "utf8");
+const cutStore = readFileSync("src/motionscript/lib/store.ts", "utf8");
+const overlayStore = readFileSync("src/motionscript/lib/overlay/store.ts", "utf8");
 
 /* ------------------------------- the delete key ------------------------------ */
 

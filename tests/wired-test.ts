@@ -15,19 +15,19 @@
  * Run with `npx tsx tests/wired-test.ts`.
  */
 
-import { getCutRanges, getKeepRanges, originalToEdited } from "../src/rescript/lib/edits";
-import { buildTimeline, outputToOriginal } from "../src/rescript/lib/overlay/timeline";
-import { cuesAreStale, cuesFromStyle } from "../src/rescript/lib/overlay/subtitles";
-import { drawStateAt } from "../src/rescript/lib/overlay/animation";
-import { buildMixGraph } from "../src/rescript/lib/overlay/mix";
+import { getCutRanges, getKeepRanges, originalToEdited } from "../src/motionscript/lib/edits";
+import { buildTimeline, outputToOriginal } from "../src/motionscript/lib/overlay/timeline";
+import { cuesAreStale, cuesFromStyle } from "../src/motionscript/lib/overlay/subtitles";
+import { drawStateAt } from "../src/motionscript/lib/overlay/animation";
+import { buildMixGraph } from "../src/motionscript/lib/overlay/mix";
 import {
   audibleClips,
   defaultGainFor,
   type AudioClip,
-} from "../src/rescript/lib/overlay/audio";
-import { DEFAULT_SUBTITLE_STYLE } from "../src/rescript/lib/overlay/types";
-import type { TextElement } from "../src/rescript/lib/overlay/types";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/overlay/audio";
+import { DEFAULT_SUBTITLE_STYLE } from "../src/motionscript/lib/overlay/types";
+import type { TextElement } from "../src/motionscript/lib/overlay/types";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

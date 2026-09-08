@@ -24,15 +24,15 @@ import {
   defaultGainFor,
   gainAt,
   type AudioClip,
-} from "../src/rescript/lib/overlay/audio";
-import { buildMixGraph } from "../src/rescript/lib/overlay/mix";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
-import { addVoiceoverOp, siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
+} from "../src/motionscript/lib/overlay/audio";
+import { buildMixGraph } from "../src/motionscript/lib/overlay/mix";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
+import { addVoiceoverOp, siftOps } from "../src/motionscript/lib/overlay/ops-schema";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
 import {
   emptyComposition,
   isEmptyComposition,
-} from "../src/rescript/lib/overlay/types";
+} from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

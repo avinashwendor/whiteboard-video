@@ -2,13 +2,13 @@
  * Unit tests for transcript / subtitle export (and round-trips).
  * Run: npx tsx tests/serialize-transcript-test.ts
  */
-import { parseTranscript } from "../src/rescript/lib/parseTranscript";
+import { parseTranscript } from "../src/motionscript/lib/parseTranscript";
 import {
   formatSrtTimestamp,
   formatVttTimestamp,
   serializeTranscript,
-} from "../src/rescript/lib/serializeTranscript";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/serializeTranscript";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

@@ -22,7 +22,7 @@ import {
   joinLayout,
   readProbe,
   type ClipProbe,
-} from "../src/rescript/lib/ffmpeg";
+} from "../src/motionscript/lib/ffmpeg";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

@@ -9,7 +9,7 @@ python tools/export-telugu-onnx/export.py     # from the repo root
 ```
 
 Output is ~310 MB and **gitignored** (`/public/models/`). It is rebuilt, never
-committed. `MODELS.teluguSmall` in `src/rescript/lib/models.ts` is flagged
+committed. `MODELS.teluguSmall` in `src/motionscript/lib/models.ts` is flagged
 `local: true`, which serves it from `/models/<id>/`.
 
 ## Why this model exists at all
@@ -92,8 +92,8 @@ and waits. So an unconfigured deploy degrades, it does not break.
 ### Publishing a new export
 
 ```sh
-railway bucket create rescript-models --region sjc      # once per project
-eval "$(railway bucket credentials --bucket rescript-models --json | jq -r '
+railway bucket create motionscript-models --region sjc      # once per project
+eval "$(railway bucket credentials --bucket motionscript-models --json | jq -r '
   "export AWS_ACCESS_KEY_ID=\(.accessKeyId)
    export AWS_SECRET_ACCESS_KEY=\(.secretAccessKey)
    export BUCKET=\(.bucketName) ENDPOINT=\(.endpoint) AWS_REGION=auto"')"

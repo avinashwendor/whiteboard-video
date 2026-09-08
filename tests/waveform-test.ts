@@ -1,4 +1,4 @@
-import { buildWaveformPeaks, peakBetween } from "../src/rescript/lib/waveform";
+import { buildWaveformPeaks, peakBetween } from "../src/motionscript/lib/waveform";
 
 /** Reference: what the timeline used to compute straight from the PCM. */
 function rawPeak(audio: Float32Array, from: number, to: number): number {

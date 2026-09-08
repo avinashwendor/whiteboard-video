@@ -20,13 +20,13 @@
  */
 
 import { readFileSync } from "node:fs";
-import { clipTimeAt } from "../src/rescript/lib/overlay/render";
-import { addBrollOp } from "../src/rescript/lib/overlay/ops-schema";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
-import { checkCraft } from "../src/rescript/lib/overlay/craft";
+import { clipTimeAt } from "../src/motionscript/lib/overlay/render";
+import { addBrollOp } from "../src/motionscript/lib/overlay/ops-schema";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
+import { checkCraft } from "../src/motionscript/lib/overlay/craft";
 import { pexels } from "../src/lib/media/pexels";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
-import type { VideoElement } from "../src/rescript/lib/overlay/types";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
+import type { VideoElement } from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -138,13 +138,13 @@ function clip(partial: Partial<VideoElement> = {}): VideoElement {
 
 {
   // The contract that cannot be checked without a decoder, checked at source.
-  const compose = readFileSync("src/rescript/lib/overlay/compose.ts", "utf8");
+  const compose = readFileSync("src/motionscript/lib/overlay/compose.ts", "utf8");
   assert(
     /await seekClips\(/.test(compose),
     "the exporter must AWAIT every clip seek — a frame from the wrong moment is in the file forever"
   );
 
-  const stage = readFileSync("src/rescript/components/overlay/OverlayStage.tsx", "utf8");
+  const stage = readFileSync("src/motionscript/components/overlay/OverlayStage.tsx", "utf8");
   assert(
     /nudgeClips\(/.test(stage),
     "the preview must position clips each frame"
@@ -154,7 +154,7 @@ function clip(partial: Partial<VideoElement> = {}): VideoElement {
     "the preview must NOT await a seek — it would run at the decoder's seek rate"
   );
 
-  const render = readFileSync("src/rescript/lib/overlay/render.ts", "utf8");
+  const render = readFileSync("src/motionscript/lib/overlay/render.ts", "utf8");
   assert(
     /preloadComposition[\s\S]{0,600}loadClip/.test(render),
     "preloading a composition has to warm the clips too, or the first exported frames are placeholders"

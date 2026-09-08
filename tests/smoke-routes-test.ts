@@ -48,7 +48,7 @@ const ROUTES: Check[] = [
   // keys land. Either way it must not throw.
   { path: "/sign-in" },
   { path: "/sign-up" },
-  { path: "/video-editor", expect: ["MotionScript"], reject: ["Rescript"], isolated: true },
+  { path: "/video-editor", expect: ["MotionScript"], reject: ["MotionScript"], isolated: true },
   // The notices are an obligation, not a page: four of the licences this app is
   // built on require their text to reach the people who receive the software,
   // and a page that 404s or silently loses a notice satisfies none of them.

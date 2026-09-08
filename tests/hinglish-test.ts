@@ -15,17 +15,17 @@
  * Run with `npx tsx tests/hinglish-test.ts`.
  */
 
-import { hasIndicChars, romanizeForDisplay } from "../src/rescript/lib/indic";
-import { romanizeWords } from "../src/rescript/lib/romanize";
+import { hasIndicChars, romanizeForDisplay } from "../src/motionscript/lib/indic";
+import { romanizeWords } from "../src/motionscript/lib/romanize";
 import {
   TRANSCRIPT_LANGUAGES,
   TRANSCRIPT_LANGUAGE_ORDER,
   isRomanizableLanguage,
   isTranscriptLanguage,
-} from "../src/rescript/lib/languages";
-import { detectLanguageFromText } from "../src/rescript/lib/scriptDetect";
-import { alignModelFor } from "../src/rescript/lib/alignModels";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/languages";
+import { detectLanguageFromText } from "../src/motionscript/lib/scriptDetect";
+import { alignModelFor } from "../src/motionscript/lib/alignModels";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

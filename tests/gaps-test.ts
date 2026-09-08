@@ -19,10 +19,10 @@ import {
   getKeepRanges,
   getWordCutRanges,
   addManualCut,
-} from "../src/rescript/lib/edits";
-import { findSilenceRanges } from "../src/rescript/lib/silences";
-import { findPauses } from "../src/rescript/lib/pauses";
-import type { ManualCut, TimeRange, Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/edits";
+import { findSilenceRanges } from "../src/motionscript/lib/silences";
+import { findPauses } from "../src/motionscript/lib/pauses";
+import type { ManualCut, TimeRange, Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

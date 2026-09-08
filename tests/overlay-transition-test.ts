@@ -15,9 +15,9 @@
  * browser.
  */
 
-import { paintFrame } from "../src/rescript/lib/overlay/frame";
-import { buildTimeline, familyOf, transitionAt } from "../src/rescript/lib/overlay/timeline";
-import { TRANSITIONS } from "../src/rescript/lib/overlay/ops-schema";
+import { paintFrame } from "../src/motionscript/lib/overlay/frame";
+import { buildTimeline, familyOf, transitionAt } from "../src/motionscript/lib/overlay/timeline";
+import { TRANSITIONS } from "../src/motionscript/lib/overlay/ops-schema";
 import {
   DEFAULT_FRAME,
   DEFAULT_SUBTITLE_STYLE,
@@ -25,8 +25,8 @@ import {
   type Composition,
   type Transition,
   type TransitionKind,
-} from "../src/rescript/lib/overlay/types";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/overlay/types";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

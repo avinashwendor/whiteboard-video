@@ -34,11 +34,11 @@
 
 import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { planRescriptEdit } from "../src/lib/ai/rescript-agent";
+import { planMotionScriptEdit } from "../src/lib/ai/motionscript-agent";
 import { PROMPT_VERSION } from "../src/lib/ai/prompt-version";
-import { checkCraft, craftScore } from "../src/rescript/lib/overlay/craft";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
-import type { AgentOp } from "../src/rescript/lib/overlay/ops-schema";
+import { checkCraft, craftScore } from "../src/motionscript/lib/overlay/craft";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
+import type { AgentOp } from "../src/motionscript/lib/overlay/ops-schema";
 
 interface Fixture {
   name: string;
@@ -108,7 +108,7 @@ async function runOne(fixture: Fixture): Promise<Result> {
   let steps = 0;
 
   try {
-    const plan = await planRescriptEdit({
+    const plan = await planMotionScriptEdit({
       instruction: fixture.instruction,
       mode: "propose",
       context: {

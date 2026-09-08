@@ -44,7 +44,7 @@ import {
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
 import { BED_DUCK, BED_LEVEL, fetchBed } from "@/lib/video/bed";
-import { handOffToEditor } from "@/rescript/lib/handoff";
+import { handOffToEditor } from "@/motionscript/lib/handoff";
 import { createSfxBus, scheduleSfx } from "@/lib/video/sfx";
 
 /**

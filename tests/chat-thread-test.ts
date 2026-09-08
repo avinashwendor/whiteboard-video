@@ -19,7 +19,7 @@ import {
   parseThread,
   useChatStore,
   type ChatThread,
-} from "../src/rescript/lib/chat/store";
+} from "../src/motionscript/lib/chat/store";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

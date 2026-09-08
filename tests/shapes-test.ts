@@ -26,8 +26,8 @@ import {
   pathsFor,
   searchShapes,
   VIEWBOX,
-} from "../src/rescript/lib/overlay/shapes";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+} from "../src/motionscript/lib/overlay/shapes";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

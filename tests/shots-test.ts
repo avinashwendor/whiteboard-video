@@ -23,7 +23,7 @@ import {
   plateRect,
   regionsFor,
   shotAt,
-} from "../src/rescript/lib/overlay/shots";
+} from "../src/motionscript/lib/overlay/shots";
 import {
   DEFAULT_FRAME,
   DEFAULT_SUBTITLE_STYLE,
@@ -40,19 +40,19 @@ import {
   type Plate,
   type Shot,
   type ShotLayout,
-} from "../src/rescript/lib/overlay/types";
-import { paintFrame } from "../src/rescript/lib/overlay/frame";
-import { cameraFor, fitCamera } from "../src/rescript/lib/overlay/camera";
-import { findBeats, placePunchIns, type Beat } from "../src/rescript/lib/overlay/emphasis";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
+} from "../src/motionscript/lib/overlay/types";
+import { paintFrame } from "../src/motionscript/lib/overlay/frame";
+import { cameraFor, fitCamera } from "../src/motionscript/lib/overlay/camera";
+import { findBeats, placePunchIns, type Beat } from "../src/motionscript/lib/overlay/emphasis";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
 import {
   compositionFor,
   extraTargets,
   nameFor,
-} from "../src/rescript/lib/overlay/deliver";
-import { NEUTRAL_GRADE } from "../src/rescript/lib/overlay/grade";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/overlay/deliver";
+import { NEUTRAL_GRADE } from "../src/motionscript/lib/overlay/grade";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

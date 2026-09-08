@@ -17,7 +17,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { transcriptFromScenes } from "../src/rescript/lib/handoff";
+import { transcriptFromScenes } from "../src/motionscript/lib/handoff";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

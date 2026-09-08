@@ -19,7 +19,7 @@ import type { NextFetchEvent, NextMiddleware, NextRequest } from "next/server";
  *
  * **It no-ops without keys.** `clerkMiddleware()` throws on every request when
  * the publishable key is missing, which would take down the whole site
- * including the Rescript editor. Keys arrive from the Clerk dashboard into
+ * including the MotionScript editor. Keys arrive from the Clerk dashboard into
  * Railway's environment, so until they do, this passes requests through
  * untouched rather than failing closed on a feature nobody is using yet.
  */

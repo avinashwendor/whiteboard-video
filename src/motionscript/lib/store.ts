@@ -1,0 +1,1284 @@
+"use client";
+
+import { create } from "zustand";
+import type {
+  EditSnapshot,
+  EditorStatus,
+  ManualCut,
+  ProgressInfo,
+  SceneBoundary,
+  SourceClip,
+  SpeakerInfo,
+  TimeRange,
+  Word,
+} from "./types";
+import {
+  addManualCut,
+  applyWordBounds,
+  canSplitAt,
+  carrySceneBoundaries,
+  cutRangeAt,
+  deleteWordsCoveredBy,
+  getClipSegments,
+  getCutRanges,
+  getKeepRanges,
+  PLAYHEAD_EPSILON_S,
+  restoreRangesResult,
+  shrinkManualCuts,
+  trimEdgeResult,
+} from "./edits";
+import { isModelId, loadModelPreference, saveModelPreference } from "./models";
+import { isTranscriptSource, type TranscriptSource } from "./source";
+import { trackEvent } from "./telemetry";
+import {
+  DEFAULT_TRANSCRIPT_LANGUAGE,
+  DEFAULT_TRANSCRIPT_SCRIPT,
+  isRomanizableLanguage,
+  isTranscriptLanguage,
+  loadTranscriptLanguagePreference,
+  loadTranscriptScriptPreference,
+  saveTranscriptLanguagePreference,
+  saveTranscriptScriptPreference,
+  type TranscriptLanguageSetting,
+  type TranscriptScript,
+} from "./languages";
+import { romanizeWords } from "./romanize";
+import {
+  DEFAULT_MIN_PAUSE_S,
+  clampPauseThreshold,
+  loadPauseThresholdPreference,
+  savePauseThresholdPreference,
+} from "./pauses";
+import { en } from "@/motionscript/lib/i18n/messages/en";
+import { detectMediaKind, type MediaKind } from "./media";
+import { buildWaveformPeaks, type WaveformPeaks } from "./waveform";
+import {
+  deleteProject,
+  fileFromProject,
+  getProject,
+  loadLastProjectId,
+  saveLastProjectId,
+  type ProjectRecord,
+} from "./projects";
+import type { Composition } from "./overlay/types";
+import { useOverlayStore } from "./overlay/store";
+import { forgetFrames } from "./overlay/glance";
+import { regenerateCues, resetImageMotion } from "./overlay/ops";
+import { useChatStore } from "./chat/store";
+import {
+  addSpeaker as addSpeakerEntry,
+  findSpeakerByName,
+  moveSpeakerBoundary,
+  reassignWords,
+  removeSpeaker as removeSpeakerEntry,
+  renameSpeaker as renameSpeakerEntry,
+  replaceSpeaker as replaceSpeakerEntry,
+  speakersFromWords,
+} from "./speakers";
+
+interface PendingTranscript {
+  name: string;
+  words: Word[];
+  speakers?: SpeakerInfo[];
+}
+
+/**
+ * The transcript exactly as the model produced it (native script), kept in
+ * memory so flipping native↔roman is lossless within a session. Not persisted:
+ * a reloaded project keeps whatever script was saved, and toggling then works
+ * from that. Set whenever {@link EditorState.words} is populated from ASR,
+ * import, or a restored record.
+ */
+let nativeWordsSnapshot: Word[] = [];
+
+/**
+ * Apply the chosen output script to a native-script transcript. Romanization
+ * only fires for a romanizable language in "roman" mode; every other case
+ * returns the words untouched (English, Chinese, native mode).
+ */
+function applyScript(
+  words: Word[],
+  script: TranscriptScript,
+  language: TranscriptLanguageSetting
+): Word[] {
+  if (script === "roman" && isRomanizableLanguage(language)) {
+    return romanizeWords(words, language);
+  }
+  return words;
+}
+
+interface EditorState {
+  // Media
+  videoFile: File | null;
+  mediaUrl: string | null;
+  /** Whether the loaded file is video or audio-only. */
+  mediaKind: MediaKind | null;
+  duration: number;
+  /**
+   * Min/max envelope of the media's audio track, for the timeline waveform.
+   *
+   * The decoded PCM itself is deliberately not kept: it is hundreds of
+   * megabytes on a long recording and the worker takes ownership of it (see
+   * useTranscriber). Null when the file has no audio track.
+   */
+  waveform: WaveformPeaks | null;
+  /** Whether the media has an audio track at all. */
+  hasAudio: boolean;
+  /**
+   * The recordings this project was made from, when it was made from more than
+   * one — where each landed on the joined media's clock.
+   *
+   * The clips are joined into a single file on the way in, so nothing
+   * downstream has to know there was ever more than one. This is what remains:
+   * enough to label the segments on the timeline with the file they came from,
+   * which is the difference between a two-hour timeline and a two-hour timeline
+   * you can find your way around.
+   */
+  sourceClips: SourceClip[];
+  /** Transcript source selected on the upload screen (speech model or import). */
+  source: TranscriptSource;
+  /** Language hint sent to Whisper when transcribing (Parakeet auto-detects). */
+  transcriptLanguage: TranscriptLanguageSetting;
+  /**
+   * Output script for a non-Latin language: "native" keeps Whisper's script,
+   * "roman" transliterates it for display. Ignored for languages that are
+   * already Latin. See {@link isRomanizableLanguage}.
+   */
+  transcriptScript: TranscriptScript;
+  /**
+   * Shortest gap, in seconds, still shown as a pause you can point at. Every
+   * pause in the transcript and on the timeline is derived from this, so
+   * lowering it reveals breaths and raising it hides the rhythm of speech.
+   */
+  pauseThreshold: number;
+  /**
+   * Caption file parsed on the upload screen when source is "import".
+   * Cleared when switching back to a speech model or after media loads.
+   */
+  pendingTranscript: PendingTranscript | null;
+  /** IndexedDB project id when this session is persisted; null for a fresh upload mid-pipeline. */
+  projectId: string | null;
+  /**
+   * When true, Editor extracts audio for the waveform but skips ASR
+   * (restored projects / imported transcripts already have words).
+   */
+  skipTranscription: boolean;
+
+  // Pipeline status
+  status: EditorStatus;
+  progress: ProgressInfo;
+  /** Streaming partial transcript text while transcribing. */
+  partialText: string;
+  error: string | null;
+
+  // Transcript / edits
+  words: Word[];
+  /** Named speakers in the project (ids match Word.speaker). */
+  speakers: SpeakerInfo[];
+  manualCuts: ManualCut[];
+  sceneBoundaries: SceneBoundary[];
+  showDeleted: boolean;
+  past: EditSnapshot[];
+  future: EditSnapshot[];
+  /** Selected timeline clip index, or null. */
+  selectedClipIndex: number | null;
+  /**
+   * Selected cut-range index (from `getCutRanges`), or null.
+   * Used to restore a deleted clip / silence section from the timeline.
+   */
+  selectedCutIndex: number | null;
+  /**
+   * Words selected in the transcript or the timeline wordbar. Shared so both
+   * views highlight the same selection and the same shortcuts apply.
+   */
+  selectedWordIds: number[];
+  nextManualCutId: number;
+  nextBoundaryId: number;
+  /**
+   * When true, subsequent edit mutations coalesce into the undo entry
+   * created by `beginGesture` (one undo step per drag).
+   */
+  gestureActive: boolean;
+
+  // Playback (mirrored from the <video>/<audio> element for UI rendering)
+  currentTime: number;
+  playing: boolean;
+  videoEl: HTMLMediaElement | null;
+
+  // Export
+  exportUrl: string | null;
+  exportOpen: boolean;
+
+  // Actions
+  /** Load media for editing. Pass `words` to skip Whisper and use that transcript. */
+  loadVideo: (
+    file: File,
+    options?: {
+      words?: Word[];
+      speakers?: SpeakerInfo[];
+      /** Where each joined recording sits, when several were combined. */
+      clips?: SourceClip[];
+    }
+  ) => void;
+  /** Restore a saved project from IndexedDB (no re-transcription). */
+  openProject: (id: string) => Promise<void>;
+  /** Delete a saved project; if it is the active one, resets to the home screen. */
+  removeProject: (id: string) => Promise<void>;
+  setSource: (s: TranscriptSource) => void;
+  setTranscriptLanguage: (language: TranscriptLanguageSetting) => void;
+  /** Switch native/roman output; re-applies to the current transcript in place. */
+  setTranscriptScript: (script: TranscriptScript) => void;
+  setPauseThreshold: (seconds: number) => void;
+  setPendingTranscript: (t: PendingTranscript | null) => void;
+  setDuration: (d: number) => void;
+  /**
+   * Hand the decoded PCM to the store. Only the waveform envelope is retained;
+   * the caller keeps ownership of the buffer itself (and transfers it to the
+   * transcription worker).
+   */
+  setAudio: (a: Float32Array | null) => void;
+  setStatus: (s: EditorStatus) => void;
+  setProgress: (p: ProgressInfo) => void;
+  setPartialText: (t: string) => void;
+  setError: (message: string) => void;
+  setWords: (words: Word[], speakers?: SpeakerInfo[]) => void;
+  /**
+   * Replace the current transcript with an imported one (keeps media).
+   * Used when the user brings their own SRT/VTT/JSON instead of Whisper.
+   */
+  importWords: (words: Word[], speakers?: SpeakerInfo[]) => void;
+  /** Rename a speaker everywhere it appears. */
+  renameSpeaker: (id: number, name: string) => void;
+  /** Create a new speaker; returns its id (or -1 if unchanged). */
+  addSpeaker: (name?: string) => number;
+  /** Reassign selected / listed words to a speaker (creating the speaker if needed). */
+  reassignWordsToSpeaker: (ids: number[], toSpeaker: number) => void;
+  /**
+   * Change who speaks a turn. Pass `toSpeaker: "new"` to create a speaker.
+   * Optional `name` renames/creates with that label.
+   */
+  changeTurnSpeaker: (
+    wordIds: number[],
+    toSpeaker: number | "new",
+    name?: string
+  ) => void;
+  /** Move a turn's start to `targetWordId` (boundary with the previous turn). */
+  moveSpeakerLabel: (turnStartWordId: number, targetWordId: number) => void;
+  /** Merge all of `fromId` into `toId` across the project. */
+  replaceSpeakerInProject: (fromId: number, toId: number) => void;
+  /** Remove a speaker; their turns join the speaker above in the script. */
+  removeSpeakerFromProject: (id: number) => void;
+  deleteWords: (ids: number[]) => void;
+  restoreWords: (ids: number[]) => void;
+  /** Cut arbitrary time ranges (e.g. detected silences) as manual cuts. */
+  cutRanges: (ranges: TimeRange[]) => void;
+  /** Restore arbitrary cut ranges (manual cuts + covered deleted words). */
+  restoreRanges: (ranges: TimeRange[]) => void;
+  /** Cut the currently selected timeline clip out of the edited media. */
+  deleteSelectedClip: () => boolean;
+  /** Restore the currently selected cut range (deleted clip / silence). */
+  restoreSelectedCut: () => boolean;
+  /** Replace the selected (contiguous) words with corrected text. */
+  correctWords: (ids: number[], text: string) => void;
+  /** Nudge a word's start/end on the timeline (may steal time from neighbors). */
+  adjustWordBounds: (id: number, start: number, end: number) => void;
+  /** Insert a scene boundary at the playhead. */
+  splitAtPlayhead: () => boolean;
+  /**
+   * Insert a scene boundary at an explicit source time.
+   *
+   * `splitAtPlayhead` reads `currentTime`, which is right for the S key and
+   * wrong for anything driven by a plan: an agent asked to split at 12s should
+   * not have to move the playhead there and wait for the seek to land.
+   */
+  splitAt: (time: number) => boolean;
+  /** Remove a scene boundary by id (join adjacent clips). */
+  removeSceneBoundary: (id: number) => void;
+  /**
+   * Move one edge of a kept region from `from` to `to` (original-media times).
+   * `edge` names the side that stays kept ("in" = the clip to the right of the
+   * edge, "out" = the clip to the left), which is what decides whether the move
+   * cuts or reclaims. Edges are addressed by time, not clip index, because a
+   * trim can merge or split clips mid-drag and renumber them.
+   */
+  trimEdge: (edge: "in" | "out", from: number, to: number) => void;
+  setSelectedClipIndex: (index: number | null) => void;
+  setSelectedCutIndex: (index: number | null) => void;
+  setSelectedWords: (ids: number[]) => void;
+  /** Start a drag gesture so subsequent edits share one undo entry. */
+  beginGesture: () => void;
+  /** End the current drag gesture. */
+  endGesture: () => void;
+  undo: () => void;
+  redo: () => void;
+  toggleShowDeleted: () => void;
+  setCurrentTime: (t: number) => void;
+  seekTo: (t: number) => void;
+  setPlaying: (p: boolean) => void;
+  setVideoEl: (el: HTMLMediaElement | null) => void;
+  /** Play/pause, skipping out of cut ranges and restarting from the start if parked at the end. */
+  togglePlayback: () => void;
+  setExportUrl: (url: string | null) => void;
+  setExportOpen: (open: boolean) => void;
+  reset: () => void;
+}
+
+/**
+ * Write whatever is open right now, before it stops being what is open.
+ *
+ * The debounce usually beats a person clicking through a project list, but
+ * "usually" is not a persistence strategy — and now that the composition is in
+ * the record, losing the last half-second of a save means losing captions, not
+ * just a trim.
+ */
+async function flushAutosave(): Promise<void> {
+  try {
+    const m = await import("./autosave");
+    await m.flushProjectAutosave();
+  } catch {
+    // A failed save of the outgoing project must not stop the incoming one
+    // from opening; the warning is already logged inside the autosave.
+  }
+}
+
+function bumpAutosave() {
+  // Dynamic import avoids a circular dependency with lib/autosave.ts.
+  void import("./autosave").then((m) => m.scheduleProjectAutosave());
+}
+
+/**
+ * How many undo steps to keep.
+ *
+ * Snapshots share structure with the live state, but every edit replaces the
+ * words array wholesale, so each entry pins a distinct copy — on an hour-long
+ * transcript that is a few megabytes per step. Unbounded, a long editing
+ * session grows without limit and never gives any of it back. A hundred steps
+ * is far more than anyone walks back through interactively.
+ */
+const MAX_UNDO_STEPS = 100;
+
+/** Append to the undo stack, dropping the oldest entries past the cap. */
+function pushHistory(past: EditSnapshot[], entry: EditSnapshot): EditSnapshot[] {
+  const next = [...past, entry];
+  return next.length > MAX_UNDO_STEPS ? next.slice(next.length - MAX_UNDO_STEPS) : next;
+}
+
+function snapshotOf(s: {
+  words: Word[];
+  speakers: SpeakerInfo[];
+  manualCuts: ManualCut[];
+  sceneBoundaries: SceneBoundary[];
+}): EditSnapshot {
+  return {
+    words: s.words,
+    speakers: s.speakers,
+    manualCuts: s.manualCuts,
+    sceneBoundaries: s.sceneBoundaries,
+  };
+}
+
+function snapshotsEqual(a: EditSnapshot, b: EditSnapshot): boolean {
+  return (
+    a.words === b.words &&
+    a.speakers === b.speakers &&
+    a.manualCuts === b.manualCuts &&
+    a.sceneBoundaries === b.sceneBoundaries
+  );
+}
+
+function maxId(items: Array<{ id: number }>, fallback = 1): number {
+  return items.reduce((m, x) => Math.max(m, x.id), fallback - 1) + 1;
+}
+
+function pushEdit(
+  get: () => EditorState,
+  set: (
+    partial:
+      | Partial<EditorState>
+      | ((s: EditorState) => Partial<EditorState>)
+  ) => void,
+  next: Partial<
+    Pick<
+      EditorState,
+      | "words"
+      | "speakers"
+      | "manualCuts"
+      | "sceneBoundaries"
+      | "selectedClipIndex"
+      | "selectedCutIndex"
+      | "selectedWordIds"
+      | "nextManualCutId"
+      | "nextBoundaryId"
+    >
+  >
+) {
+  const s = get();
+  if (s.gestureActive) {
+    // Coalesce into the snapshot already pushed by beginGesture.
+    set({ future: [], ...next });
+  } else {
+    set({
+      past: pushHistory(s.past, snapshotOf(s)),
+      future: [],
+      ...next,
+    });
+  }
+  bumpAutosave();
+}
+
+/**
+ * Bring a stored composition back to life.
+ *
+ * Everything in it survives IndexedDB as plain data except the `blob:` URLs of
+ * pictures dragged in from disk: those are valid only for the page that minted
+ * them. The bytes were saved beside the composition, so each one is re-minted
+ * here; anything without stored bytes keeps its src and renders as a
+ * placeholder, which is the honest outcome.
+ */
+function rehydrateComposition(record: ProjectRecord): Composition {
+  const composition = record.composition!;
+  const assets = record.assets;
+  if (!assets) return composition;
+
+  return {
+    ...composition,
+    elements: composition.elements.map((element) => {
+      if (element.kind !== "image" && element.kind !== "video") return element;
+      if (!element.src.startsWith("blob:")) return element;
+      const bytes = assets[element.id];
+      if (!bytes) return element;
+      return { ...element, src: URL.createObjectURL(bytes) };
+    }),
+  };
+}
+
+export const useEditorStore = create<EditorState>((set, get) => ({
+  videoFile: null,
+  mediaUrl: null,
+  mediaKind: null,
+  duration: 0,
+  waveform: null,
+  hasAudio: false,
+  source: "base",
+  transcriptLanguage: DEFAULT_TRANSCRIPT_LANGUAGE,
+  transcriptScript: DEFAULT_TRANSCRIPT_SCRIPT,
+  pauseThreshold: DEFAULT_MIN_PAUSE_S,
+  pendingTranscript: null,
+  projectId: null,
+  skipTranscription: false,
+
+  status: "idle",
+  progress: { message: "", value: null },
+  partialText: "",
+  error: null,
+
+  words: [],
+  speakers: [],
+  manualCuts: [],
+  sceneBoundaries: [],
+  showDeleted: true,
+  past: [],
+  future: [],
+  selectedClipIndex: null,
+  selectedCutIndex: null,
+  selectedWordIds: [],
+  nextManualCutId: 1,
+  nextBoundaryId: 1,
+  gestureActive: false,
+
+  currentTime: 0,
+  playing: false,
+  videoEl: null,
+  sourceClips: [],
+
+  exportUrl: null,
+  exportOpen: false,
+
+  loadVideo: (file, options) => {
+    const kind = detectMediaKind(file);
+    if (!kind) return;
+    const imported = options?.words;
+    if (imported && imported.length === 0) return;
+    const prev = get().mediaUrl;
+    if (prev) URL.revokeObjectURL(prev);
+    // Decoded frames are keyed by media URL, and a revoked blob URL can be
+    // handed straight back out for different bytes — so a survivor here would
+    // be a picture of the previous video, measured as if it were this one.
+    forgetFrames();
+    resetImageMotion();
+    // Captions, overlays, transitions and the frame belong to the project that
+    // was open, not to the editor. Loading different media without this is what
+    // put the last video's subtitles over the new one. The conversation goes
+    // the same way: "make that bigger" cannot follow you to a different video.
+    useOverlayStore.getState().reset();
+    useChatStore.getState().reset();
+    const current = get().source;
+    const speakers = imported
+      ? speakersFromWords(imported, options?.speakers ?? [])
+      : [];
+    set({
+      videoFile: file,
+      mediaUrl: URL.createObjectURL(file),
+      mediaKind: kind,
+      projectId: null,
+      skipTranscription: Boolean(imported),
+      source: imported ? "import" : isModelId(current) ? current : "base",
+      pendingTranscript: null,
+      status: "preparing",
+      progress: {
+        message: imported
+          ? en["progress.loadingMedia"]
+          : en["progress.loadingMediaEngine"],
+        value: null,
+      },
+      words: imported ? imported : [],
+      speakers,
+      manualCuts: [],
+      sceneBoundaries: [],
+      past: [],
+      future: [],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      nextManualCutId: 1,
+      nextBoundaryId: 1,
+      gestureActive: false,
+      partialText: "",
+      error: null,
+      currentTime: 0,
+      exportUrl: null,
+      waveform: null,
+      hasAudio: false,
+      duration: 0,
+      sourceClips: options?.clips?.length && options.clips.length > 1 ? options.clips : [],
+      // A join is a cut somebody already made, so it starts life as a scene
+      // boundary: each recording is its own segment on the timeline, and every
+      // seam has a transition available at it without splitting anything first.
+      ...(options?.clips && options.clips.length > 1
+        ? {
+            sceneBoundaries: options.clips
+              .slice(1)
+              .map((clip, i) => ({ id: i + 1, time: clip.start })),
+            nextBoundaryId: options.clips.length,
+          }
+        : {}),
+    });
+    // Funnel step between opening the app and getting a transcript. `kind` and
+    // `source` are fixed vocabulary — nothing derived from the file itself.
+    trackEvent("project_created", {
+      kind,
+      source: imported ? "import" : "asr",
+    });
+  },
+
+  openProject: async (id) => {
+    // The project being left is saved before the one being opened is read.
+    await flushAutosave();
+    const record = await getProject(id);
+    if (!record) throw new Error(en["error.projectMissing"]);
+    const file = fileFromProject(record);
+    const prev = get().mediaUrl;
+    if (prev) URL.revokeObjectURL(prev);
+    // Decoded frames are keyed by media URL, and a revoked blob URL can be
+    // handed straight back out for different bytes — so a survivor here would
+    // be a picture of the previous video, measured as if it were this one.
+    forgetFrames();
+    resetImageMotion();
+    // Clear first, then restore: a project saved before the composition layer
+    // existed has no composition, and "no composition" must mean an empty one
+    // rather than whatever happened to be on screen a moment ago.
+    const overlay = useOverlayStore.getState();
+    overlay.reset();
+    if (record.composition) {
+      overlay.loadComposition(rehydrateComposition(record));
+    }
+    // Clear-then-restore, for the same reason: a project saved before the chat
+    // was persisted has none, and "none" must mean an empty conversation.
+    const chat = useChatStore.getState();
+    chat.reset();
+    if (record.chat) chat.hydrate(record.chat);
+    saveLastProjectId(record.id);
+    const manualCuts = record.manualCuts ?? [];
+    const sceneBoundaries = record.sceneBoundaries ?? [];
+    const speakers = speakersFromWords(record.words, record.speakers ?? []);
+    // Saved transcripts are canonical as-is; treat them as the native snapshot
+    // so a later native↔roman toggle derives from them.
+    nativeWordsSnapshot = record.words;
+    set({
+      videoFile: file,
+      mediaUrl: URL.createObjectURL(file),
+      mediaKind: record.mediaKind,
+      duration: record.duration,
+      source: isTranscriptSource(record.source) ? record.source : "base",
+      transcriptLanguage: isTranscriptLanguage(record.transcriptLanguage)
+        ? record.transcriptLanguage
+        : DEFAULT_TRANSCRIPT_LANGUAGE,
+      transcriptScript: DEFAULT_TRANSCRIPT_SCRIPT,
+      projectId: record.id,
+      skipTranscription: true,
+      pendingTranscript: null,
+      status: "preparing",
+      progress: { message: en["progress.loadingMediaEngine"], value: null },
+      words: record.words,
+      speakers,
+      manualCuts,
+      sceneBoundaries,
+      sourceClips: record.sourceClips ?? [],
+      showDeleted: record.showDeleted,
+      past: [],
+      future: [],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      nextManualCutId: maxId(manualCuts, 1),
+      nextBoundaryId: maxId(sceneBoundaries, 1),
+      partialText: "",
+      error: null,
+      currentTime: 0,
+      playing: false,
+      exportUrl: null,
+      exportOpen: false,
+      waveform: null,
+      hasAudio: false,
+    });
+  },
+
+  removeProject: async (id) => {
+    await deleteProject(id);
+    if (loadLastProjectId() === id) saveLastProjectId(null);
+    if (get().projectId === id) {
+      get().reset();
+    }
+  },
+
+  setSource: (source) => {
+    if (isModelId(source)) {
+      saveModelPreference(source);
+      set({ source, pendingTranscript: null });
+    } else {
+      set({ source });
+    }
+  },
+  setTranscriptLanguage: (transcriptLanguage) => {
+    saveTranscriptLanguagePreference(transcriptLanguage);
+    set({ transcriptLanguage });
+  },
+  setTranscriptScript: (transcriptScript) => {
+    saveTranscriptScriptPreference(transcriptScript);
+    const { transcriptLanguage, past } = get();
+    // Re-derive in place from the native snapshot only before any edit (no undo
+    // history), so a toggle right after transcription is lossless and one made
+    // mid-edit never clobbers work — it just changes the choice going forward.
+    if (past.length === 0 && nativeWordsSnapshot.length > 0) {
+      set({
+        transcriptScript,
+        words: applyScript(nativeWordsSnapshot, transcriptScript, transcriptLanguage),
+      });
+      // Captions are the transcript, burned into the picture. Switching between
+      // the native script and Hinglish rewrites every word and leaves the
+      // timings alone, so nothing else notices — the video would go on showing
+      // captions in the script the transcript is no longer in, which is the one
+      // way subtitles can be wrong that reads as the tool being broken.
+      if (useOverlayStore.getState().subtitles.cues.length) regenerateCues();
+      if (get().status === "ready") bumpAutosave();
+    } else {
+      set({ transcriptScript });
+    }
+  },
+  setPauseThreshold: (seconds) => {
+    // Pauses are derived, never stored, so this needs no history entry and
+    // cannot desync from the words: everything recomputes on the next render.
+    const pauseThreshold = clampPauseThreshold(seconds);
+    savePauseThresholdPreference(pauseThreshold);
+    set({ pauseThreshold });
+  },
+  setPendingTranscript: (pendingTranscript) => set({ pendingTranscript }),
+  setDuration: (duration) => {
+    set({ duration });
+    if (get().status === "ready") bumpAutosave();
+  },
+  setAudio: (audio) =>
+    set({
+      waveform: audio && audio.length > 0 ? buildWaveformPeaks(audio) : null,
+      hasAudio: audio !== null,
+    }),
+  setStatus: (status) => {
+    set({ status });
+    if (status === "ready") bumpAutosave();
+  },
+  setProgress: (progress) => set({ progress }),
+  setPartialText: (partialText) => set({ partialText }),
+  setError: (message) => set({ status: "error", error: message }),
+  setWords: (words, speakers) => {
+    // `words` arrive from ASR in native script; keep them as the toggle source
+    // and show the user's chosen script.
+    nativeWordsSnapshot = words;
+    const displayed = applyScript(words, get().transcriptScript, get().transcriptLanguage);
+    set({
+      words: displayed,
+      speakers: speakersFromWords(displayed, speakers ?? []),
+      manualCuts: [],
+      sceneBoundaries: [],
+      sourceClips: [],
+      past: [],
+      future: [],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+    });
+    if (get().status === "ready") bumpAutosave();
+  },
+  importWords: (words, speakers) => {
+    if (words.length === 0) return;
+    const { status } = get();
+    if (
+      status !== "ready" &&
+      status !== "error" &&
+      status !== "transcribing"
+    ) {
+      return;
+    }
+    // Stop Whisper if it was still running.
+    void import("@/motionscript/hooks/useTranscriber").then((m) => m.cancelTranscription());
+    nativeWordsSnapshot = words;
+    const displayed = applyScript(words, get().transcriptScript, get().transcriptLanguage);
+    set({
+      words: displayed,
+      speakers: speakersFromWords(displayed, speakers ?? []),
+      manualCuts: [],
+      sceneBoundaries: [],
+      sourceClips: [],
+      past: [],
+      future: [],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      partialText: "",
+      error: null,
+      status: "ready",
+      progress: { message: "", value: null },
+      skipTranscription: true,
+      source: "import",
+    });
+    bumpAutosave();
+  },
+
+  renameSpeaker: (id, name) => {
+    const { speakers } = get();
+    const next = renameSpeakerEntry(speakers, id, name);
+    if (next === speakers) return;
+    pushEdit(get, set, { speakers: next });
+  },
+
+  addSpeaker: (name) => {
+    const { speakers } = get();
+    const trimmed = name?.trim();
+    if (trimmed) {
+      const existing = findSpeakerByName(speakers, trimmed);
+      if (existing) return existing.id;
+    }
+    const { speakers: next, id } = addSpeakerEntry(speakers, name);
+    pushEdit(get, set, { speakers: next });
+    return id;
+  },
+
+  reassignWordsToSpeaker: (ids, toSpeaker) => {
+    if (ids.length === 0) return;
+    const s = get();
+    const words = reassignWords(s.words, ids, toSpeaker);
+    if (words === s.words) return;
+    const speakers = speakersFromWords(words, s.speakers);
+    pushEdit(get, set, { words, speakers });
+  },
+
+  changeTurnSpeaker: (wordIds, toSpeaker, name) => {
+    if (wordIds.length === 0) return;
+    const s = get();
+    let speakers = s.speakers;
+    let targetId: number;
+    if (toSpeaker === "new") {
+      const added = addSpeakerEntry(speakers, name);
+      speakers = added.speakers;
+      targetId = added.id;
+    } else {
+      targetId = toSpeaker;
+      if (name && name.trim()) {
+        speakers = renameSpeakerEntry(speakers, targetId, name);
+      } else if (!speakers.some((sp) => sp.id === targetId)) {
+        speakers = speakersFromWords(
+          s.words,
+          [...speakers, { id: targetId, name: `Speaker ${targetId + 1}` }]
+        );
+      }
+    }
+    const words = reassignWords(s.words, wordIds, targetId);
+    if (words === s.words && speakers === s.speakers) return;
+    pushEdit(get, set, {
+      words,
+      speakers: speakersFromWords(words, speakers),
+    });
+  },
+
+  moveSpeakerLabel: (turnStartWordId, targetWordId) => {
+    const { words } = get();
+    const next = moveSpeakerBoundary(words, turnStartWordId, targetWordId);
+    if (!next) return;
+    pushEdit(get, set, { words: next });
+  },
+
+  replaceSpeakerInProject: (fromId, toId) => {
+    const s = get();
+    const result = replaceSpeakerEntry(s.words, s.speakers, fromId, toId);
+    if (!result) return;
+    pushEdit(get, set, {
+      words: result.words,
+      speakers: result.speakers,
+    });
+  },
+
+  removeSpeakerFromProject: (id) => {
+    const s = get();
+    const result = removeSpeakerEntry(s.words, s.speakers, id);
+    if (!result) return;
+    pushEdit(get, set, {
+      words: result.words,
+      speakers: result.speakers,
+    });
+  },
+
+  deleteWords: (ids) => {
+    if (ids.length === 0) return;
+    const { words } = get();
+    const idSet = new Set(ids);
+    pushEdit(get, set, {
+      words: words.map((w) =>
+        idSet.has(w.id) && !w.deleted ? { ...w, deleted: true } : w
+      ),
+      selectedCutIndex: null,
+    });
+  },
+  cutRanges: (ranges) => {
+    const usable = ranges.filter((r) => r.end - r.start > 1e-4);
+    if (usable.length === 0) return;
+    const s = get();
+    let words = s.words;
+    let manualCuts = s.manualCuts;
+    let nextManualCutId = s.nextManualCutId;
+    for (const r of usable) {
+      const added = addManualCut(manualCuts, r.start, r.end, nextManualCutId, words);
+      manualCuts = added.cuts;
+      nextManualCutId = added.nextId;
+      words = deleteWordsCoveredBy(words, r.start, r.end);
+    }
+    pushEdit(get, set, {
+      words,
+      manualCuts,
+      nextManualCutId,
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+    });
+  },
+  restoreRanges: (ranges) => {
+    const s = get();
+    const result = restoreRangesResult(
+      s.words,
+      s.manualCuts,
+      ranges,
+      s.nextManualCutId
+    );
+    if (!result) return;
+    pushEdit(get, set, {
+      words: result.words,
+      manualCuts: result.manualCuts,
+      nextManualCutId: result.nextCutId,
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+    });
+  },
+  deleteSelectedClip: () => {
+    const s = get();
+    if (s.selectedClipIndex == null || s.duration <= 0) return false;
+    const cuts = getCutRanges(s.words, s.duration, s.manualCuts);
+    const clips = getClipSegments(
+      getKeepRanges(cuts, s.duration),
+      s.sceneBoundaries
+    );
+    const clip = clips.find((c) => c.index === s.selectedClipIndex);
+    if (!clip || clip.end - clip.start <= 1e-4) return false;
+    get().cutRanges([{ start: clip.start, end: clip.end }]);
+    return true;
+  },
+  restoreSelectedCut: () => {
+    const s = get();
+    if (s.selectedCutIndex == null || s.duration <= 0) return false;
+    const cuts = getCutRanges(s.words, s.duration, s.manualCuts);
+    const cut = cuts[s.selectedCutIndex];
+    if (!cut || cut.end - cut.start <= 1e-4) return false;
+    get().restoreRanges([{ start: cut.start, end: cut.end }]);
+    return true;
+  },
+  restoreWords: (ids) => {
+    if (ids.length === 0) return;
+    const s = get();
+    const idSet = new Set(ids);
+    const restored = s.words.filter((w) => idSet.has(w.id));
+    if (restored.length === 0) return;
+
+    // Pull manual cuts off the restored words so transcript restore also
+    // brings the audio back (trim-created cuts would otherwise remain).
+    let manualCuts = s.manualCuts;
+    let nextManualCutId = s.nextManualCutId;
+    for (const w of restored) {
+      const shrunk = shrinkManualCuts(
+        manualCuts,
+        w.start,
+        w.end,
+        nextManualCutId
+      );
+      manualCuts = shrunk.cuts;
+      nextManualCutId = shrunk.nextId;
+    }
+
+    const words = s.words.map((w) =>
+      idSet.has(w.id) ? { ...w, deleted: false } : w
+    );
+
+    pushEdit(get, set, {
+      words,
+      manualCuts,
+      nextManualCutId,
+      selectedCutIndex: null,
+    });
+  },
+  correctWords: (ids, text) => {
+    const { words } = get();
+    const tokens = text.split(/\s+/).filter(Boolean);
+    if (ids.length === 0 || tokens.length === 0) return;
+    const idSet = new Set(ids);
+    const indices = words.reduce<number[]>((acc, w, i) => {
+      if (idSet.has(w.id)) acc.push(i);
+      return acc;
+    }, []);
+    if (indices.length === 0) return;
+    // Replace the whole contiguous slice covered by the selection.
+    const from = indices[0];
+    const to = indices[indices.length - 1];
+    const selected = words.slice(from, to + 1);
+    if (selected.map((w) => w.text).join(" ") === tokens.join(" ")) return;
+
+    // Distribute the original time span across the new words in proportion
+    // to their character length.
+    const spanStart = selected[0].start;
+    const spanEnd = selected[selected.length - 1].end;
+    const span = Math.max(0.02, spanEnd - spanStart);
+    const totalChars = tokens.reduce((acc, t) => acc + t.length, 0);
+    let nextId = words.reduce((m, w) => Math.max(m, w.id), 0) + 1;
+    let cursor = spanStart;
+    const replacement: Word[] = tokens.map((t) => {
+      const dur = (span * t.length) / totalChars;
+      const word: Word = {
+        id: nextId++,
+        text: t,
+        start: cursor,
+        end: Math.min(spanEnd, cursor + dur),
+        speaker: selected[0].speaker,
+        // A correction implies the words are wanted, unless the whole
+        // selection was already cut.
+        deleted: selected.every((w) => w.deleted),
+      };
+      cursor = word.end;
+      return word;
+    });
+    replacement[replacement.length - 1].end = spanEnd;
+
+    pushEdit(get, set, {
+      words: [...words.slice(0, from), ...replacement, ...words.slice(to + 1)],
+      // The corrected span is new words with new ids; nothing to stay selected.
+      selectedWordIds: [],
+    });
+  },
+
+  adjustWordBounds: (id, start, end) => {
+    const { words, duration } = get();
+    const next = applyWordBounds(words, id, start, end, duration);
+    if (!next) return;
+    pushEdit(get, set, { words: next });
+  },
+
+  splitAtPlayhead: () => get().splitAt(get().currentTime),
+
+  splitAt: (time) => {
+    const s = get();
+    const cuts = getCutRanges(s.words, s.duration, s.manualCuts);
+    if (!canSplitAt(time, s.duration, cuts, s.sceneBoundaries)) return false;
+    const id = s.nextBoundaryId;
+    pushEdit(get, set, {
+      sceneBoundaries: [...s.sceneBoundaries, { id, time }].sort(
+        (a, b) => a.time - b.time
+      ),
+      nextBoundaryId: id + 1,
+    });
+    return true;
+  },
+
+  removeSceneBoundary: (id) => {
+    const { sceneBoundaries } = get();
+    if (!sceneBoundaries.some((b) => b.id === id)) return;
+    pushEdit(get, set, {
+      sceneBoundaries: sceneBoundaries.filter((b) => b.id !== id),
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+    });
+  },
+
+  trimEdge: (edge, from, to) => {
+    const s = get();
+    const result = trimEdgeResult(
+      s.words,
+      s.manualCuts,
+      edge,
+      from,
+      to,
+      s.nextManualCutId
+    );
+    if (!result) return;
+
+    // A split point sitting on the dragged edge *is* that edge — it has to move
+    // with it, or the span the drag reclaims becomes an orphan clip.
+    const sceneBoundaries = carrySceneBoundaries(s.sceneBoundaries, from, to);
+
+    // Clip indices shift whenever a trim merges or splits keep ranges, so
+    // re-find the clip that owns the moved edge instead of keeping an index.
+    const clips = getClipSegments(
+      getKeepRanges(
+        getCutRanges(result.words, s.duration, result.manualCuts),
+        s.duration
+      ),
+      sceneBoundaries
+    );
+    const owner =
+      clips.find((c) => Math.abs((edge === "in" ? c.start : c.end) - to) < 1e-3) ??
+      clips.find((c) => to >= c.start && to <= c.end);
+
+    pushEdit(get, set, {
+      words: result.words,
+      manualCuts: result.manualCuts,
+      sceneBoundaries,
+      nextManualCutId: result.nextCutId,
+      selectedClipIndex: owner?.index ?? s.selectedClipIndex,
+      selectedCutIndex: null,
+    });
+  },
+
+  setSelectedClipIndex: (selectedClipIndex) => {
+    if (selectedClipIndex != null) useOverlayStore.getState().select(null);
+    set({
+      selectedClipIndex,
+      ...(selectedClipIndex != null ? { selectedCutIndex: null } : {}),
+    });
+  },
+
+  setSelectedCutIndex: (selectedCutIndex) => {
+    if (selectedCutIndex != null) useOverlayStore.getState().select(null);
+    set({
+      selectedCutIndex,
+      ...(selectedCutIndex != null ? { selectedClipIndex: null } : {}),
+    });
+  },
+
+  setSelectedWords: (selectedWordIds) => {
+    // Selecting in the transcript drops the overlay selection, and selecting
+    // an overlay drops this one. There is one Delete key and two things it
+    // could mean; keeping the two selections mutually exclusive is what makes
+    // the answer never a guess.
+    if (selectedWordIds.length > 0) useOverlayStore.getState().select(null);
+    set({
+      selectedWordIds,
+      // A fresh word selection from the transcript supersedes a prior cut pick.
+      // Timeline cut-word clicks re-select the cut afterward.
+      ...(selectedWordIds.length > 0 ? { selectedCutIndex: null } : {}),
+    });
+  },
+
+  beginGesture: () => {
+    const s = get();
+    if (s.gestureActive) return;
+    set({
+      gestureActive: true,
+      past: pushHistory(s.past, snapshotOf(s)),
+      future: [],
+    });
+  },
+  endGesture: () => {
+    const s = get();
+    if (!s.gestureActive) return;
+    const last = s.past[s.past.length - 1];
+    if (last && snapshotsEqual(last, snapshotOf(s))) {
+      // No net change — drop the empty undo entry.
+      set({ gestureActive: false, past: s.past.slice(0, -1) });
+    } else {
+      set({ gestureActive: false });
+      bumpAutosave();
+    }
+  },
+
+  undo: () => {
+    const { past, future, words, speakers, manualCuts, sceneBoundaries } =
+      get();
+    if (past.length === 0) return;
+    const prev = past[past.length - 1];
+    set({
+      words: prev.words,
+      speakers: prev.speakers,
+      manualCuts: prev.manualCuts,
+      sceneBoundaries: prev.sceneBoundaries,
+      past: past.slice(0, -1),
+      future: [
+        { words, speakers, manualCuts, sceneBoundaries },
+        ...future,
+      ],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      gestureActive: false,
+    });
+    bumpAutosave();
+  },
+  redo: () => {
+    const { past, future, words, speakers, manualCuts, sceneBoundaries } =
+      get();
+    if (future.length === 0) return;
+    const next = future[0];
+    set({
+      words: next.words,
+      speakers: next.speakers,
+      manualCuts: next.manualCuts,
+      sceneBoundaries: next.sceneBoundaries,
+      future: future.slice(1),
+      past: pushHistory(past, { words, speakers, manualCuts, sceneBoundaries }),
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      gestureActive: false,
+    });
+    bumpAutosave();
+  },
+  toggleShowDeleted: () => {
+    set((s) => ({ showDeleted: !s.showDeleted }));
+    bumpAutosave();
+  },
+
+  setCurrentTime: (currentTime) => set({ currentTime }),
+  seekTo: (time) => {
+    const media = get().videoEl;
+    if (media) media.currentTime = time;
+    set({ currentTime: time });
+  },
+  setPlaying: (playing) => set({ playing }),
+  setVideoEl: (videoEl) => set({ videoEl }),
+  togglePlayback: () => {
+    const s = get();
+    const media = s.videoEl;
+    if (!media) return;
+    if (media.paused) {
+      const cuts = getCutRanges(s.words, s.duration, s.manualCuts);
+      const cut = cutRangeAt(media.currentTime, cuts);
+      if (cut) media.currentTime = cut.end + PLAYHEAD_EPSILON_S;
+      if (media.currentTime >= media.duration - 0.05) media.currentTime = 0;
+      void media.play();
+    } else {
+      media.pause();
+    }
+  },
+  setExportUrl: (exportUrl) => set({ exportUrl }),
+  setExportOpen: (exportOpen) => set({ exportOpen }),
+
+  reset: () => {
+    useOverlayStore.getState().reset();
+    useChatStore.getState().reset();
+    forgetFrames();
+    resetImageMotion();
+    saveLastProjectId(null);
+    const { mediaUrl, exportUrl } = get();
+    if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+    if (exportUrl) URL.revokeObjectURL(exportUrl);
+    nativeWordsSnapshot = [];
+    set({
+      videoFile: null,
+      mediaUrl: null,
+      mediaKind: null,
+      duration: 0,
+      waveform: null,
+      hasAudio: false,
+      source: loadModelPreference(),
+      transcriptLanguage: loadTranscriptLanguagePreference(),
+      transcriptScript: loadTranscriptScriptPreference(),
+      pauseThreshold: loadPauseThresholdPreference(),
+      pendingTranscript: null,
+      projectId: null,
+      skipTranscription: false,
+      status: "idle",
+      progress: { message: "", value: null },
+      partialText: "",
+      error: null,
+      words: [],
+      speakers: [],
+      manualCuts: [],
+      sceneBoundaries: [],
+      sourceClips: [],
+      past: [],
+      future: [],
+      selectedClipIndex: null,
+      selectedCutIndex: null,
+      selectedWordIds: [],
+      nextManualCutId: 1,
+      nextBoundaryId: 1,
+      gestureActive: false,
+      currentTime: 0,
+      playing: false,
+      exportUrl: null,
+      exportOpen: false,
+    });
+  },
+}));
+
+/** Apply the stored model preference after mount (avoids SSR/localStorage mismatch). */
+export function hydrateModelPreference() {
+  const stored = loadModelPreference();
+  const current = useEditorStore.getState().source;
+  // Don't clobber an in-progress import selection.
+  if (current === "import" || stored === current) return;
+  useEditorStore.setState({ source: stored });
+}
+
+/** Apply the stored transcript language after mount (avoids SSR/localStorage mismatch). */
+export function hydrateTranscriptLanguagePreference() {
+  const stored = loadTranscriptLanguagePreference();
+  if (stored !== useEditorStore.getState().transcriptLanguage) {
+    useEditorStore.setState({ transcriptLanguage: stored });
+  }
+}
+
+/** Apply the stored pause threshold after mount (avoids SSR/localStorage mismatch). */
+export function hydratePauseThresholdPreference() {
+  const stored = loadPauseThresholdPreference();
+  if (stored !== useEditorStore.getState().pauseThreshold) {
+    useEditorStore.setState({ pauseThreshold: stored });
+  }
+}
+
+/** Apply the stored output script after mount (avoids SSR/localStorage mismatch). */
+export function hydrateTranscriptScriptPreference() {
+  const stored = loadTranscriptScriptPreference();
+  if (stored !== useEditorStore.getState().transcriptScript) {
+    useEditorStore.setState({ transcriptScript: stored });
+  }
+}
+
+// DevTools / Playwright: inspect and drive the editor store from the console.
+if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+  (window as unknown as { __motionscriptStore?: typeof useEditorStore }).__motionscriptStore =
+    useEditorStore;
+}

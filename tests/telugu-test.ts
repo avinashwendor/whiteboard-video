@@ -5,17 +5,17 @@ import {
   isTranscriptScript,
   TRANSCRIPT_LANGUAGE_ORDER,
   TRANSCRIPT_LANGUAGES,
-} from "../src/rescript/lib/languages";
+} from "../src/motionscript/lib/languages";
 import {
   hasIndicChars,
   isIndicLanguage,
   romanizeForAlign,
   romanizeForDisplay,
   transliterateToLatin,
-} from "../src/rescript/lib/indic";
-import { normalizeForCtc } from "../src/rescript/lib/forcedAlign";
-import { romanizeWords } from "../src/rescript/lib/romanize";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/indic";
+import { normalizeForCtc } from "../src/motionscript/lib/forcedAlign";
+import { romanizeWords } from "../src/motionscript/lib/romanize";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);

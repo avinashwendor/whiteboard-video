@@ -1,0 +1,1312 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  CornerDownLeft,
+  Eye,
+  ListChecks,
+  Loader2,
+  Sparkles,
+  Square,
+  Wand2,
+} from "lucide-react";
+import { useEditorStore } from "@/motionscript/lib/store";
+import { isWordCutOut, originalToEdited } from "@/motionscript/lib/edits";
+import { useCutRanges } from "@/motionscript/hooks/useCutRanges";
+import {
+  useOutputTime,
+  useOutputTimeline,
+} from "@/motionscript/hooks/useOverlayTimeline";
+import { useOverlayStore } from "@/motionscript/lib/overlay/store";
+import {
+  useChatStore,
+  type LogEntry,
+  type Proposal,
+  type ProposedStep,
+} from "@/motionscript/lib/chat/store";
+import { runPlan, type OpResult } from "@/motionscript/lib/overlay/ops";
+import { analyseFootage } from "@/motionscript/lib/overlay/analysis";
+import { buildTimeline } from "@/motionscript/lib/overlay/timeline";
+import type { AgentOp } from "@/motionscript/lib/overlay/ops-schema";
+import { Button, Empty, formatSeconds } from "./ui";
+import { MicButton } from "@/components/ui/mic-button";
+import { loadAgentModel, saveAgentModel } from "@/motionscript/lib/agent-model";
+import {
+  listFeedback,
+  recordAll,
+  recordFeedback,
+  reviseVerdict,
+} from "@/motionscript/lib/feedback/store";
+import {
+  retrieveExemplars,
+  standingPreferences,
+  type Exemplar,
+} from "@/motionscript/lib/feedback/retrieve";
+import {
+  reviewTimes,
+  surveyFootage,
+  surveyForReview,
+} from "@/motionscript/lib/overlay/glance";
+import { currentComposition } from "@/motionscript/lib/overlay/store";
+import { PROMPT_VERSION } from "@/lib/ai/prompt-version";
+
+/**
+ * The prompt surface.
+ *
+ * It sends a *description* of the project, never the media and never the word
+ * timings: a numbered element list, the boundary times, and a plain transcript
+ * with coarse timestamps. What comes back is a list of operations that are
+ * validated on the server, validated again here, and then run one at a time
+ * with every step reported. Nothing is applied that the schema did not accept,
+ * and a step that fails says so instead of failing silently.
+ */
+
+/**
+ * One click that does the whole job. Phrased as a sentence rather than wired to
+ * a special code path on purpose: it goes through the same planner as anything
+ * typed, so what it does is inspectable and editable rather than hidden.
+ */
+const AUTO_EDIT =
+  "Edit this for me end to end: cut the filler words and the dead air, " +
+  "drop anything that rambles, put a transition on every cut, burn in " +
+  "subtitles, and add a title card at the start based on what it is about.";
+
+const SUGGESTIONS = [
+  "Make this a 30 second vertical short — keep only the best parts",
+  "Reframe it to 9:16 and keep me centred",
+  "Cut every um, uh and long pause",
+  "Burn in subtitles, big and centred like a Short",
+  "Put a dissolve on every cut and a title card at the start",
+  "Add a lower third with my name for the first five seconds",
+  "Generate a hand-drawn rocket in the top right at 5s",
+];
+
+/**
+ * The whole transcript goes up, not a prompt-sized slice of it.
+ *
+ * The agent windows into it with its own reading tools and is shown an outline
+ * when it is long, so truncating here would only hide the back half of a long
+ * recording from the tools as well — which is what made plans for anything over
+ * ten minutes quietly stop at the ten minute mark.
+ */
+const TRANSCRIPT_BUDGET = 180_000;
+
+/** How much of the live reasoning to keep on screen. */
+const THOUGHT_TAIL = 1_400;
+
+/**
+ * How long after applying a plan an undo still counts as a verdict on it.
+ *
+ * Short on purpose. Undoing immediately is "that was wrong"; undoing a minute
+ * later is ordinary editing that happens to walk back over the same ground.
+ */
+const UNDO_WINDOW_MS = 30_000;
+
+interface PlanReply {
+  success?: boolean;
+  summary?: string;
+  findings?: string[];
+  steps?: ProposedStep[];
+  ops?: AgentOp[];
+  rejected?: string[];
+  trace?: { tool: string; detail: string }[];
+  warnings?: string[];
+  error?: { message?: string };
+}
+
+type AgentEvent =
+  | { type: "turn"; index: number }
+  | { type: "thinking"; text: string }
+  | { type: "look"; tool: string; detail: string }
+  | { type: "verify"; problems: number }
+  | { type: "repair"; problems: string[] }
+  | { type: "retry"; reason: string }
+  | { type: "trim"; dropped: number; digested: number; tokens: number }
+  | ({ type: "plan" } & PlanReply)
+  | ({ type: "error" } & PlanReply);
+
+/**
+ * Read the agent's newline-delimited event stream, reporting as it arrives.
+ *
+ * Returns the final plan (or error), having handed everything before it to the
+ * callbacks. A body that is not a stream at all — an error page, a proxy that
+ * decided to buffer — still parses, because a single JSON object is also a
+ * valid one-line NDJSON document.
+ */
+async function consumeStream(
+  res: Response,
+  handlers: {
+    onStatus: (status: string | null) => void;
+    onThinking: (text: string) => void;
+    onLook: (detail: string) => void;
+    /** Something the person should know, but that is not a result. */
+    onNote: (text: string) => void;
+  }
+): Promise<PlanReply | null> {
+  const body = res.body;
+  if (!body) return null;
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: PlanReply | null = null;
+
+  const handle = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let event: AgentEvent;
+    try {
+      event = JSON.parse(trimmed) as AgentEvent;
+    } catch {
+      // A half-written line is impossible here — lines are only handled once
+      // the newline that terminates them has arrived — so this is genuinely
+      // unparseable and skipping it is right.
+      return;
+    }
+
+    switch (event.type) {
+      case "turn":
+        handlers.onStatus(event.index === 0 ? "Thinking…" : "Thinking again…");
+        break;
+      case "thinking":
+        handlers.onThinking(event.text);
+        break;
+      case "look":
+        handlers.onLook(event.detail);
+        handlers.onStatus("Thinking…");
+        break;
+      case "verify":
+        handlers.onStatus(
+          event.problems
+            ? `Checking the plan — ${event.problems} to fix…`
+            : "Checking the plan…"
+        );
+        break;
+      case "repair":
+        handlers.onStatus("Fixing the plan…");
+        break;
+      case "retry":
+        // The reason is written server-side and is the only thing that
+        // distinguishes an unusable reply from a conversation too long to read.
+        handlers.onStatus(
+          event.reason
+            ? `${event.reason} — asking again…`
+            : "That reply couldn't be used — asking again…"
+        );
+        break;
+      case "trim":
+        // Worth saying out loud. The alternative is an agent that quietly
+        // answers from less than it was given, which reads as forgetfulness.
+        handlers.onNote(
+          event.dropped
+            ? `The conversation got long — dropped ${event.dropped} older ${
+                event.dropped === 1 ? "message" : "messages"
+              } to fit.`
+            : "The conversation got long — shortened some older messages to fit."
+        );
+        break;
+      default:
+        // Anything unrecognised is the final reply. A new event type that is
+        // not handled above therefore ends the stream holding a plan-shaped
+        // object that is not a plan, which is why every case is explicit.
+        final = event;
+        break;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      handle(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+    }
+  }
+  handle(buffer);
+
+  handlers.onStatus(null);
+  return final;
+}
+
+/**
+ * What this person's past decisions have to say about this instruction.
+ *
+ * Never throws and never blocks a plan: an empty result is the state the agent
+ * was in before any of this existed, so a failure here costs the improvement
+ * rather than the request.
+ */
+async function gatherLearned(instruction: string): Promise<{
+  exemplars: Exemplar[];
+  preferences: string[];
+}> {
+  try {
+    const events = await listFeedback();
+    if (events.length === 0) return { exemplars: [], preferences: [] };
+    const exemplars = await retrieveExemplars(instruction, { events });
+    return {
+      exemplars,
+      preferences: standingPreferences(events).map((p) => p.note),
+    };
+  } catch {
+    return { exemplars: [], preferences: [] };
+  }
+}
+
+export default function AiPanel() {
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  /** What the agent is doing right now, and the reasoning behind it. */
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [thought, setThought] = useState("");
+  // The conversation lives in its own store so it survives a refresh with the
+  // rest of the project. See `lib/chat/store.ts`.
+  const log = useChatStore((s) => s.log);
+  const proposal = useChatStore((s) => s.proposal);
+  const append = useChatStore((s) => s.append);
+  const setProposal = useChatStore((s) => s.setProposal);
+  /**
+   * Toggle one step of the open proposal.
+   *
+   * Reads the proposal out of the store rather than closing over the rendered
+   * one: ticking two steps quickly would otherwise have the second click work
+   * from the state the first click replaced.
+   */
+  const setProposalWith = useCallback(
+    (update: (prev: Proposal | null) => Proposal | null) => {
+      const store = useChatStore.getState();
+      store.setProposal(update(store.proposal));
+    },
+    []
+  );
+  const abortRef = useRef<AbortController | null>(null);
+  /**
+   * What was asked for, kept for as long as its answer is on screen.
+   *
+   * A ref rather than state because nothing renders from it: the box is cleared
+   * the moment a request is sent, and a proposal is read and accepted seconds
+   * later — so by the time a verdict is recorded, the instruction that earned
+   * it is long gone from `prompt`.
+   */
+  const instructionRef = useRef("");
+  /**
+   * What was just applied, so an undo can be read as an opinion about it.
+   *
+   * Undoing within a few seconds of accepting a plan is the strongest signal
+   * this panel can collect — the person read the step, ran it, looked at the
+   * result and took it back. It is worth more than a decline, which is a
+   * judgement made before seeing anything.
+   */
+  const appliedRef = useRef<{ ids: string[]; at: number } | null>(null);
+  /**
+   * The operations the last applied plan carried, so a review knows where to
+   * look. A review that samples evenly reviews the parts of the video nothing
+   * happened to.
+   */
+  const reviewAtRef = useRef<{ start?: number; at?: number }[]>([]);
+  /** Whether there is applied work worth watching back. Drives the button. */
+  const [reviewable, setReviewable] = useState(false);
+  /**
+   * Whether the edit that was just run is big enough to watch back unasked.
+   *
+   * The review has always been offered rather than automatic, and the reasoning
+   * was right for the case it was written against: it costs a request with
+   * composited frames in it, and an edit somebody accepted step by step is
+   * usually fine. Making them ask kept a reviewer from becoming a tax on every
+   * "make that bigger".
+   *
+   * It is the wrong default for the other case. "Edit this for me end to end"
+   * accepts six steps and thirty operations in one click; nobody has looked at
+   * any of it, and the half of an editor's job that is *watching the cut back*
+   * is exactly the half being skipped. So the tax is charged where it buys
+   * something — a plan large enough that nobody has really read it.
+   */
+  const autoReviewRef = useRef(false);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * The current `submitText`, so the repair round can re-enter it.
+   *
+   * A direct call would close over the function from the render that created
+   * it, which is both a lint error and a real staleness bug once the callback
+   * starts depending on the timeline — and the timeline is exactly what the cut
+   * that just ran has changed.
+   */
+  const submitRef = useRef<
+    | ((
+        text?: string,
+        mode?: "propose" | "execute" | "review",
+        options?: { repair?: boolean; silent?: boolean }
+      ) => Promise<void>)
+    | null
+  >(null);
+
+  const words = useEditorStore((s) => s.words);
+  const duration = useEditorStore((s) => s.duration);
+  const status = useEditorStore((s) => s.status);
+  const cuts = useCutRanges();
+  const timeline = useOutputTimeline();
+  const playhead = useOutputTime();
+  const aspect = useOverlayStore((s) => s.aspect);
+  const manualCuts = useEditorStore((s) => s.manualCuts);
+  const sceneBoundaries = useEditorStore((s) => s.sceneBoundaries);
+
+  // Counts, not impressions: the proposal quotes these back, so they are
+  // measured with the same functions the Tools menu uses.
+  const analysis = useMemo(
+    () => analyseFootage(words, duration, manualCuts, sceneBoundaries),
+    [words, duration, manualCuts, sceneBoundaries]
+  );
+
+  /**
+   * What this deployment can reach.
+   *
+   * Sound defaults to false and image generation to true, which looks
+   * inconsistent and is not: images have a keyless fallback tier, and the audio
+   * catalogues do not. Guessing "yes" about sound produces an agent that plans
+   * a soundtrack on every edit and delivers none of it.
+   */
+  const [can, setCan] = useState({
+    generateImage: true,
+    photoSearch: false,
+    music: false,
+    sfx: false,
+    video: false,
+    voice: false,
+  });
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  /** "" means the server picks, which is what this panel always did before. */
+  const [model, setModel] = useState<string>(() => loadAgentModel());
+
+  // What this deployment can actually do decides what the model is allowed to
+  // plan, so it is read once rather than guessed at per request.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/capabilities")
+      .then((r) => r.json())
+      .then((json: {
+        image?: { providers?: Array<{ id: string; configured?: boolean }> };
+        visual?: { configured?: boolean };
+        media?: { kinds?: Record<string, boolean> };
+        voice?: { configured?: boolean };
+      }) => {
+        if (!alive) return;
+        const providers = json.image?.providers ?? [];
+        const kinds = json.media?.kinds ?? {};
+        setCan({
+          generateImage: providers.some((p) => p.configured !== false),
+          photoSearch: json.visual?.configured ?? true,
+          // The same field the music panel reads, so the picker and the agent
+          // cannot disagree about whether there is a catalogue to search.
+          music: kinds.music === true,
+          sfx: kinds.sfx === true,
+          video: kinds.video === true,
+          voice: json.voice?.configured === true,
+        });
+      })
+      .catch(() => {
+        // Leaving the defaults is right: a failed probe should not disable the
+        // feature, it should let the actual request report the actual problem.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The catalogue is what the account actually exposes, so it is asked for
+  // rather than hardcoded. A failure leaves the picker empty and the panel on
+  // the server's default — which is exactly the old behaviour.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/models?provider=omega")
+      .then((r) => r.json())
+      .then((json: { models?: { id: string; label: string }[] }) => {
+        if (alive) setModels(json.models ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+    // The live reasoning grows inside the same scroller, so it has to keep the
+    // view pinned to the bottom as it arrives, not only when a line is logged.
+  }, [log, thought, agentStatus]);
+
+  // The conversation is about a particular video, and carrying it into the next
+  // one is the same mistake as carrying the captions: "make that bigger" would
+  // refer to an element that no longer exists.
+  //
+  // The clearing itself now belongs to the chat store, called from `loadVideo`,
+  // `openProject` and `reset` alongside the overlay store's — doing it here
+  // instead would also wipe the conversation `openProject` has just restored,
+  // since opening a project changes the media URL too. What is left here is the
+  // transient UI of a turn in flight, which is not persisted and not restored.
+  useEffect(
+    () =>
+      useEditorStore.subscribe((state, previous) => {
+        if (state.mediaUrl === previous.mediaUrl) return;
+        setBusy(false);
+        setThought("");
+        setAgentStatus(null);
+      }),
+    []
+  );
+
+  /**
+   * Watch for the plan being taken back.
+   *
+   * `past` shrinking while `future` grows is an undo, whichever way it was
+   * triggered — the button, the shortcut, or the menu. The window is short on
+   * purpose: an undo half a minute later is ordinary editing, not a verdict on
+   * anything the agent did.
+   */
+  useEffect(
+    () =>
+      useOverlayStore.subscribe((state, previous) => {
+        const undone =
+          state.past.length < previous.past.length &&
+          state.future.length > previous.future.length;
+        if (!undone) return;
+
+        const applied = appliedRef.current;
+        if (!applied) return;
+        if (Date.now() - applied.at > UNDO_WINDOW_MS) {
+          appliedRef.current = null;
+          return;
+        }
+        // Once only: a second undo is walking back further work, not a second
+        // opinion about the same steps.
+        appliedRef.current = null;
+        void reviseVerdict(applied.ids, "undone");
+      }),
+    []
+  );
+
+  // The store aborts in-flight work when it is reset, but the controller lives
+  // here. Handing it over is what makes `useChatStore.reset()` safe to call
+  // from the editor store.
+  useEffect(() => {
+    const { setAbort } = useChatStore.getState();
+    setAbort(() => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    });
+    return () => setAbort(null);
+  }, []);
+
+  const buildTranscript = useCallback(() => {
+    const kept = words.filter((w) => !w.deleted && !isWordCutOut(w, cuts));
+    if (!kept.length) return undefined;
+
+    // Stamped per sentence, not per fixed interval. Choosing where to cut means
+    // choosing between whole thoughts, so the model needs a time against each
+    // one — and a stamp every ten seconds lands mid-sentence and invites a cut
+    // that clips someone off mid-word.
+    const lines: string[] = [];
+    let line: string[] = [];
+    let lineStart = 0;
+    let previousEnd = 0;
+
+    const flush = () => {
+      if (!line.length) return;
+      lines.push(`[${formatSeconds(lineStart)}] ${line.join(" ")}`);
+      line = [];
+    };
+
+    for (const word of kept) {
+      const outStart = originalToEdited(word.start, cuts);
+      if (!line.length) lineStart = outStart;
+      line.push(word.text);
+      // Break on sentence punctuation, on a real pause, or when a line has run
+      // long enough that a cut point inside it would be hard to address.
+      const sentenceEnd = /[.!?…]["')\]]?$/.test(word.text);
+      const pause = originalToEdited(word.end, cuts);
+      const nextGap = pause - previousEnd;
+      previousEnd = pause;
+      if (sentenceEnd || nextGap > 1.2 || line.length >= 40) flush();
+    }
+    flush();
+
+    const text = lines.join("\n");
+    return text.length > TRANSCRIPT_BUDGET
+      ? `${text.slice(0, TRANSCRIPT_BUDGET)}\n…(transcript truncated)`
+      : text;
+  }, [words, cuts]);
+
+  /** Keep the turn, so the next one can refer to it. */
+  const remember = useCallback(
+    (instruction: string, summary: string, outcome?: string) => {
+      useChatStore.getState().pushTurn({ instruction, summary, outcome });
+    },
+    []
+  );
+
+  /**
+   * Send an instruction. Defaults to whatever is typed in the box.
+   *
+   * `repair` marks the automatic second attempt after a failed operation: it
+   * reuses the controller and the busy flag of the turn that spawned it, so
+   * Stop still stops the whole thing and the box does not flicker back to idle
+   * between the two halves. `silent` keeps the machine-written repair
+   * instruction out of the log, where it would read as something the person
+   * said.
+   */
+  const submitText = useCallback(async (
+    text?: string,
+    mode: "propose" | "execute" | "review" = "execute",
+    options?: { repair?: boolean; silent?: boolean }
+  ) => {
+    const repair = options?.repair ?? false;
+    const instruction = (text ?? prompt).trim();
+    if (!instruction) return;
+    if (busy && !repair) return;
+
+    const controller = repair && abortRef.current
+      ? abortRef.current
+      : new AbortController();
+    abortRef.current = controller;
+    if (!repair) {
+      setBusy(true);
+      setPrompt("");
+      setProposal(null);
+    }
+    if (!options?.silent) {
+      append("you", instruction);
+      instructionRef.current = instruction;
+    }
+    setThought("");
+    setAgentStatus(null);
+
+    /** Look details already put in the log by the stream, so they are not repeated. */
+    const reported = new Set<string>();
+
+    // Reading the whole store costs a few milliseconds against a request that
+    // takes seconds, and it must be fresh: a verdict given thirty seconds ago
+    // should count towards the very next plan.
+    const learned = await gatherLearned(instruction);
+
+    // A few frames of the cut, so the planner is not editing blind. Skipped for
+    // audio — there is nothing to look at — and skipped on a repair, which is
+    // the same request again and has already been shown them.
+    const media = useEditorStore.getState();
+    const survey =
+      repair || media.mediaKind !== "video" || !media.mediaUrl
+        ? { glances: [], vision: [] }
+        : mode === "review"
+          ? // Composited pictures: a review of the raw footage would be a
+            // review of a video nobody is going to watch. The measurements
+            // still come off the clean frame — what was *behind* each caption
+            // is what decides whether it can be read.
+            await surveyForReview(
+              media.mediaUrl,
+              timeline,
+              currentComposition(),
+              reviewTimes(reviewAtRef.current, timeline.duration)
+            )
+          : await surveyFootage(media.mediaUrl, timeline, currentComposition());
+    const { glances, vision } = survey;
+
+    // A review with nothing to look at is a review of nothing, and the model
+    // will fill the silence with plausible-sounding findings.
+    if (mode === "review" && glances.length === 0) {
+      setBusy(false);
+      return;
+    }
+
+    try {
+      const overlay = useOverlayStore.getState();
+      const ordered = [...overlay.elements].sort((a, b) => a.z - b.z);
+
+      const body = {
+        instruction,
+        context: {
+          duration: timeline.duration || duration,
+          playhead,
+          boundaries: timeline.boundaries.map((b) => ({
+            number: b.index,
+            at: b.outTime,
+          })),
+          elements: ordered.map((element, i) => ({
+            number: i + 1,
+            kind: element.kind,
+            name: element.name,
+            text: element.kind === "text" ? element.text : undefined,
+            start: element.start,
+            end: element.end,
+            position: { x: element.rect.x, y: element.rect.y },
+          })),
+          subtitles: {
+            enabled: overlay.subtitles.enabled,
+            cueCount: overlay.subtitles.cues.length,
+            position: overlay.subtitles.style.position,
+          },
+          transitions: overlay.transitions.map((t) => ({
+            between: t.index,
+            kind: t.kind,
+            duration: t.duration,
+          })),
+          transcript: buildTranscript(),
+          analysis: {
+            wordCount: analysis.wordCount,
+            wordsPerMinute: analysis.wordsPerMinute,
+            speakerCount: analysis.speakerCount,
+            fillerCount: analysis.fillerCount,
+            fillerSeconds: analysis.fillerSeconds,
+            silenceCount: analysis.silenceCount,
+            silenceSeconds: analysis.silenceSeconds,
+            longestPauses: analysis.longestPauses,
+            clipCount: analysis.clipCount,
+            runsLong: analysis.runsLong,
+          },
+          aspect,
+          frame: {
+            aspect: overlay.frame.aspect,
+            fit: overlay.frame.fit,
+            zoom: overlay.frame.zoom,
+          },
+          // Omitted rather than empty on audio and on a repair, so the agent's
+          // "say nothing about how it looks" branch fires instead of it being
+          // handed an empty survey and reading it as a clear frame.
+          ...(vision.length ? { vision } : {}),
+          can,
+        },
+        mode,
+        history: useChatStore.getState().turns.slice(-6),
+        // Omitted rather than empty: the schema treats absent as "the server
+        // picks", which is what this panel did before there was a picker.
+        model: model || undefined,
+        // Retrieved here rather than server-side because this is where they
+        // live: the feedback store is in the browser with the media and the
+        // transcript, and shipping it somewhere to be queried would give away
+        // the one property this editor has that nothing else does.
+        ...(learned.exemplars.length ? { exemplars: learned.exemplars } : {}),
+        ...(learned.preferences.length
+          ? { preferences: learned.preferences }
+          : {}),
+        ...(glances.length ? { glances } : {}),
+      };
+
+      const res = await fetch("/api/motionscript/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      // The route answers as a stream of events and ends with the plan. The
+      // events are the point: the agent takes several turns to get there, and
+      // watching it read the transcript and check a phrase is the difference
+      // between a wait that makes sense and a spinner.
+      const json = await consumeStream(res, {
+        onStatus: setAgentStatus,
+        onThinking: (text) =>
+          setThought((prev) => (prev + text).slice(-THOUGHT_TAIL)),
+        onLook: (detail) => {
+          setThought("");
+          reported.add(detail);
+          append("look", detail);
+        },
+        onNote: (text) => append("note", text),
+      });
+
+      if (!res.ok || !json || !json.success) {
+        append(
+          "fail",
+          json?.error?.message ?? "That request didn't get through."
+        );
+        return;
+      }
+
+      // Anything the stream did not already report — a reconnect, or a
+      // provider that would not stream — still lands here, so the log is the
+      // same either way.
+      for (const entry of json.trace ?? []) {
+        if (!reported.has(entry.detail)) append("look", entry.detail);
+      }
+      if (json.summary) append("summary", json.summary);
+      for (const finding of json.findings ?? []) append("finding", finding);
+      for (const warning of json.warnings ?? []) append("warn", warning);
+      for (const reason of json.rejected ?? []) {
+        append("note", `Skipped — ${reason}`);
+      }
+
+      // A proposal is shown and waited on; only an execution runs immediately.
+      // If the model answered a proposal request with a flat list anyway — it
+      // sometimes does — that is still a proposal, not permission to run. It
+      // gets wrapped into one step rather than executed behind the person's
+      // back, because "show me the plan" must never turn into "did it".
+      const steps = json.steps ?? [];
+      if (mode === "propose") {
+        const grouped =
+          steps.length > 0
+            ? steps
+            : (json.ops ?? []).length > 0
+              ? [
+                  {
+                    title: "The whole edit",
+                    detail: json.summary ?? "",
+                    ops: json.ops!,
+                  },
+                ]
+              : [];
+
+        if (grouped.length) {
+          setProposal({
+            summary: json.summary ?? "",
+            steps: grouped,
+            declined: [],
+          });
+          return;
+        }
+        append("note", "Nothing worth changing was found.");
+        return;
+      }
+
+      const ops = json.ops ?? [];
+      if (!ops.length) {
+        if (!json.summary) append("note", "Nothing to do for that one.");
+        remember(instruction, json.summary ?? "Nothing to do.");
+        return;
+      }
+
+      const results: OpResult[] = await runPlan(
+        ops,
+        {
+          playhead,
+          duration: timeline.duration || duration,
+          timeline,
+          aspect,
+        },
+        (result) => append(result.ok ? "ok" : "fail", result.message),
+        controller.signal
+      );
+
+      const failures = results.filter((r) => !r.ok);
+      remember(
+        instruction,
+        json.summary ?? "",
+        failures.length
+          ? `${results.length - failures.length} of ${results.length} operations landed; these did not: ${failures
+              .map((f) => f.message)
+              .join("; ")}`
+          : `all ${results.length} operations landed`
+      );
+
+      if (!failures.length) return;
+
+      if (failures.length === results.length && !repair) {
+        append("note", "Nothing landed. Trying once more with what went wrong.");
+      }
+
+      // One repair round, and only one.
+      //
+      // Everything the model needs to fix a failure is in the failure itself —
+      // a boundary that does not exist reports how many there are, a phrase that
+      // is not said says so — and it is now holding the conversation, so it can
+      // read them. Asking the person to relay a machine's error message back to
+      // the machine was never a reasonable thing to do.
+      if (!repair && !controller.signal.aborted) {
+        await submitRef.current?.(
+          [
+            "Some of that did not work. These operations failed:",
+            ...failures.map((f) => `  - ${f.message}`),
+            "Fix them against the project as it is now, and send only the operations that put them right. Do not repeat the ones that already worked.",
+          ].join("\n"),
+          "execute",
+          { repair: true, silent: true }
+        );
+      }
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
+      else
+        append(
+          "fail",
+          err instanceof Error ? err.message : "Something went wrong."
+        );
+    } finally {
+      // The repair runs inside its parent's turn, so it must not hand the
+      // panel back to idle while that turn is still unwinding.
+      if (!repair) {
+        abortRef.current = null;
+        setBusy(false);
+      }
+      setThought("");
+      setAgentStatus(null);
+    }
+  }, [
+    prompt,
+    busy,
+    model,
+    append,
+    setProposal,
+    remember,
+    timeline,
+    duration,
+    playhead,
+    aspect,
+    analysis,
+    can,
+    buildTranscript,
+  ]);
+
+  useEffect(() => {
+    submitRef.current = submitText;
+  }, [submitText]);
+
+  /**
+   * An instruction posted from somewhere else — the `/` menu in the transcript,
+   * for anything it cannot express as operations of its own.
+   *
+   * Taken rather than read, so it runs exactly once however many times this
+   * panel is mounted and unmounted by the tab strip. Deliberately after the
+   * effect above: on the render where the panel first appears, `submitRef` is
+   * assigned by that effect and this one runs with it already set.
+   */
+  const pendingAsk = useChatStore((s) => s.pending);
+  useEffect(() => {
+    if (!pendingAsk || busy) return;
+    const instruction = useChatStore.getState().takePending();
+    if (instruction) void submitRef.current?.(instruction, "execute");
+  }, [pendingAsk, busy]);
+
+  /** Run the steps the person kept, in order, reporting each one. */
+  const applyProposal = useCallback(async () => {
+    const current = proposal;
+    if (!current || busy) return;
+    const accepted = current.steps.filter(
+      (_, i) => !current.declined.includes(i)
+    );
+    if (!accepted.length) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+    setProposal(null);
+
+    // The verdict is recorded here, at the moment it is actually made: the
+    // person has read every step and decided, one at a time, which of them
+    // were right. That is a labelled preference pair per step, produced by
+    // someone looking at their own footage — and until now it was discarded
+    // the instant the panel moved on.
+    void recordAll(
+      current.steps.map((step, i) => ({
+        projectId: useEditorStore.getState().projectId,
+        instruction: instructionRef.current,
+        planSummary: current.summary,
+        stepTitle: step.title,
+        stepDetail: step.detail,
+        ops: step.ops,
+        verdict: current.declined.includes(i)
+          ? ("declined" as const)
+          : ("accepted" as const),
+        model: model || undefined,
+        promptVersion: PROMPT_VERSION,
+      }))
+    ).then((ids) => {
+      appliedRef.current = { ids, at: Date.now() };
+    });
+
+    try {
+      for (const step of accepted) {
+        if (controller.signal.aborted) break;
+        append("summary", step.title);
+        // Rebuilt per step: an earlier step may have re-cut the video, and the
+        // next one has to be planned against the clock that leaves behind.
+        const editor = useEditorStore.getState();
+        const fresh = buildTimeline(
+          editor.words,
+          editor.duration,
+          editor.manualCuts,
+          editor.sceneBoundaries
+        );
+        let failed = 0;
+        await runPlan(
+          step.ops,
+          {
+            playhead: Math.min(playhead, Math.max(0, fresh.duration - 0.2)),
+            duration: fresh.duration,
+            timeline: fresh,
+            aspect,
+          },
+          (result) => {
+            if (!result.ok) failed += 1;
+            append(result.ok ? "ok" : "fail", result.message);
+          },
+          controller.signal
+        );
+
+        // A step that was accepted and then would not run is a different
+        // failure from one that was declined, and the more useful of the two:
+        // the person wanted it and the plan could not deliver it.
+        if (failed > 0) {
+          void recordFeedback({
+            projectId: useEditorStore.getState().projectId,
+            instruction: instructionRef.current,
+            planSummary: current.summary,
+            stepTitle: step.title,
+            stepDetail: step.detail,
+            ops: step.ops,
+            verdict: "failed",
+            model: model || undefined,
+            promptVersion: PROMPT_VERSION,
+          });
+        }
+      }
+      reviewAtRef.current = accepted.flatMap((step) =>
+        step.ops.map((op) => ({
+          start: (op as { start?: number }).start,
+          at: (op as { at?: number }).at,
+        }))
+      );
+      setReviewable(true);
+      // Big edits get watched back without being asked. The threshold is a
+      // count rather than a flag on the request, so it catches any large plan —
+      // including one the person built up themselves out of several steps —
+      // rather than only the whole-edit button.
+      const touched = accepted.reduce((n, step) => n + step.ops.length, 0);
+      autoReviewRef.current = accepted.length >= 4 || touched >= 12;
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") append("note", "Stopped.");
+      else append("fail", err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      abortRef.current = null;
+      setBusy(false);
+    }
+  }, [proposal, busy, model, append, setProposal, playhead, aspect]);
+
+  /**
+   * Watch the cut back.
+   *
+   * Offered on a small edit, automatic on a large one — see `autoReviewRef`.
+   * It costs a request with composited frames in it, so it is charged where it
+   * buys something rather than on every plan.
+   */
+  const review = useCallback(() => {
+    setReviewable(false);
+    autoReviewRef.current = false;
+    void submitRef.current?.(
+      "Watch this back and tell me what is wrong with it.",
+      "review",
+      { silent: true }
+    );
+  }, []);
+
+  /**
+   * Fire the automatic review once the run has actually finished.
+   *
+   * Deferred to an effect rather than awaited at the end of the run: the review
+   * has to plan against the composition the run *left behind*, and inside the
+   * run the stores have been written but the frames the survey will paint have
+   * not been asked for yet. Waiting for `busy` to fall is waiting for the whole
+   * thing to settle.
+   */
+  useEffect(() => {
+    if (busy || proposal || !autoReviewRef.current) return;
+    autoReviewRef.current = false;
+    append("note", "Watching it back…");
+    review();
+  }, [busy, proposal, review, append]);
+
+  const ready = status === "ready";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        ref={logRef}
+        className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3"
+      >
+        {log.length === 0 ? (
+          <div className="space-y-3 pt-2">
+            <p className="px-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Describe the change. It reads the transcript, the clips, the frame
+              and what is already on screen — checking anything it is unsure of —
+              then makes the edit.
+            </p>
+
+            <button
+              type="button"
+              disabled={!ready || busy}
+              onClick={() => void submitText(AUTO_EDIT, "propose")}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-xl bg-zinc-900 px-3 py-2.5 text-left transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:hover:bg-white"
+            >
+              <Wand2 size={15} className="shrink-0 text-white dark:text-zinc-900" />
+              <span className="min-w-0">
+                <span className="block text-[12px] font-semibold text-white dark:text-zinc-900">
+                  Analyse and propose an edit
+                </span>
+                <span className="block text-[10px] leading-tight text-zinc-300 dark:text-zinc-600">
+                  Reads the footage, then shows you the plan before it runs
+                </span>
+              </span>
+            </button>
+            <div className="space-y-1.5">
+              {SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setPrompt(suggestion)}
+                  className="w-full cursor-pointer rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-left text-[12px] text-zinc-600 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-800"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          log.map((entry) => <LogLine key={entry.id} entry={entry} />)
+        )}
+
+        {(agentStatus || thought) && (
+          <div className="pt-1">
+            {agentStatus && (
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                <Loader2 size={10} className="shrink-0 animate-spin" />
+                {agentStatus}
+              </p>
+            )}
+            {thought && (
+              // The model's own reasoning, as it writes it. Dimmed and small
+              // because it is working-out, not an answer — but it is the thing
+              // that makes a ninety-second wait legible, and it is often where
+              // you first see the edit going somewhere you did not want.
+              <p className="mt-1 max-h-40 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-500">
+                {thought}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {proposal && (
+        <div className="border-t border-zinc-200 bg-zinc-50 p-2.5 dark:border-zinc-800 dark:bg-zinc-950/60">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
+            <ListChecks size={12} /> Proposed edit
+          </p>
+
+          <ul className="mb-2.5 space-y-1">
+            {proposal.steps.map((step, i) => {
+              const on = !proposal.declined.includes(i);
+              return (
+                <li key={`${step.title}-${i}`}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setProposalWith((prev) => {
+                        if (!prev) return prev;
+                        const declined = prev.declined.includes(i)
+                          ? prev.declined.filter((n) => n !== i)
+                          : [...prev.declined, i];
+                        return { ...prev, declined };
+                      })
+                    }
+                    className={`flex w-full cursor-pointer items-start gap-2 rounded-lg border px-2 py-1.5 text-left transition ${
+                      on
+                        ? "border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                        : "border-transparent bg-transparent opacity-50"
+                    }`}
+                  >
+                    <span
+                      className={`mt-px flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border text-[9px] ${
+                        on
+                          ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
+                          : "border-zinc-400 text-transparent dark:border-zinc-600"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[12px] font-medium text-zinc-800 dark:text-zinc-100">
+                        {step.title}
+                      </span>
+                      {step.detail && (
+                        <span className="block text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                          {step.detail}
+                        </span>
+                      )}
+                      <span className="mt-0.5 block text-[10px] text-zinc-400 dark:text-zinc-500">
+                        {step.ops.length} operation{step.ops.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="flex gap-1.5">
+            <Button
+              variant="solid"
+              className="flex-1"
+              disabled={busy || proposal.declined.length === proposal.steps.length}
+              onClick={() => void applyProposal()}
+            >
+              <Check size={12} />
+              Apply{" "}
+              {proposal.declined.length
+                ? `${proposal.steps.length - proposal.declined.length} of ${proposal.steps.length}`
+                : "all"}
+            </Button>
+            <Button onClick={() => setProposal(null)} disabled={busy}>
+              Discard
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-zinc-200 p-2.5 dark:border-zinc-800">
+        {reviewable && !busy && !proposal && (
+          <button
+            type="button"
+            onClick={() => {
+              setReviewable(false);
+              review();
+            }}
+            className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-left transition hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-zinc-500 dark:hover:bg-zinc-800/60"
+          >
+            <Eye size={13} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-zinc-800 dark:text-zinc-100">
+                Watch it back
+              </span>
+              <span className="block text-[10px] leading-tight text-zinc-400 dark:text-zinc-600">
+                Renders what shipped and looks at it — legibility, collisions,
+                framing
+              </span>
+            </span>
+          </button>
+        )}
+        <div className="relative">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void submitText();
+              }
+            }}
+            rows={3}
+            disabled={!ready}
+            placeholder={
+              ready
+                ? "Add a caption, cut the fillers, put a dissolve on every cut…"
+                : "Waiting for the transcript…"
+            }
+            className="scrollbar-thin w-full resize-none rounded-xl border border-zinc-200 bg-white py-2 pr-16 pl-2.5 text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:focus:border-zinc-500"
+          />
+          <div className="absolute right-1.5 bottom-1.5 flex items-center gap-1">
+            <MicButton
+              onTranscription={(text) => setPrompt((prev) => (prev ? prev + " " + text : text))}
+            />
+            {busy ? (
+              <Button
+                variant="ghost"
+                onClick={() => abortRef.current?.abort()}
+                title="Stop"
+              >
+                <Square size={12} />
+              </Button>
+            ) : (
+              <Button
+                variant="solid"
+                onClick={() => void submitText()}
+                disabled={!prompt.trim() || !ready}
+                title="Send (Enter)"
+              >
+                <CornerDownLeft size={12} />
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-2 px-1">
+          <p className="min-w-0 flex-1 truncate text-[10px] text-zinc-400 dark:text-zinc-600">
+            {busy ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={10} className="animate-spin" />
+                {agentStatus ?? "Working…"}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Sparkles size={10} /> Enter to send · Shift+Enter for a new line
+              </span>
+            )}
+          </p>
+          {models.length > 0 && (
+            <select
+              value={model}
+              aria-label="Model"
+              title="Which model plans the edit"
+              disabled={busy}
+              onChange={(e) => {
+                setModel(e.target.value);
+                saveAgentModel(e.target.value);
+              }}
+              className="max-w-[45%] shrink-0 cursor-pointer truncate rounded-md border border-transparent bg-transparent py-0.5 text-[10px] text-zinc-400 outline-none transition hover:border-zinc-200 hover:text-zinc-600 focus:border-zinc-300 disabled:opacity-50 dark:text-zinc-600 dark:hover:border-zinc-700 dark:hover:text-zinc-300 dark:focus:border-zinc-600"
+            >
+              <option value="">Default model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LogLine({ entry }: { entry: LogEntry }) {
+  if (entry.kind === "you") {
+    return (
+      <p className="ml-6 rounded-xl rounded-br-sm bg-zinc-900 px-2.5 py-1.5 text-[12px] leading-relaxed text-white dark:bg-zinc-100 dark:text-zinc-900">
+        {entry.text}
+      </p>
+    );
+  }
+  if (entry.kind === "summary") {
+    return (
+      <p className="text-[12px] leading-relaxed font-medium text-zinc-800 dark:text-zinc-100">
+        {entry.text}
+      </p>
+    );
+  }
+  const tone = {
+    ok: "text-emerald-600 dark:text-emerald-400",
+    fail: "text-red-600 dark:text-red-400",
+    note: "text-amber-600 dark:text-amber-500",
+    finding: "text-zinc-500 dark:text-zinc-400",
+    // Looks are the agent's working, not its answer: present, but quiet.
+    look: "text-zinc-400 italic dark:text-zinc-500",
+    warn: "text-amber-600 dark:text-amber-500",
+  }[entry.kind];
+  const mark = {
+    ok: "✓",
+    fail: "✕",
+    note: "!",
+    finding: "·",
+    look: "→",
+    warn: "△",
+  }[entry.kind];
+  return (
+    <p className={`flex gap-1.5 pl-1 text-[11px] leading-relaxed ${tone}`}>
+      <span aria-hidden className="shrink-0">
+        {mark}
+      </span>
+      <span className="min-w-0">{entry.text}</span>
+    </p>
+  );
+}
+
+/** Empty state used when the sidebar renders before a project is open. */
+export function AiPanelPlaceholder() {
+  return <Empty>Load a video to start editing with prompts.</Empty>;
+}

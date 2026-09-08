@@ -21,8 +21,8 @@
  * Run with `npx tsx tests/ken-burns-test.ts`.
  */
 
-import { kenBurns } from "../src/rescript/lib/overlay/render";
-import type { ImageMotionKind } from "../src/rescript/lib/overlay/types";
+import { kenBurns } from "../src/motionscript/lib/overlay/render";
+import type { ImageMotionKind } from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

@@ -18,15 +18,15 @@ import {
   drawStateAt,
   tokenProgress,
   ANIMATION_KINDS,
-} from "../src/rescript/lib/overlay/animation";
-import { paintComposition } from "../src/rescript/lib/overlay/render";
+} from "../src/motionscript/lib/overlay/animation";
+import { paintComposition } from "../src/motionscript/lib/overlay/render";
 import {
   DEFAULT_SUBTITLE_STYLE,
   DEFAULT_FRAME,
   type AnimationSpec,
   type Composition,
   type TextElement,
-} from "../src/rescript/lib/overlay/types";
+} from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

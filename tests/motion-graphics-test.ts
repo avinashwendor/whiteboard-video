@@ -23,12 +23,12 @@ import {
   ambientAt,
   counterText,
   describeAmbients,
-} from "../src/rescript/lib/overlay/ambient";
-import { drawStateAt } from "../src/rescript/lib/overlay/animation";
-import { addTextOp, animateElementOp } from "../src/rescript/lib/overlay/ops-schema";
-import { readFigure } from "../src/rescript/lib/slash";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
-import type { AmbientKind, TextElement } from "../src/rescript/lib/overlay/types";
+} from "../src/motionscript/lib/overlay/ambient";
+import { drawStateAt } from "../src/motionscript/lib/overlay/animation";
+import { addTextOp, animateElementOp } from "../src/motionscript/lib/overlay/ops-schema";
+import { readFigure } from "../src/motionscript/lib/slash";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
+import type { AmbientKind, TextElement } from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

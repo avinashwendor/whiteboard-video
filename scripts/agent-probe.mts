@@ -5,7 +5,7 @@
  *
  * Calls the planner directly against a synthetic project, so the tool loop, the
  * verifier and the repair round can be watched end to end without a video, a
- * transcription pass or a browser. Set RESCRIPT_AGENT_DEBUG (this sets it to
+ * transcription pass or a browser. Set MOTIONSCRIPT_AGENT_DEBUG (this sets it to
  * stderr) to see the model's raw replies — which is the only way the two
  * harness bugs found this way were ever going to be visible, since the route
  * answers 200 either way.
@@ -20,10 +20,10 @@ for (const line of readFileSync(".env.local", "utf8").split("\n")) {
 // Defaults to stderr, but honours a path — the event stream that STREAM=1
 // writes also goes to stderr, and the two interleave into something that
 // cannot be parsed back apart.
-process.env.RESCRIPT_AGENT_DEBUG ||= "/dev/stderr";
+process.env.MOTIONSCRIPT_AGENT_DEBUG ||= "/dev/stderr";
 
-const { planRescriptEdit } = await import("../src/lib/ai/rescript-agent.js");
-const { readFrame, toWire } = await import("../src/rescript/lib/overlay/vision.js");
+const { planMotionScriptEdit } = await import("../src/lib/ai/motionscript-agent.js");
+const { readFrame, toWire } = await import("../src/motionscript/lib/overlay/vision.js");
 
 /**
  * A measured survey, synthesised.
@@ -95,7 +95,7 @@ for (let i = 0; i < Number(process.env.LINES ?? 600); i++) {
 }
 
 async function main() {
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
   instruction: process.argv[2] ?? "Analyse this and propose an edit for a vertical short",
   /**
    * GLANCES=1 attaches a frame, which is what the editor does and the probe

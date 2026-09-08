@@ -1,11 +1,11 @@
-import { isNetworkError, installFetchRetry } from "../src/rescript/lib/network";
+import { isNetworkError, installFetchRetry } from "../src/motionscript/lib/network";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
 }
 
 {
-  // The three engine wordings, as reported by RESCRIPT-9 (Electron/Windows) and
+  // The three engine wordings, as reported on Electron/Windows and
   // their Firefox / WebKit equivalents.
   assert(isNetworkError(new TypeError("Failed to fetch")), "chromium wording");
   assert(

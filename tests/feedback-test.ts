@@ -15,13 +15,13 @@
  * Run with `npx tsx tests/feedback-test.ts`.
  */
 
-import { tally, toJsonl, type FeedbackEvent } from "../src/rescript/lib/feedback/store";
+import { tally, toJsonl, type FeedbackEvent } from "../src/motionscript/lib/feedback/store";
 import {
   retrieveExemplars,
   similarity,
   standingPreferences,
-} from "../src/rescript/lib/feedback/retrieve";
-import type { AgentOp } from "../src/rescript/lib/overlay/ops-schema";
+} from "../src/motionscript/lib/feedback/retrieve";
+import type { AgentOp } from "../src/motionscript/lib/overlay/ops-schema";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

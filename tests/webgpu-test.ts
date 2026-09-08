@@ -1,4 +1,4 @@
-import { isWebGpuDeviceLostError } from "../src/rescript/lib/webgpu";
+import { isWebGpuDeviceLostError } from "../src/motionscript/lib/webgpu";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);

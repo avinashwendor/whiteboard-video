@@ -35,7 +35,7 @@ For stock Whisper this is harmless: the vocabulary ends at the timestamp block,
 so there is nothing above it to misclassify. It breaks any derivative that
 extends the vocabulary.
 
-**How it broke Rescript.** CrisperWhisper appends 31 tokens past the block —
+**How it broke the editor.** CrisperWhisper appends 31 tokens past the block —
 `[UM]`, `[UH]`, 13 vocal events (`[laughter]`, `[breath]`, …) and its prompt
 scaffolding. Two distinct failures, both triggered by the model transcribing a
 filler:

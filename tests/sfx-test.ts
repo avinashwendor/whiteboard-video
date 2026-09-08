@@ -23,10 +23,10 @@ import {
   SFX_IDS,
   SOUND_EFFECTS,
   type SfxMoment,
-} from "../src/rescript/lib/overlay/sfx";
-import { addSfxOp, autoSfxOp } from "../src/rescript/lib/overlay/ops-schema";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
+} from "../src/motionscript/lib/overlay/sfx";
+import { addSfxOp, autoSfxOp } from "../src/motionscript/lib/overlay/ops-schema";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

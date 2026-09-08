@@ -19,10 +19,10 @@
  * Run with `npx tsx tests/camera-variety-test.ts`.
  */
 
-import { findBeats, placePunchIns, type Beat } from "../src/rescript/lib/overlay/emphasis";
-import { autoPunchInsOp, addImageOp } from "../src/rescript/lib/overlay/ops-schema";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
-import type { Word } from "../src/rescript/lib/types";
+import { findBeats, placePunchIns, type Beat } from "../src/motionscript/lib/overlay/emphasis";
+import { autoPunchInsOp, addImageOp } from "../src/motionscript/lib/overlay/ops-schema";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

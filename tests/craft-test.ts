@@ -16,8 +16,8 @@
  * Run with `npx tsx tests/craft-test.ts`.
  */
 
-import { checkCraft, craftScore } from "../src/rescript/lib/overlay/craft";
-import type { AgentOp } from "../src/rescript/lib/overlay/ops-schema";
+import { checkCraft, craftScore } from "../src/motionscript/lib/overlay/craft";
+import type { AgentOp } from "../src/motionscript/lib/overlay/ops-schema";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

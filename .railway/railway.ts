@@ -34,7 +34,7 @@ export default defineRailway(() => {
       // weights are far too large for the repository — the Telugu decoder alone
       // is 260 MB — so public/models/ is empty in a deployment and
       // src/app/models/[...path] streams them from here instead. Created with
-      // `railway bucket create rescript-models`; `preserve()` keeps the keys in
+      // `railway bucket create motionscript-models`; `preserve()` keeps the keys in
       // Railway rather than in source.
       MODEL_BUCKET_ENDPOINT: preserve(),
       MODEL_BUCKET_NAME: preserve(),

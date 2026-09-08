@@ -17,23 +17,23 @@
  * Run with `npx tsx tests/templates-test.ts`.
  */
 
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
 import {
   describeTemplates,
   TEMPLATE_IDS,
   TEXT_TEMPLATES,
   templatesByCategory,
   textTemplate,
-} from "../src/rescript/lib/overlay/templates";
-import { paintComposition } from "../src/rescript/lib/overlay/render";
-import { ANIMATION_KINDS } from "../src/rescript/lib/overlay/animation";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+} from "../src/motionscript/lib/overlay/templates";
+import { paintComposition } from "../src/motionscript/lib/overlay/render";
+import { ANIMATION_KINDS } from "../src/motionscript/lib/overlay/animation";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
 import {
   DEFAULT_FRAME,
   DEFAULT_SUBTITLE_STYLE,
   type Composition,
   type TextElement,
-} from "../src/rescript/lib/overlay/types";
+} from "../src/motionscript/lib/overlay/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

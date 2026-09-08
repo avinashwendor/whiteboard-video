@@ -6,8 +6,8 @@ import {
   MIN_PAUSE_THRESHOLD_S,
   MAX_PAUSE_THRESHOLD_S,
   PAUSE_THRESHOLD_PRESETS,
-} from "../src/rescript/lib/pauses";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/pauses";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error(msg);

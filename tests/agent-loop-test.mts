@@ -14,16 +14,16 @@
 
 import {
   MAX_TOOL_CALLS,
-  planRescriptEdit,
+  planMotionScriptEdit,
   PROTOCOL,
-  type RescriptAgentContext,
-} from "../src/lib/ai/rescript-agent.js";
+  type MotionScriptAgentContext,
+} from "../src/lib/ai/motionscript-agent.js";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 
-const context: RescriptAgentContext = {
+const context: MotionScriptAgentContext = {
   duration: 120,
   playhead: 0,
   boundaries: [],
@@ -69,7 +69,7 @@ function model(replies: (n: number) => string) {
   const stub = model(() => SAME_LOOK);
   let threw: { message: string; userMessage?: string } | null = null;
   try {
-    await planRescriptEdit({
+    await planMotionScriptEdit({
       instruction: "make it a short",
       context,
       generate: stub.generate,
@@ -103,7 +103,7 @@ function model(replies: (n: number) => string) {
   // Three repeats — enough to close the tools — and then a plan. The loop has
   // to still deliver it rather than having already burned its turns.
   const stub = model((n) => (n < 4 ? SAME_LOOK : PLAN));
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "cut the fillers",
     context,
     generate: stub.generate,
@@ -133,7 +133,7 @@ function model(replies: (n: number) => string) {
     }
     return PLAN;
   });
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "cut the fillers",
     context,
     generate: stub.generate,
@@ -182,7 +182,7 @@ function model(replies: (n: number) => string) {
     },
   };
 
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "edit this end to end",
     context,
     generate: stub.generate,
@@ -215,7 +215,7 @@ function model(replies: (n: number) => string) {
   );
   let threw: { userMessage?: string } | null = null;
   try {
-    await planRescriptEdit({
+    await planMotionScriptEdit({
       instruction: "edit this for me end to end",
       context,
       generate: stub.generate,
@@ -239,7 +239,7 @@ function model(replies: (n: number) => string) {
           ops: [],
         })
   );
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "tidy this up",
     context,
     generate: explained.generate,
@@ -267,7 +267,7 @@ function model(replies: (n: number) => string) {
   );
   let threw: unknown = null;
   try {
-    await planRescriptEdit({
+    await planMotionScriptEdit({
       instruction: "edit this end to end",
       context,
       generate: intending.generate,
@@ -288,7 +288,7 @@ function model(replies: (n: number) => string) {
           ops: [],
         })
   );
-  const fine = await planRescriptEdit({
+  const fine = await planMotionScriptEdit({
     instruction: "tidy this up",
     context,
     generate: verdict.generate,
@@ -304,7 +304,7 @@ function model(replies: (n: number) => string) {
       ? JSON.stringify({ thinking: "…", summary: "Let me check the transcript.", ops: [] })
       : PLAN
   );
-  const landed = await planRescriptEdit({
+  const landed = await planMotionScriptEdit({
     instruction: "cut the fillers",
     context,
     generate: recovers.generate,
@@ -323,7 +323,7 @@ function model(replies: (n: number) => string) {
   );
   let threw = false;
   try {
-    await planRescriptEdit({
+    await planMotionScriptEdit({
       instruction: "edit this end to end",
       context,
       generate: stub.generate,
@@ -344,7 +344,7 @@ function model(replies: (n: number) => string) {
           ops: [{ op: "removeFillers" }],
         })
   );
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "cut the fillers",
     context,
     generate: recovers.generate,
@@ -359,7 +359,7 @@ function model(replies: (n: number) => string) {
 
 {
   const stub = model(() => PLAN);
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "cut the fillers",
     context,
     generate: stub.generate,
@@ -413,7 +413,7 @@ function model(replies: (n: number) => string) {
 
   const repairs: string[][] = [];
   const stub = model((n) => (n === 0 ? clashing : fixed));
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "caption the two claims",
     context,
     mode: "propose",
@@ -454,7 +454,7 @@ function model(replies: (n: number) => string) {
   });
 
   const stub = model(() => smelly);
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "punch in on the claims",
     context,
     mode: "propose",
@@ -479,7 +479,7 @@ function model(replies: (n: number) => string) {
   });
 
   const stub = model(() => clean);
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "watch this back",
     context,
     mode: "review",
@@ -512,7 +512,7 @@ function model(replies: (n: number) => string) {
   });
 
   const stub = model(() => fault);
-  const plan = await planRescriptEdit({
+  const plan = await planMotionScriptEdit({
     instruction: "watch this back",
     context,
     mode: "review",

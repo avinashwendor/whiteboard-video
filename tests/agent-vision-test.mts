@@ -19,10 +19,10 @@
  */
 
 import {
-  planRescriptEdit,
-  type RescriptAgentContext,
-} from "../src/lib/ai/rescript-agent.js";
-import { readFrame, toWire } from "../src/rescript/lib/overlay/vision.js";
+  planMotionScriptEdit,
+  type MotionScriptAgentContext,
+} from "../src/lib/ai/motionscript-agent.js";
+import { readFrame, toWire } from "../src/motionscript/lib/overlay/vision.js";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -82,7 +82,7 @@ function survey(count = 8, duration = 40) {
   return out;
 }
 
-const base: RescriptAgentContext = {
+const base: MotionScriptAgentContext = {
   duration: 40,
   playhead: 0,
   boundaries: [],
@@ -106,10 +106,10 @@ const PLAN = JSON.stringify({
  * The tool results are what the loop feeds back as user turns, so they are
  * captured by watching what the stub is asked next.
  */
-async function ask(call: object, context: RescriptAgentContext) {
+async function ask(call: object, context: MotionScriptAgentContext) {
   const seen: string[] = [];
   let turn = 0;
-  await planRescriptEdit({
+  await planMotionScriptEdit({
     instruction: "put a caption somewhere sensible",
     context,
     generate: async (input) => {
@@ -305,7 +305,7 @@ async function ask(call: object, context: RescriptAgentContext) {
   // path, and it is the one that would break silently.
   const context = { ...base, vision: survey() };
   let brief = "";
-  await planRescriptEdit({
+  await planMotionScriptEdit({
     instruction: "put a caption somewhere sensible",
     context,
     generate: async (input) => {
@@ -337,9 +337,9 @@ async function ask(call: object, context: RescriptAgentContext) {
   // catalogue — they failed one at a time at execution with nothing said
   // beforehand. Both directions are checked, because "available" silently
   // becoming "not configured" is the same bug wearing the other hat.
-  const brief = async (can: RescriptAgentContext["can"]) => {
+  const brief = async (can: MotionScriptAgentContext["can"]) => {
     let text = "";
-    await planRescriptEdit({
+    await planMotionScriptEdit({
       instruction: "add some sound",
       context: { ...base, can },
       generate: async (input) => {

@@ -8,14 +8,14 @@ import {
   buildNleTimeline,
   mediaFileUrl,
   serializeTimelineXml,
-} from "../src/rescript/lib/serializeTimeline";
+} from "../src/motionscript/lib/serializeTimeline";
 import {
   AAF_MAX_CLIPS,
   aafMediaFileUrl,
   fitAafMediaName,
   secondsToFrames,
   writeAafComposition,
-} from "../src/rescript/lib/aaf/patchAaf";
+} from "../src/motionscript/lib/aaf/patchAaf";
 
 // Node 18+ has fetch; polyfill scaffold loading from disk for AAF tests.
 const scaffoldPath = resolve("assets/aaf/scaffold.aaf");
@@ -40,7 +40,7 @@ const keeps = [
 
 async function main() {
 {
-  const width = "RESCRIPT_MEDIA_PLACEHOLDER".length;
+  const width = "MOTIONSCRIPT_MEDIA_PLCHLDR".length;
   assert(fitAafMediaName("a.mp4").length === width, "fit pads");
   assert(fitAafMediaName("a".repeat(40)).length === width, "fit truncates");
   const longNamed = fitAafMediaName("My Long Interview Recording Final.mp4");
@@ -172,7 +172,7 @@ async function main() {
     buf.includes(Buffer.from("file:///interview.mp4", "utf16le")),
     "aaf has encoded-safe url"
   );
-  writeFileSync("/tmp/rescript-test.aaf", buf);
+  writeFileSync("/tmp/motionscript-test.aaf", buf);
   console.log("aaf write: ok");
 }
 
@@ -232,7 +232,7 @@ async function main() {
         "-c",
         `
 import aaf2, sys
-with aaf2.open("/tmp/rescript-test.aaf", "r") as f:
+with aaf2.open("/tmp/motionscript-test.aaf", "r") as f:
     tops = list(f.content.toplevel())
     assert len(tops) == 1, tops
     comp = tops[0]

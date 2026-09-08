@@ -5,7 +5,7 @@ import {
   DIARIZE_OVERLAP_S,
   type DiarizationSegment,
   type DiarizationWindow,
-} from "../src/rescript/lib/diarize";
+} from "../src/motionscript/lib/diarize";
 
 const SR = 16_000;
 

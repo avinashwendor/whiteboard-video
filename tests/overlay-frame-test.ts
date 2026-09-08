@@ -18,12 +18,12 @@ import {
   isEmptyComposition,
   outputSize,
   type FrameSpec,
-} from "../src/rescript/lib/overlay/types";
-import { subtitleBand, typeScale } from "../src/rescript/lib/overlay/layout";
-import { fittedCharsPerLine } from "../src/rescript/lib/overlay/subtitles";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
-import { jsonObjects, repairJson } from "../src/lib/ai/rescript-agent";
+} from "../src/motionscript/lib/overlay/types";
+import { subtitleBand, typeScale } from "../src/motionscript/lib/overlay/layout";
+import { fittedCharsPerLine } from "../src/motionscript/lib/overlay/subtitles";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
+import { jsonObjects, repairJson } from "../src/lib/ai/motionscript-agent";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

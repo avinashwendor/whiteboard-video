@@ -21,15 +21,15 @@ import {
   rewrapCues,
   SUBTITLE_PRESETS,
   SUBTITLE_PRESET_IDS,
-} from "../src/rescript/lib/overlay/subtitles";
-import { subtitlesOp } from "../src/rescript/lib/overlay/ops-schema";
+} from "../src/motionscript/lib/overlay/subtitles";
+import { subtitlesOp } from "../src/motionscript/lib/overlay/ops-schema";
 import {
   DEFAULT_SUBTITLE_STYLE,
   type SubtitleStyle,
   type SubtitleTrack,
-} from "../src/rescript/lib/overlay/types";
-import type { Word } from "../src/rescript/lib/types";
-import { SYSTEM } from "../src/lib/ai/rescript-agent";
+} from "../src/motionscript/lib/overlay/types";
+import type { Word } from "../src/motionscript/lib/types";
+import { SYSTEM } from "../src/lib/ai/motionscript-agent";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -171,7 +171,7 @@ const words = speak(LINE);
     wordsPerCue: 2,
     emphasis: "auto",
     emphasisColor: "#4ade80",
-    keywords: ["rescript", "free"],
+    keywords: ["motionscript", "free"],
     activeScale: 1.12,
   });
   assert(full.success, `the whole vocabulary parses: ${JSON.stringify(full.error?.issues)}`);

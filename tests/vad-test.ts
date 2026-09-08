@@ -3,7 +3,7 @@ import {
   VAD_FRAME_SIZE,
   energySpeechFrames,
   speechSegmentsFromFrames,
-} from "../src/rescript/lib/vad";
+} from "../src/motionscript/lib/vad";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);

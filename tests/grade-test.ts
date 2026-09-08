@@ -26,7 +26,7 @@ import {
   withGrade,
   withGradeDefaults,
 
-} from "../src/rescript/lib/overlay/grade";
+} from "../src/motionscript/lib/overlay/grade";
 import {
   DEFAULT_FRAME,
   DEFAULT_SUBTITLE_STYLE,
@@ -35,10 +35,10 @@ import {
   primaryPlate,
   type Composition,
   type Shot,
-} from "../src/rescript/lib/overlay/types";
-import { paintFrame } from "../src/rescript/lib/overlay/frame";
-import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+} from "../src/motionscript/lib/overlay/types";
+import { paintFrame } from "../src/motionscript/lib/overlay/frame";
+import { verifyPlan, type PlanWorld } from "../src/motionscript/lib/overlay/verify";
+import { siftOps } from "../src/motionscript/lib/overlay/ops-schema";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);

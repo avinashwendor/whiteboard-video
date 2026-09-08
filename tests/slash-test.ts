@@ -26,9 +26,9 @@ import {
   sentenceAround,
   slashCommandsFor,
   type SlashContext,
-} from "../src/rescript/lib/slash";
-import { agentOpSchema } from "../src/rescript/lib/overlay/ops-schema";
-import type { Word } from "../src/rescript/lib/types";
+} from "../src/motionscript/lib/slash";
+import { agentOpSchema } from "../src/motionscript/lib/overlay/ops-schema";
+import type { Word } from "../src/motionscript/lib/types";
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -233,8 +233,8 @@ function context(patch: Partial<SlashContext> = {}): SlashContext {
 {
   // Two things about the menu that live in components and cannot be checked by
   // calling a function, both of which make it useless if they are wrong.
-  const panel = readFileSync("src/rescript/components/TranscriptPanel.tsx", "utf8");
-  const menu = readFileSync("src/rescript/components/TranscriptSlashMenu.tsx", "utf8");
+  const panel = readFileSync("src/motionscript/components/TranscriptPanel.tsx", "utf8");
+  const menu = readFileSync("src/motionscript/components/TranscriptSlashMenu.tsx", "utf8");
 
   // The menu renders through a FloatingPortal, so it is not a descendant of the
   // transcript however much it looks like one. The transcript closes its caret
