@@ -79,12 +79,34 @@ export const openverse: MediaProvider = {
     // Openverse can do this properly.
     if (commercialOnly) params.set("license_type", "commercial,modification");
 
-    const res = await fetchWithTimeout(`${BASE}/${endpoint}/?${params}`, {
-      headers: { Accept: "application/json" },
-      timeoutMs: 12_000,
-      label: "openverse search",
-      signal,
-    });
+    /**
+     * Asked twice, if the first attempt times out.
+     *
+     * Openverse is keyless and unauthenticated, which is exactly why it is the
+     * fallback catalogue — and it is also a public API that occasionally takes
+     * ten seconds to wake up and then answers the same query in 250ms. A single
+     * attempt turns that cold start into an empty result list, which reads as
+     * "there is no music called that" rather than "ask again". One retry costs
+     * nothing on the common path and removes the only failure this provider
+     * has that is not a real absence.
+     */
+    const ask = () =>
+      fetchWithTimeout(`${BASE}/${endpoint}/?${params}`, {
+        headers: { Accept: "application/json" },
+        timeoutMs: 12_000,
+        label: "openverse search",
+        signal,
+      });
+
+    let res: Response;
+    try {
+      res = await ask();
+    } catch (err) {
+      // Only a timeout is worth repeating. An aborted request is the caller
+      // changing their mind, and asking again would be ignoring them.
+      if (signal?.aborted) throw err;
+      res = await ask();
+    }
 
     // A rate-limited anonymous request is a normal outcome here, not an
     // incident. An empty shelf beats an error dialog over a search someone can

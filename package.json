@@ -58,7 +58,8 @@
     "test:slash": "tsx tests/slash-test.ts",
     "test:hinglish": "tsx tests/hinglish-test.ts",
     "test:join": "tsx tests/join-test.ts",
-    "test:motiongfx": "tsx tests/motion-graphics-test.ts"
+    "test:motiongfx": "tsx tests/motion-graphics-test.ts",
+    "test:wired": "tsx tests/wired-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

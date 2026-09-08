@@ -38,6 +38,7 @@ import {
   extraTargets,
   nameFor,
 } from "@/rescript/lib/overlay/deliver";
+import { cuesAreStale } from "@/rescript/lib/overlay/subtitles";
 import {
   downloadTranscript,
   type SubtitleFormat,
@@ -240,6 +241,27 @@ export default function ExportDialog() {
               : "timeline"
             : "video"
           : tab;
+
+  /**
+   * Captions that no longer say what the transcript says.
+   *
+   * Checked here as well as in the subtitles panel because this is the last
+   * moment before they are burned into a file: a video whose captions
+   * contradict its own transcript is not something anyone can fix afterwards
+   * without exporting again.
+   */
+  const captionsStale = useMemo(
+    () =>
+      compositionSubtitles.enabled &&
+      cuesAreStale(
+        compositionSubtitles.cues,
+        words,
+        cuts,
+        compositionSubtitles.style,
+        sourceAspect
+      ),
+    [compositionSubtitles, words, cuts, sourceAspect]
+  );
 
   const baseName = videoFile
     ? videoFile.name.replace(/\.[^.]+$/, "")
@@ -644,6 +666,19 @@ export default function ExportDialog() {
               {frameLabel} frame — {frameSize.width}×{frameSize.height}. Change it
               in the Frame tab.
             </p>
+
+            {/* The last moment before the wrong captions are burned in for
+                good. The subtitles panel says the same thing, and somebody who
+                never opened that tab has to be told here. */}
+            {captionsStale && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 dark:border-amber-900/50 dark:bg-amber-950/30">
+                <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                  The captions no longer match the transcript — the cut or the
+                  wording has changed since they were made. Rebuild them in the
+                  Captions tab, or they will be burned in as they are.
+                </p>
+              </div>
+            )}
 
             {canCompose() && (
               <div>

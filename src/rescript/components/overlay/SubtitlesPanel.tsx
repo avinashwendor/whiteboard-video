@@ -7,6 +7,7 @@ import { useCutRanges } from "@/rescript/hooks/useCutRanges";
 import { useOutputTime } from "@/rescript/hooks/useOverlayTimeline";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import {
+  cuesAreStale,
   cuesFromStyle,
   SUBTITLE_PRESETS,
 } from "@/rescript/lib/overlay/subtitles";
@@ -75,16 +76,12 @@ export default function SubtitlesPanel() {
    * video burned in captions that disagreed with the transcript on screen
    * beside them, and nothing anywhere said so.
    */
-  const stale = useMemo(() => {
-    if (!subtitles.cues.length) return false;
-    const fresh = cuesFromStyle(words, cuts, subtitles.style, aspect);
-    if (fresh.length !== subtitles.cues.length) return true;
-    return fresh.some(
-      (cue, i) =>
-        Math.abs(cue.start - subtitles.cues[i].start) > 0.05 ||
-        cue.text !== subtitles.cues[i].text
-    );
-  }, [words, cuts, subtitles.cues, subtitles.style, aspect]);
+  // Timings and text both — see `cuesAreStale`, which the export dialog also
+  // asks, because somebody who never opens this tab still has to be told.
+  const stale = useMemo(
+    () => cuesAreStale(subtitles.cues, words, cuts, subtitles.style, aspect),
+    [words, cuts, subtitles.cues, subtitles.style, aspect]
+  );
 
   const activeIndex = subtitles.cues.findIndex(
     (cue) => at >= cue.start && at < cue.end

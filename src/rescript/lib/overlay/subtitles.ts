@@ -197,6 +197,37 @@ export function cuesFromStyle(
 }
 
 /**
+ * Whether the burned-in captions still say what the transcript says.
+ *
+ * Timings *and* text, and the text half is the one that matters most. Cutting a
+ * word changes the count and the timings, which is obvious the moment you look
+ * at the panel — but correcting a misheard word, or switching the transcript
+ * between its native script and Hinglish, changes what every caption should
+ * read while leaving the count and the timings exactly where they were. That
+ * produces a video with captions contradicting the transcript on screen beside
+ * them, and nothing anywhere saying so.
+ *
+ * Shared between the subtitles panel, which offers to rebuild them, and the
+ * export dialog, which is the last moment before the wrong ones are burned in
+ * for good — a person who never opens the subtitles tab has to be told
+ * somewhere.
+ */
+export function cuesAreStale(
+  cues: SubtitleCue[],
+  words: Word[],
+  cuts: TimeRange[],
+  style: SubtitleStyle,
+  aspect = 16 / 9
+): boolean {
+  if (!cues.length) return false;
+  const fresh = cuesFromStyle(words, cuts, style, aspect);
+  if (fresh.length !== cues.length) return true;
+  return fresh.some(
+    (cue, i) => Math.abs(cue.start - cues[i].start) > 0.05 || cue.text !== cues[i].text
+  );
+}
+
+/**
  * Re-break existing cues for a different frame shape.
  *
  * Line length is a function of the frame — `fittedCharsPerLine` caps the taste
