@@ -43,7 +43,6 @@ import {
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
 import { BED_DUCK, BED_LEVEL, fetchBed } from "@/lib/video/bed";
-import { useRouter } from "next/navigation";
 import { handOffToEditor } from "@/rescript/lib/handoff";
 import { createSfxBus, scheduleSfx } from "@/lib/video/sfx";
 
@@ -395,7 +394,6 @@ export function WhiteboardPlayer({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [elapsed, setElapsed] = useState(0);
   const [exporting, setExporting] = useState(false);
-  const router = useRouter();
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStage, setExportStage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1214,7 +1212,24 @@ export function WhiteboardPlayer({
           seconds: scene.audio?.duration,
         })),
       });
-      router.push(`/video-editor?open=${encodeURIComponent(id)}`);
+      /**
+       * A real page load, not a client-side transition.
+       *
+       * The editor needs `SharedArrayBuffer` to run ffmpeg, which means the
+       * document has to be cross-origin isolated — and isolation comes from
+       * COOP/COEP response headers that next.config.ts sets on `/video-editor`
+       * alone. Headers apply to a *document*, so a soft navigation would land
+       * on the editor inside the document this page was loaded as, with no
+       * isolation, and the media engine would refuse to start with a message
+       * about the page rather than about the navigation.
+       *
+       * Next does force a full load across root layouts, and these two route
+       * groups have their own — but that is a framework behaviour delivering a
+       * security header, and the failure if it ever changes is silent and
+       * total. Asking for it directly costs nothing.
+       */
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign(`/video-editor?open=${encodeURIComponent(id)}`);
     };
 
     const deliver = async (blob: Blob, extension: string) => {
@@ -1350,7 +1365,6 @@ export function WhiteboardPlayer({
   }, [
     advance,
     coverDuration,
-    router,
     durations,
     exporting,
     mimeType,

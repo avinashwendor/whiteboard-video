@@ -16,6 +16,7 @@
  * Run with `npx tsx tests/handoff-test.ts`.
  */
 
+import { readFileSync } from "node:fs";
 import { transcriptFromScenes } from "../src/rescript/lib/handoff";
 
 function assert(value: unknown, message: string): asserts value {
@@ -141,6 +142,36 @@ function near(actual: number, expected: number, tol: number, what: string) {
     `five words should take a second or two, got ${guessed[4].end.toFixed(2)}s`
   );
   console.log("✓ empty, blank and unmeasured scenes are all survivable");
+}
+
+/* ------------------------------ the navigation ------------------------------ */
+
+{
+  // The one thing about this handoff that cannot be checked by calling a
+  // function, and the one that breaks it completely.
+  //
+  // The editor needs SharedArrayBuffer to run ffmpeg, which needs the document
+  // to be cross-origin isolated, which comes from COOP/COEP headers that
+  // next.config.ts sets on /video-editor alone. Headers apply to a document —
+  // so a client-side transition would land on the editor inside the document
+  // the studio was loaded as, with no isolation, and the media engine would
+  // refuse to start with a message about the page rather than the navigation.
+  const player = readFileSync("src/components/whiteboard/whiteboard-player.tsx", "utf8");
+  assert(
+    /window\.location\.assign\(`\/video-editor/.test(player),
+    "the handoff navigates without forcing a real page load, so the editor lands un-isolated"
+  );
+  assert(
+    !/router\.push\(`\/video-editor/.test(player),
+    "a soft navigation to the editor cannot carry the isolation headers"
+  );
+
+  const config = readFileSync("next.config.ts", "utf8");
+  assert(
+    /Cross-Origin-Embedder-Policy/.test(config) && /\/video-editor/.test(config),
+    "the editor route no longer carries the isolation headers this depends on"
+  );
+  console.log("✓ the handoff arrives as a real page load, where the isolation headers apply");
 }
 
 console.log("\nhandoff: all checks passed");
