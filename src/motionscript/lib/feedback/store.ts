@@ -19,10 +19,10 @@
  */
 
 import type { AgentOp } from "../overlay/ops-schema";
-import { migrateLegacyDatabases } from "../legacy-storage";
+import { migrateLegacyInto } from "../legacy-storage";
 
 const DB_NAME = "motionscript-feedback";
-const DB_VERSION = 1;
+const LEGACY_DB_NAME = "rescript-feedback";
 const STORE = "events";
 
 /**
@@ -69,15 +69,17 @@ export type FeedbackWrite = Omit<FeedbackEvent, "id" | "createdAt">;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  // Events saved under the previous database name are moved across first.
-  dbPromise = migrateLegacyDatabases().then(() => new Promise<IDBDatabase>((resolve, reject) => {
+/** Open the store, creating it on any version that needs it. See projects.ts. */
+function openAt(version?: number): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is not available."));
       return;
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req =
+      version === undefined
+        ? indexedDB.open(DB_NAME)
+        : indexedDB.open(DB_NAME, version);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -97,7 +99,23 @@ function openDb(): Promise<IDBDatabase> {
       dbPromise = null;
       reject(req.error ?? new Error("Failed to open the feedback store."));
     };
-  }));
+  });
+}
+
+function openDb(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = (async () => {
+    let db = await openAt();
+    // See projects.ts: a database that exists without its store can only be
+    // repaired by bumping past whatever version it is on.
+    if (!db.objectStoreNames.contains(STORE)) {
+      const next = db.version + 1;
+      db.close();
+      db = await openAt(next);
+    }
+    await migrateLegacyInto(db, LEGACY_DB_NAME);
+    return db;
+  })();
   return dbPromise;
 }
 

@@ -6,7 +6,7 @@
  * (oldest by updatedAt are pruned).
  */
 
-import { migrateLegacyDatabases } from "./legacy-storage";
+import { migrateLegacyInto } from "./legacy-storage";
 import { isTranscriptSource, type TranscriptSource } from "./source";
 import type { TranscriptLanguageSetting } from "./languages";
 import {
@@ -25,7 +25,7 @@ import type { Composition } from "./overlay/types";
 import type { ChatThread } from "./chat/store";
 
 const DB_NAME = "motionscript-projects";
-const DB_VERSION = 1;
+const LEGACY_DB_NAME = "rescript-projects";
 const STORE = "projects";
 export const MAX_PROJECTS = 10;
 
@@ -114,16 +114,27 @@ function forgetDb(db: IDBDatabase) {
   dbPromise = null;
 }
 
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  // Anything saved under the previous database name is moved across first, so
-  // a project list never renders empty over rows that are about to arrive.
-  dbPromise = migrateLegacyDatabases().then(() => new Promise<IDBDatabase>((resolve, reject) => {
+/**
+ * Open the database, creating the store on any version that needs it.
+ *
+ * `version` is omitted in the ordinary case, and that is deliberate rather than
+ * lazy. Naming a fixed version means every open asserts the database is at
+ * exactly that number, and an open against a database that has moved past it
+ * fails outright with `VersionError` — unrecoverably, because the only way to
+ * come back down is to delete the data. Opening without one takes whatever
+ * version is there (creating it at 1 when there is nothing), which leaves the
+ * repair below free to bump as far as it has to.
+ */
+function openAt(version?: number): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("IndexedDB is not available."));
       return;
     }
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req =
+      version === undefined
+        ? indexedDB.open(DB_NAME)
+        : indexedDB.open(DB_NAME, version);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -147,7 +158,33 @@ function openDb(): Promise<IDBDatabase> {
       dbPromise = null;
       reject(req.error ?? new Error("Failed to open projects DB."));
     };
-  }));
+  });
+}
+
+function openDb(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = (async () => {
+    let db = await openAt();
+
+    // A database that exists but has no store in it cannot be repaired by
+    // opening it again — `onupgradeneeded` only fires on a version bump. Going
+    // one past whatever is there is the way back, and it costs nothing in the
+    // ordinary case, where the store is already present.
+    if (!db.objectStoreNames.contains(STORE)) {
+      const next = db.version + 1;
+      db.close();
+      // Deliberately not `forgetDb` — that nulls `dbPromise`, which is the
+      // promise this function is still inside. `openAt` overwrites `liveDb` on
+      // the way back, which is the only part that needs undoing.
+      db = await openAt(next);
+    }
+
+    // Only now: the schema exists, so rows from the previous database name have
+    // somewhere to land. Awaited before the handle is handed out, or a project
+    // list renders empty over rows that are about to arrive.
+    await migrateLegacyInto(db, LEGACY_DB_NAME);
+    return db;
+  })();
   return dbPromise;
 }
 

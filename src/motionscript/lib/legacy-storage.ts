@@ -12,18 +12,12 @@
  *
  * Both halves are idempotent and both fail soft. Neither is worth an error a
  * person has to read: the worst case for a browser that has never held the old
- * names — which is every browser but this developer's — is a few microseconds
- * of looking for keys that are not there.
+ * names — which is every browser but the one this was developed on — is a few
+ * microseconds of looking for keys that are not there.
  */
 
 const OLD_PREFIX = "rescript.";
 const NEW_PREFIX = "motionscript.";
-
-/** IndexedDB databases to move, old name → new name. */
-const DATABASES: ReadonlyArray<readonly [string, string]> = [
-  ["rescript-projects", "motionscript-projects"],
-  ["rescript-feedback", "motionscript-feedback"],
-];
 
 /* -------------------------------- preferences ------------------------------- */
 
@@ -32,9 +26,10 @@ let sweptPreferences = false;
 /**
  * Move `rescript.*` preferences to `motionscript.*`.
  *
- * Synchronous, because the values it moves are read synchronously at module
- * load all over the editor — a preference restored one tick late is a theme
- * that flashes and a language selector that resets.
+ * Synchronous, because the values it moves are read synchronously the first
+ * time each module is asked for one, and several of those reads happen while
+ * the editor is still initialising. A preference restored one tick late is a
+ * theme that flashes and a language selector that resets.
  *
  * An existing new-prefix value always wins. Someone who has already used the
  * renamed build has newer preferences than the stale ones left behind, and
@@ -65,11 +60,28 @@ export function migrateLegacyPreferences(): void {
 
 /* --------------------------------- databases -------------------------------- */
 
-function open(name: string, version?: number): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
+/**
+ * Copy an old database's rows into an already-open new one, then drop the old.
+ *
+ * The destination is passed in *open* rather than opened here, and that is the
+ * whole design. Opening it here would mean opening it before the app has had a
+ * chance to run its own `onupgradeneeded` — and `indexedDB.open` on an unknown
+ * name does not fail, it silently creates an empty database. The migration
+ * would then find no object stores to write into, give up, and leave behind a
+ * database sitting at the version the app expects with none of the stores the
+ * app requires, which every later transaction would throw on.
+ *
+ * Taking the open handle means the schema already exists, exactly as the app
+ * defines it, and this function never has to know what that schema is.
+ *
+ * Rows go in with `put`, so re-running over a half-finished copy overwrites
+ * rather than throwing on a duplicate key.
+ */
+async function copyInto(target: IDBDatabase, from: string): Promise<void> {
+  const source = await new Promise<IDBDatabase | null>((resolve) => {
     let req: IDBOpenDBRequest;
     try {
-      req = version === undefined ? indexedDB.open(name) : indexedDB.open(name, version);
+      req = indexedDB.open(from);
     } catch {
       resolve(null);
       return;
@@ -78,67 +90,35 @@ function open(name: string, version?: number): Promise<IDBDatabase | null> {
     req.onerror = () => resolve(null);
     req.onblocked = () => resolve(null);
   });
-}
-
-/** Every store in a database, with its rows and its key path. */
-async function readAll(db: IDBDatabase): Promise<Map<string, unknown[]>> {
-  const names = Array.from(db.objectStoreNames);
-  const out = new Map<string, unknown[]>();
-  if (!names.length) return out;
-  await new Promise<void>((resolve) => {
-    const tx = db.transaction(names, "readonly");
-    for (const name of names) {
-      const req = tx.objectStore(name).getAll();
-      req.onsuccess = () => out.set(name, req.result ?? []);
-    }
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-    tx.onabort = () => resolve();
-  });
-  return out;
-}
-
-/**
- * Copy one database's rows into another, then drop the original.
- *
- * The destination is opened *without* a version so this never races the
- * editor's own upgrade — whatever schema the app has already created is the
- * one the rows land in. Stores the destination does not have are skipped
- * rather than created: a row nothing knows how to read is not worth keeping,
- * and inventing a store here would fight the real `onupgradeneeded`.
- *
- * Rows are added with `put`, so a second run over a half-finished migration
- * overwrites rather than throwing on a duplicate key.
- */
-async function migrateDatabase(from: string, to: string): Promise<void> {
-  const source = await open(from);
   if (!source) return;
 
-  // An empty database is the ordinary case: `indexedDB.open` *creates* one when
-  // the name is unknown, so every browser that never ran the old build has just
-  // been handed a blank `rescript-*`. Delete it and move on.
-  if (!source.objectStoreNames.length) {
+  // An empty source is the ordinary case: the open above *created* it, because
+  // this browser never ran the old build. Delete it and move on.
+  const shared = Array.from(source.objectStoreNames).filter((name) =>
+    target.objectStoreNames.contains(name)
+  );
+  if (!shared.length) {
     source.close();
     indexedDB.deleteDatabase(from);
     return;
   }
 
-  const rows = await readAll(source);
+  const rows = new Map<string, unknown[]>();
+  await new Promise<void>((resolve) => {
+    const tx = source.transaction(shared, "readonly");
+    for (const name of shared) {
+      const req = tx.objectStore(name).getAll();
+      req.onsuccess = () => rows.set(name, req.result ?? []);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+  });
   source.close();
 
-  const total = Array.from(rows.values()).reduce((n, list) => n + list.length, 0);
-  if (!total) {
-    indexedDB.deleteDatabase(from);
-    return;
-  }
-
-  const target = await open(to);
-  if (!target) return;
-  const names = Array.from(target.objectStoreNames).filter(
-    (name) => (rows.get(name)?.length ?? 0) > 0
-  );
+  const names = shared.filter((name) => (rows.get(name)?.length ?? 0) > 0);
   if (!names.length) {
-    target.close();
+    indexedDB.deleteDatabase(from);
     return;
   }
 
@@ -152,34 +132,29 @@ async function migrateDatabase(from: string, to: string): Promise<void> {
     tx.onerror = () => resolve(false);
     tx.onabort = () => resolve(false);
   });
-  target.close();
 
   // Only once the rows are safely in the new database. A failed copy leaves the
   // original where it is, and the next load tries again.
   if (written) indexedDB.deleteDatabase(from);
 }
 
-let databases: Promise<void> | null = null;
+const done = new Map<string, Promise<void>>();
 
 /**
- * Move the saved projects and the feedback history.
+ * Move everything held under `from` into the open database `target`.
  *
- * Returns the same promise on every call, and must be awaited before the first
- * read of either database — otherwise a project list can render empty a moment
- * before the rows arrive, which reads as data loss even though it is not.
+ * Must be awaited before the first read of `target`, or a project list can
+ * render empty a moment before the rows arrive — which reads as data loss even
+ * though it is not. Runs at most once per source name per page.
  */
-export function migrateLegacyDatabases(): Promise<void> {
-  if (typeof window === "undefined" || typeof indexedDB === "undefined") {
-    return Promise.resolve();
+export function migrateLegacyInto(target: IDBDatabase, from: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return Promise.resolve();
+  let run = done.get(from);
+  if (!run) {
+    run = copyInto(target, from).catch(() => {
+      // Leave the original alone; the next load will try again.
+    });
+    done.set(from, run);
   }
-  databases ??= (async () => {
-    for (const [from, to] of DATABASES) {
-      try {
-        await migrateDatabase(from, to);
-      } catch {
-        // Leave the original alone; the next load will try again.
-      }
-    }
-  })();
-  return databases;
+  return run;
 }
