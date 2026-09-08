@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
+  Scissors,
   Loader2,
   Maximize2,
   Minimize2,
@@ -42,6 +43,8 @@ import {
 import { buildScore } from "@/lib/video/score";
 import { scheduleMusic, type MusicMood } from "@/lib/video/music";
 import { BED_DUCK, BED_LEVEL, fetchBed } from "@/lib/video/bed";
+import { useRouter } from "next/navigation";
+import { handOffToEditor } from "@/rescript/lib/handoff";
 import { createSfxBus, scheduleSfx } from "@/lib/video/sfx";
 
 /**
@@ -171,6 +174,9 @@ interface SceneSchedule {
   cues: Cue[];
   modern: ModernPlan | null;
 }
+
+/** What happens to the file once it is rendered. */
+type ExportDestination = "download" | "editor";
 
 export function WhiteboardPlayer({
   project,
@@ -389,6 +395,7 @@ export function WhiteboardPlayer({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [elapsed, setElapsed] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const router = useRouter();
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStage, setExportStage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1154,7 +1161,15 @@ export function WhiteboardPlayer({
 
   /* --------------------------------- export -------------------------------- */
 
-  const exportVideo = useCallback(async () => {
+  /**
+   * Export, and either save it or take it into the editor.
+   *
+   * One function rather than two because the render is identical — the only
+   * difference is what happens to the blob at the end, and duplicating a
+   * two-hundred-line export to change its last line is how the two of them
+   * start disagreeing about what a finished video is.
+   */
+  const exportVideo = useCallback(async (destination: ExportDestination = "download") => {
     if (exporting || !ready) return;
 
     setExportError(null);
@@ -1174,6 +1189,37 @@ export function WhiteboardPlayer({
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(link.href), 30_000);
+    };
+
+    /**
+     * Into the editor, with the narration as its transcript.
+     *
+     * Every scene's voice came back from an engine that reported when each word
+     * was said, so what the editor is handed is exact — better than it can
+     * produce for any footage brought in from outside, and it arrives without a
+     * model download or an alignment pass. The scene offsets are the same ones
+     * the audio placements above are built from, so the transcript is in step
+     * with the file by construction rather than by agreement.
+     */
+    const intoEditor = async (blob: Blob) => {
+      setExportStage("Opening the editor");
+      const id = await handOffToEditor({
+        blob,
+        name: slugify(project.title) || "video",
+        duration: total,
+        scenes: scenes.map((scene, index) => ({
+          at: offsetOf(index, durations, coverDuration) + (schedule[index]?.lead ?? 0),
+          words: scene.audio?.words,
+          narration: scene.narration,
+          seconds: scene.audio?.duration,
+        })),
+      });
+      router.push(`/video-editor?open=${encodeURIComponent(id)}`);
+    };
+
+    const deliver = async (blob: Blob, extension: string) => {
+      if (destination === "editor") await intoEditor(blob);
+      else save(blob, extension);
     };
 
     try {
@@ -1219,7 +1265,7 @@ export function WhiteboardPlayer({
             signal: controller.signal,
           });
 
-          save(blob, "mp4");
+          await deliver(blob, "mp4");
           return;
         } catch (err) {
           // Having the API is not the same as being able to use it: a GPU
@@ -1286,7 +1332,7 @@ export function WhiteboardPlayer({
       await new Promise((resolve) => setTimeout(resolve, 500));
       const blob = await recorder.stop();
       silence();
-      save(blob, extensionFor(mimeType));
+      await deliver(blob, extensionFor(mimeType));
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         setExportError(
@@ -1304,6 +1350,7 @@ export function WhiteboardPlayer({
   }, [
     advance,
     coverDuration,
+    router,
     durations,
     exporting,
     mimeType,
@@ -1765,7 +1812,7 @@ export function WhiteboardPlayer({
         <Button
           size="sm"
           variant="secondary"
-          onClick={exportVideo}
+          onClick={() => void exportVideo("download")}
           loading={exporting}
           disabled={!ready || (renderable === false && !mimeType)}
           title={
@@ -1778,6 +1825,23 @@ export function WhiteboardPlayer({
         >
           {exporting ? null : <Download className="size-3.5" />}
           {exporting ? "Exporting" : renderable === false ? "Export video" : "Export MP4"}
+        </Button>
+
+        {/* The other half of the product. A generated video is a first cut, and
+            everything you would want to do to it next — trim the bit that runs
+            long, reframe it to 9:16, put a picture in the gap, land a sound on
+            the cut, score it — lives in the transcript editor. The narration
+            goes with it as an exact transcript, so nothing has to be
+            re-listened to. */}
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void exportVideo("editor")}
+          disabled={exporting || !ready || (renderable === false && !mimeType)}
+          title="Renders the video and opens it in the editor, with the narration as its transcript"
+        >
+          <Scissors className="size-3.5" />
+          Edit this video
         </Button>
       </div>
 

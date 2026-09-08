@@ -161,6 +161,7 @@ export default function Editor() {
   const videoFile = useEditorStore((s) => s.videoFile);
   const skipTranscription = useEditorStore((s) => s.skipTranscription);
   const loadVideo = useEditorStore((s) => s.loadVideo);
+  const openProject = useEditorStore((s) => s.openProject);
   const { transcribe } = useTranscriber();
 
   const canUndo = useEditorStore((s) => s.past.length > 0);
@@ -276,6 +277,32 @@ export default function Editor() {
     },
     [loadVideo]
   );
+
+  /**
+   * `?open=<id>` — a project handed over from somewhere else.
+   *
+   * The studio writes a generated video into the same store the editor's own
+   * projects live in and then sends the person here. What arrives is an
+   * ordinary project, so this is one call: the whole point of writing it as a
+   * project rather than inventing a transfer format is that nothing on this
+   * side has to know where it came from.
+   *
+   * The parameter is removed once it has been acted on, so a reload does not
+   * reopen a project the person has since navigated away from — and so the URL
+   * they might copy is the editor, not a one-shot handoff.
+   */
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !isolated) return;
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (!id) return;
+    opened.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    void openProject(id).catch((err) => {
+      console.error("Could not open the handed-over project:", err);
+      reportError(err, "handoff-open");
+    });
+  }, [isolated, openProject]);
 
   // Daily-active signal: reports the launch, then again on each day rollover so
   // a long-running window doesn't look churned.

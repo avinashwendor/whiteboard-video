@@ -37,13 +37,20 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
 - [ ] Optimize timings
 
 ### Video format
-- [ ] Short-form video support
-- [ ] Portrait mode support
-      NOT a constant change. BOARD_WIDTH/HEIGHT are the single source of truth
-      (no stray 1280/720 anywhere), but the layout engines mix absolute pixels
-      with them — margins of 160, 62pt type, fixed TITLE_Y — across scene.ts,
-      renderer.ts and modern-renderer.ts. Portrait needs those re-tuned, not
-      rescaled. Multi-hour, and it is the pipeline the demo runs on.
+- [~] Short-form video support
+- [~] Portrait mode support
+      Answered from the other end rather than in the board. "Edit this video"
+      on the player renders the MP4 and opens it in the transcript editor with
+      the narration as an exact transcript — and that editor already has a
+      real frame: 9:16 with cover/contain, focus point, elements reflowed and
+      captions re-broken for the new shape. So a short is a generated video
+      reframed and cut, which is what one is anyway.
+      A native portrait board is still open and still not a constant change:
+      BOARD_WIDTH/HEIGHT are the single source of truth, but the layout
+      engines mix absolute pixels with them — margins of 160, 62pt type, fixed
+      TITLE_Y, a four-icon row 1052px wide — across scene.ts and renderer.ts.
+      Those need re-tuning per layout, not rescaling. Multi-hour, and it is
+      the pipeline the demo runs on.
 
 ### Landing page content
 - [~] Rescript UI → match website theme — defaults to dark now so crossing
