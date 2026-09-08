@@ -248,7 +248,10 @@ async function generateSpeech(input: TTSInput): Promise<TTSResult> {
     throw new AppError("invalid_request", { userMessage: "There's no text to speak." });
   }
 
-  const model = input.modelId ?? input.voiceId ?? DEFAULT_TTS_MODEL;
+  // Deepgram has no separate voice id: the model *is* the voice. An empty
+  // string is not a model, so it is treated as "no opinion" rather than passed
+  // through to be rejected.
+  const model = input.modelId?.trim() || input.voiceId?.trim() || DEFAULT_TTS_MODEL;
   const params = new URLSearchParams({ model, encoding: "mp3" });
 
   const res = await fetchWithTimeout(`${BASE}/speak?${params}`, {

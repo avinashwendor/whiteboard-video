@@ -82,7 +82,13 @@ export const ttsRequestSchema = z.object({
     .trim()
     .min(1, "There's nothing to speak.")
     .max(MAX_TRANSCRIPT_CHARS, `Keep narration under ${MAX_TRANSCRIPT_CHARS} characters.`),
-  voiceId: z.string().trim().min(1).max(120),
+  /**
+   * Optional, because every engine has a default voice and each one resolves
+   * it itself. Required here, "speak this line" was impossible without first
+   * fetching a catalogue — which is a round trip, a network dependency and a
+   * choice, for a caller that has no opinion about who reads it.
+   */
+  voiceId: z.string().trim().min(1).max(120).optional(),
   modelId: modelId.optional(),
   language: z
     .string()

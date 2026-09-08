@@ -20,12 +20,24 @@ interface Check {
   expect?: string[];
   /** Fragments that must not. */
   reject?: string[];
+  /**
+   * Must be served cross-origin isolated.
+   *
+   * The editor needs SharedArrayBuffer for ffmpeg, which needs COOP and COEP
+   * on the response. Those are set per route in next.config.ts, so a rename or
+   * a route group moving takes them off without breaking anything that a page
+   * render would notice — the page loads, and then the media engine refuses to
+   * start with a message about the browser.
+   */
+  isolated?: boolean;
 }
 
 const ROUTES: Check[] = [
   {
     path: "/",
-    expect: ["IDEAS INTO MOTION", "Production modes", "Pricing", "motionhouse"],
+    // "IDEAS INTO" rather than the whole line: the hero breaks it across two
+    // lines with a <br/>, so the full phrase is never contiguous in the HTML.
+    expect: ["IDEAS INTO", "Production modes", "Pricing", "motionhouse"],
     reject: ["Storyboard"],
   },
   { path: "/new", expect: ["Motionhouse"] },
@@ -36,7 +48,7 @@ const ROUTES: Check[] = [
   // keys land. Either way it must not throw.
   { path: "/sign-in" },
   { path: "/sign-up" },
-  { path: "/motionscript", expect: ["MotionScript"], reject: ["Rescript"] },
+  { path: "/video-editor", expect: ["MotionScript"], reject: ["Rescript"], isolated: true },
 ];
 
 const API: Check[] = [{ path: "/api/capabilities" }, { path: "/api/models" }];
@@ -48,7 +60,7 @@ function fail(where: string, why: string) {
   console.error(`  FAIL  ${where} — ${why}`);
 }
 
-async function checkRoute({ path, expect = [], reject = [] }: Check) {
+async function checkRoute({ path, expect = [], reject = [], isolated = false }: Check) {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, { redirect: "follow" });
@@ -60,6 +72,15 @@ async function checkRoute({ path, expect = [], reject = [] }: Check) {
   if (!res.ok) {
     fail(path, `HTTP ${res.status}`);
     return;
+  }
+
+  if (isolated) {
+    const coop = res.headers.get("cross-origin-opener-policy");
+    const coep = res.headers.get("cross-origin-embedder-policy");
+    if (coop !== "same-origin" || coep !== "require-corp") {
+      fail(path, `not cross-origin isolated (COOP ${coop}, COEP ${coep}) — ffmpeg cannot start`);
+      return;
+    }
   }
 
   const html = await res.text();

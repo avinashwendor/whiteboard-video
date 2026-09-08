@@ -131,7 +131,8 @@ export interface ImageProvider {
 
 export interface TTSInput {
   transcript: string;
-  voiceId: string;
+  /** Omit to use the engine's own default voice. */
+  voiceId?: string;
   modelId?: string;
   language?: string;
   speed?: number;

@@ -29,6 +29,22 @@ const WANT_TIMESTAMPS = process.env.CARTESIA_TIMESTAMPS?.trim() !== "0";
 
 export const DEFAULT_TTS_MODEL = process.env.CARTESIA_MODEL?.trim() || "sonic-3";
 
+/**
+ * The voice used when the caller has no opinion about who reads it.
+ *
+ * "Sarah" — a neutral American narrator, present on every Cartesia account.
+ * Named here rather than left to the API, which rejects a request with no
+ * voice rather than choosing one, so "just speak this line" needed a catalogue
+ * fetch before it could ask for anything at all.
+ */
+export const DEFAULT_VOICE =
+  process.env.CARTESIA_VOICE?.trim() || "694f9389-aac1-45b6-b726-9d9369183238";
+
+/** Whichever voice the caller asked for, or the default. */
+function voiceOf(input: TTSInput): string {
+  return input.voiceId?.trim() || DEFAULT_VOICE;
+}
+
 /** Newest first -- the first one the account can actually use wins. */
 const MODEL_PREFERENCE = ["sonic-3.5", "sonic-3", "sonic-latest", "sonic-2", "sonic-english"];
 
@@ -317,7 +333,7 @@ function requestBody(input: TTSInput, shapeIndex: number) {
   const payload: Record<string, unknown> = {
     model_id: input.modelId ?? DEFAULT_TTS_MODEL,
     transcript: input.transcript,
-    voice: VOICE_SHAPES[shapeIndex].build(input.voiceId),
+    voice: VOICE_SHAPES[shapeIndex].build(voiceOf(input)),
     output_format: {
       container: "mp3",
       sample_rate: 44100,
@@ -389,7 +405,7 @@ function sseBody(input: TTSInput, shapeIndex: number): string {
   const payload: Record<string, unknown> = {
     model_id: input.modelId ?? DEFAULT_TTS_MODEL,
     transcript: input.transcript,
-    voice: VOICE_SHAPES[shapeIndex].build(input.voiceId),
+    voice: VOICE_SHAPES[shapeIndex].build(voiceOf(input)),
     output_format: {
       container: "raw",
       encoding: "pcm_s16le",
@@ -501,7 +517,7 @@ async function streamSpeech(input: TTSInput, shapeIndex: number): Promise<TTSRes
     contentType: "audio/wav",
     provider: "cartesia",
     model: input.modelId ?? DEFAULT_TTS_MODEL,
-    voiceId: input.voiceId,
+    voiceId: voiceOf(input),
     duration: samples / PCM_SAMPLE_RATE,
     words: words.length ? words : undefined,
   };
@@ -568,7 +584,7 @@ async function generateSpeech(input: TTSInput): Promise<TTSResult> {
         contentType: res.headers.get("content-type") ?? "audio/mpeg",
         provider: "cartesia",
         model: input.modelId ?? DEFAULT_TTS_MODEL,
-        voiceId: input.voiceId,
+        voiceId: voiceOf(input),
       };
     }
 
