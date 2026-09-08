@@ -7,6 +7,7 @@
  * element the same way it always does.
  */
 
+import { ambientAt } from "./ambient";
 import type {
   AnimationKind,
   AnimationSpec,
@@ -55,6 +56,16 @@ export interface DrawState {
   dx: number;
   dy: number;
   scale: number;
+  /** Degrees, added to the element's own rotation. Comes from ambient motion. */
+  rotate: number;
+  /**
+   * How far through its own life the element is, 0 → 1.
+   *
+   * Carried on the state because the things that need it — a counting number,
+   * a bar that fills — are drawn deep inside the renderer, which is handed a
+   * state and a box and has no idea what second it is.
+   */
+  progress: number;
   blur: number;
   reveal: number;
   charFraction: number;
@@ -82,6 +93,8 @@ const IDENTITY: DrawState = {
   dx: 0,
   dy: 0,
   scale: 1,
+  rotate: 0,
+  progress: 0,
   blur: 0,
   reveal: 1,
   charFraction: 1,
@@ -229,7 +242,20 @@ export function drawStateAt(
       ? { unit, p, stagger: spec.stagger ?? DEFAULT_STAGGER }
       : null;
 
-  return { ...state, tokens, opacity: state.opacity * element.opacity };
+  // What it does while it is up, composed on top of however it arrived. Every
+  // motion is identity at t=0, so there is no jump at the handover.
+  const ambient = ambientAt(element.ambient, into, life);
+
+  return {
+    ...state,
+    tokens,
+    progress: into / life,
+    dx: state.dx + ambient.dx,
+    dy: state.dy + ambient.dy,
+    scale: state.scale * ambient.scale,
+    rotate: state.rotate + ambient.rotate,
+    opacity: state.opacity * element.opacity * ambient.opacity,
+  };
 }
 
 /** Every animation kind, in the order the picker shows them. */

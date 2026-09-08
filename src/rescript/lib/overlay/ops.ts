@@ -42,7 +42,10 @@ import {
   primaryPlate,
   regionCount,
   SHOT_LAYOUT_LABELS,
+  type AmbientKind,
+  type AmbientSpec,
   type AnimationKind,
+  type CounterSpec,
   type AnimationSpec,
   type OverlayElement,
   type Plate,
@@ -137,6 +140,28 @@ function resolveRect(
   };
 }
 
+/**
+ * Read an ambient motion out of an op.
+ *
+ * Accepts the bare name — which is what the agent should almost always write —
+ * as well as the object form for the rare case that wants a smaller amount.
+ * `"none"` comes back as a spec rather than `undefined`, because setting a
+ * motion to none has to be able to *remove* one.
+ */
+function ambient(
+  value: AmbientKind | { kind: AmbientKind; amount?: number; speed?: number } | undefined
+): AmbientSpec | undefined {
+  if (!value) return undefined;
+  return typeof value === "string" ? { kind: value } : value;
+}
+
+/** A counter op field as the element stores it. */
+function counter(
+  value: { from: number; to: number; decimals?: number; prefix?: string; suffix?: string; hold?: number } | undefined
+): CounterSpec | undefined {
+  return value ? { ...value } : undefined;
+}
+
 function textWidthFor(
   position: PositionName | { x: number; y: number } | undefined
 ): number {
@@ -160,6 +185,27 @@ function orderedElements(): OverlayElement[] {
  */
 type Placement = PositionName | { x: number; y: number } | undefined;
 
+/**
+ * What a template does once it has landed, by what the template is for.
+ *
+ * Set here rather than on all fifty-two templates because it is a property of
+ * the *job*, not of the look: anything that sits under someone talking holds
+ * still, because a name badge that drifts while a person speaks is a
+ * distraction rather than a flourish; anything that is on screen alone is
+ * allowed to be alive, because a full-frame title that freezes for three
+ * seconds is the thing that makes an automatic edit read as automatic.
+ *
+ * Overridable per operation. These are defaults, not decisions.
+ */
+const AMBIENT_BY_CATEGORY: Record<string, AmbientSpec | undefined> = {
+  title: { kind: "float" },
+  callout: { kind: "wobble", amount: 0.7 },
+  data: { kind: "breathe" },
+  cta: { kind: "pulse", amount: 0.8 },
+  lowerThird: undefined,
+  caption: undefined,
+};
+
 function resolveTextLook(op: {
   template?: string;
   style?: Parameters<typeof textStyleFields>[0];
@@ -175,6 +221,7 @@ function resolveTextLook(op: {
   position: Placement;
   enter: AnimationSpec;
   exit: AnimationSpec;
+  ambient: AmbientSpec | undefined;
 } {
   const template = op.template ? textTemplate(op.template) : null;
   // A named face beats whatever the template or the style would have set. The
@@ -191,6 +238,7 @@ function resolveTextLook(op: {
       position: op.position,
       enter: animation(op.enter, "slideUp"),
       exit: animation(op.exit, "fade"),
+      ambient: undefined,
     };
   }
 
@@ -205,6 +253,7 @@ function resolveTextLook(op: {
     // someone named a different kind.
     enter: op.enter ? animation(op.enter, "slideUp") : template.enter,
     exit: op.exit ? animation(op.exit, "fade") : template.exit,
+    ambient: AMBIENT_BY_CATEGORY[template.category],
   };
 }
 
@@ -561,6 +610,13 @@ async function runOne(
             ? { strokeColor: op.strokeColor, strokeWidth: 0.08 }
             : {}),
         ...(op.rotation !== undefined ? { rotation: op.rotation } : {}),
+        // The operation's own choice, then whatever the template's job implies.
+        ...(op.ambient
+          ? { ambient: ambient(op.ambient) }
+          : look.ambient
+            ? { ambient: look.ambient }
+            : {}),
+        ...(op.count ? { counter: counter(op.count) } : {}),
         enter: look.enter,
         exit: look.exit,
       });
@@ -595,6 +651,7 @@ async function runOne(
         rect,
         prompt: op.prompt,
         origin: op.prompt ? "generated" : "search",
+        ...(op.ambient ? { ambient: ambient(op.ambient) } : {}),
         enter: animation(op.enter, "pop"),
         exit: animation(op.exit, "fade"),
         motion: { kind: imageMotion(op.motion), amount: 1 },
@@ -634,6 +691,7 @@ async function runOne(
         end,
         rect,
         rate: op.rate ?? 1,
+        ...(op.ambient ? { ambient: ambient(op.ambient) } : {}),
         enter: animation(op.enter, "fade"),
         exit: animation(op.exit, "fade"),
       });
@@ -674,6 +732,7 @@ async function runOne(
         ...(wantsMark ? { pathName: op.mark, name: op.mark } : {}),
         ...(op.fill !== undefined ? { fill: op.fill } : {}),
         ...(op.strokeColor !== undefined ? { strokeColor: op.strokeColor } : {}),
+        ...(op.ambient ? { ambient: ambient(op.ambient) } : {}),
       });
       return {
         ok: true,
@@ -801,8 +860,15 @@ async function runOne(
         patch.enter = { ...element.enter, duration: op.duration };
         patch.exit = { ...element.exit, duration: op.duration };
       }
+      if (op.ambient) patch.ambient = ambient(op.ambient);
+      if (op.count && element.kind === "text") {
+        (patch as Partial<TextElement>).counter = counter(op.count);
+      }
       overlay.updateElement(element.id, patch);
-      return { ok: true, message: `Animated element ${op.element}` };
+      const how = op.ambient
+        ? ` (${typeof op.ambient === "string" ? op.ambient : op.ambient.kind})`
+        : "";
+      return { ok: true, message: `Animated element ${op.element}${how}` };
     }
 
     case "removeElement": {

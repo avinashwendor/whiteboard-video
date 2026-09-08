@@ -128,6 +128,38 @@ const SFX_OPTIONS: SlashOption[] = SOUND_EFFECTS.map((e) => ({
   hint: e.use,
 }));
 
+
+/**
+ * Pull a number out of what somebody typed, keeping whatever sits around it.
+ *
+ * "$1.2M" is a prefix, a value and a suffix; "94%" is a value and a suffix;
+ * "10,000 users" is a value and a suffix with a space in it. Asking for the
+ * three parts separately would be three fields for something everybody can
+ * already write in one, and getting it wrong costs nothing — the text is
+ * still on the element, and turning the counter off shows it.
+ */
+export function readFigure(text: string): {
+  value: number;
+  decimals: number;
+  prefix: string;
+  suffix: string;
+} | null {
+  const match = /-?\d[\d,]*(\.\d+)?/.exec(text);
+  // No number in it at all. Better to place the words and animate nothing than
+  // to invent a figure to count to.
+  if (!match) return null;
+  const digits = match[0];
+  const decimals = Math.min(2, (match[1]?.length ?? 1) - 1);
+  return {
+    value: Number(digits.replace(/,/g, "")),
+    decimals: decimals > 0 ? decimals : 0,
+    // Trimmed to what the schema takes: a counter is a figure with a unit on
+    // it, and anything longer than that belongs in a caption beside it.
+    prefix: text.slice(0, match.index).slice(0, 12),
+    suffix: text.slice(match.index + digits.length).slice(0, 12),
+  };
+}
+
 export const SLASH_COMMANDS: SlashCommand[] = [
   /* ---------------------------------- cut ---------------------------------- */
   {
@@ -307,6 +339,46 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       ],
       note: "Caption",
     }),
+  },
+  {
+    id: "count",
+    group: "say",
+    title: "Count a number up",
+    hint: "A figure that climbs to its value and holds — “$1.2M”, “94%”, “10,000 users”.",
+    icon: "trending-up",
+    keywords: ["number", "stat", "figure", "counter", "percent", "metric", "data"],
+    arg: {
+      kind: "text",
+      label: "Figure",
+      placeholder: "94% · $1.2M · 10,000 users",
+    },
+    run: (c, value) => {
+      const figure = readFigure(value);
+      return {
+        kind: "ops",
+        ops: [
+          {
+            op: "addText",
+            text: value,
+            template: "statBig",
+            position: "center",
+            ...(figure
+              ? {
+                  count: {
+                    from: 0,
+                    to: figure.value,
+                    decimals: figure.decimals,
+                    prefix: figure.prefix,
+                    suffix: figure.suffix,
+                  },
+                }
+              : {}),
+            ...span(c, 3),
+          },
+        ],
+        note: figure ? "Counter" : "Stat",
+      };
+    },
   },
   {
     id: "callout",

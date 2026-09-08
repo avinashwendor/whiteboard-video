@@ -18,6 +18,7 @@ import {
   tokenProgress,
   type DrawState,
 } from "./animation";
+import { counterText } from "./ambient";
 import { drawShapePath } from "./shapes";
 import type {
   Composition,
@@ -451,7 +452,11 @@ function drawText(
   const padPx = el.padding * fontPx;
   const innerWidth = Math.max(1, box.w - padPx * 2);
 
-  let content = el.uppercase ? el.text.toUpperCase() : el.text;
+  // A counting number replaces the element's own text while it is set. The
+  // text stays on the element, so removing the counter leaves something to
+  // show rather than an empty box.
+  const source = el.counter ? counterText(el.counter, state.progress) : el.text;
+  let content = el.uppercase ? source.toUpperCase() : source;
   if (state.charFraction < 1) {
     // Typewriter counts printable characters, not lines, so the reveal rate is
     // even regardless of where the wraps land.
@@ -840,9 +845,10 @@ export function paintElement(
   // Rotation and animated scale both act about the element's centre.
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  if (element.rotation || state.scale !== 1) {
+  const turn = element.rotation + state.rotate;
+  if (turn || state.scale !== 1) {
     ctx.translate(cx, cy);
-    if (element.rotation) ctx.rotate((element.rotation * Math.PI) / 180);
+    if (turn) ctx.rotate((turn * Math.PI) / 180);
     if (state.scale !== 1) ctx.scale(state.scale, state.scale);
     ctx.translate(-cx, -cy);
   }

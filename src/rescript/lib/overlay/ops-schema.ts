@@ -21,6 +21,7 @@ import { TYPEFACE_IDS } from "./typefaces";
 // moment the library grew, and rejected names the prompt had already taught.
 import { SUBTITLE_PRESET_IDS } from "./subtitles";
 import { SFX_IDS } from "./sfx";
+import { AMBIENT_KINDS } from "./ambient";
 
 export const POSITIONS = [
   "top-left",
@@ -118,6 +119,40 @@ const elementNumber = z.number().int().min(1).max(200);
 const animationField = z.enum(ANIMATIONS);
 
 /**
+ * What the element does while it is up, as opposed to how it arrives.
+ *
+ * A bare name is the tuned amount, which is what should almost always be used.
+ * The object form exists for the one case that needs it — a badge that should
+ * float half as far as a title — and `amount` is capped at 2 because these are
+ * meant to be felt rather than watched.
+ */
+const ambientField = z.union([
+  z.enum(AMBIENT_KINDS),
+  z.object({
+    kind: z.enum(AMBIENT_KINDS),
+    amount: z.number().min(0).max(2).optional(),
+    speed: z.number().min(0.25).max(3).optional(),
+  }),
+]);
+
+/**
+ * A number that counts up while it is on screen.
+ *
+ * The only motion here that changes what the element *says* rather than where
+ * it is. It counts for the first part of its life and then holds, because a
+ * figure still climbing as it fades out has not been read.
+ */
+const counterField = z.object({
+  from: z.number().min(-1e12).max(1e12),
+  to: z.number().min(-1e12).max(1e12),
+  decimals: z.number().int().min(0).max(3).optional(),
+  prefix: z.string().max(12).optional(),
+  suffix: z.string().max(12).optional(),
+  /** Fraction of the element's life spent counting. 0.6 by default. */
+  hold: z.number().min(0.05).max(1).optional(),
+});
+
+/**
  * The face, by name.
  *
  * Separate from `style` on purpose: a style says how the words should *read*
@@ -176,6 +211,10 @@ export const addTextOp = z.object({
   rotation: z.number().min(-180).max(180).optional(),
   enter: animationField.optional(),
   exit: animationField.optional(),
+  /** What it does while it is up: float, breathe, pulse… */
+  ambient: ambientField.optional(),
+  /** Turns the text into a number counting up to a figure. */
+  count: counterField.optional(),
 });
 
 export const addImageOp = z.object({
@@ -202,6 +241,7 @@ export const addImageOp = z.object({
   size: z.enum(SIZES).optional(),
   enter: animationField.optional(),
   exit: animationField.optional(),
+  ambient: ambientField.optional(),
 });
 
 /**
@@ -226,6 +266,7 @@ export const addBrollOp = z.object({
   rate: z.number().min(0.25).max(2).optional(),
   enter: animationField.optional(),
   exit: animationField.optional(),
+  ambient: ambientField.optional(),
 });
 
 export const addShapeOp = z.object({
@@ -246,6 +287,7 @@ export const addShapeOp = z.object({
   size: z.enum(SIZES).optional(),
   fill: colour.nullable().optional(),
   strokeColor: colour.nullable().optional(),
+  ambient: ambientField.optional(),
 });
 
 export const updateElementOp = z.object({
@@ -282,6 +324,9 @@ export const animateElementOp = z.object({
   enter: animationField.optional(),
   exit: animationField.optional(),
   duration: z.number().min(0.05).max(5).optional(),
+  /** What it does between arriving and leaving. `"none"` puts it back to still. */
+  ambient: ambientField.optional(),
+  count: counterField.optional(),
 });
 
 export const removeElementOp = z.object({

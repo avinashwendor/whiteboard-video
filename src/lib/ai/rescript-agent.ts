@@ -12,6 +12,7 @@ import { checkCraft } from "@/rescript/lib/overlay/craft";
 import { describeTemplates } from "@/rescript/lib/overlay/templates";
 import { describeSubtitlePresets } from "@/rescript/lib/overlay/subtitles";
 import { describeSfx } from "@/rescript/lib/overlay/sfx";
+import { describeAmbients } from "@/rescript/lib/overlay/ambient";
 import { describeTypefaces } from "@/rescript/lib/overlay/typefaces";
 import {
   describeFrame,
@@ -140,6 +141,31 @@ ${describeTypefaces()}
 {"op":"timeElement","element":2,"start":4,"duration":3}
 {"op":"animateElement","element":2,"enter":"pop","exit":"fade","duration":0.4}
 {"op":"removeElement","element":2}          — or {"op":"removeElement","element":"all"} to clear them all.
+
+MOTION — what a thing does BETWEEN arriving and leaving
+Enter and exit are the two ends of an element's life. A composition made only of those is a slideshow:
+everything lands, freezes for three seconds and leaves. Add "ambient" to any addText / addImage / addBroll /
+addShape, or set it later with animateElement, and it moves the whole time it is up.
+
+{"op":"addText","text":"Shipped in a week","template":"boldSlam","ambient":"float"}
+{"op":"animateElement","element":3,"ambient":{"kind":"pulse","amount":0.8}}
+
+${describeAmbients()}
+
+  A bare name is the tuned amount and is what you should write. The object form exists for the one case
+  that needs less of it. These are meant to be felt, not watched: everything here moves a few pixels over
+  several seconds, and doubling any of it turns a produced video into a bouncy one.
+  Templates already carry the right answer for their job — titles float, callouts wobble, stats breathe,
+  calls to action pulse, and anything that sits under someone talking holds still, because a name badge
+  that drifts while a person speaks is a distraction rather than a flourish. Only name "ambient" when you
+  want something other than that, and "none" to take one away.
+
+{"op":"addText","text":"10,000 users","template":"statBig","count":{"from":0,"to":10000,"suffix":" users"}}
+  A number that counts up to its value and then holds. This is the one piece of motion that changes what
+  the element SAYS. Use it for any figure worth looking at — a result, a percentage, a price, a count — and
+  keep "text" as what it should read if the count is removed. It lands before it leaves on purpose: a
+  figure still climbing as it fades out has not been read. "decimals" 0-3, "prefix" and "suffix" up to 12
+  characters each ("$", "%", " users", "/mo").
 
 {"op":"setTransition","between":1,"kind":"dissolve","duration":0.5}
 {"op":"setAllTransitions","kind":"fadeBlack","duration":0.4}

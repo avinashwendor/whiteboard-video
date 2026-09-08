@@ -7,6 +7,7 @@ import {
   ANIMATION_LABELS,
   EASING_NAMES,
 } from "@/rescript/lib/overlay/animation";
+import { AMBIENTS } from "@/rescript/lib/overlay/ambient";
 import {
   rectAt,
   TEXT_STYLES,
@@ -41,6 +42,7 @@ import {
   Select,
   Slider,
   TextInput,
+  Toggle,
 } from "./ui";
 
 /** Everything about the one element that is selected. */
@@ -64,6 +66,7 @@ export default function InspectorPanel() {
       <SelectedBar element={element} />
       <TimingSection element={element} at={at} />
       {element.kind === "text" && <TextSection element={element} />}
+      {element.kind === "text" && <CounterSection element={element} />}
       {element.kind === "image" && <ImageSection element={element} />}
       {element.kind === "shape" && <ShapeSection element={element} />}
       <PlacementSection element={element} />
@@ -556,14 +559,147 @@ function AnimationSection({ element }: { element: OverlayElement }) {
     </div>
   );
 
+  const ambient = element.ambient ?? { kind: "none" as const };
+
   return (
     <Section title="Animation">
       {row("enter", element.enter, "Coming in")}
       {row("exit", element.exit, "Going out")}
+
+      {/* The part between the two, which is where a composition stops being a
+          slideshow. */}
+      <div className="mb-3 last:mb-0">
+        <p className="mb-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+          While it&rsquo;s up
+        </p>
+        <Row label="Motion">
+          <Select
+            value={ambient.kind}
+            options={AMBIENTS.map((a) => ({ value: a.id, label: a.label }))}
+            onChange={(kind) =>
+              update({ ambient: kind === "none" ? undefined : { ...ambient, kind } })
+            }
+          />
+        </Row>
+        {ambient.kind !== "none" && (
+          <>
+            <Row label="Amount">
+              <Slider
+                value={ambient.amount ?? 1}
+                min={0}
+                max={2}
+                step={0.05}
+                onChange={(amount) => update({ ambient: { ...ambient, amount } })}
+                format={(v) => `${Math.round(v * 100)}%`}
+              />
+            </Row>
+            <Row label="Speed">
+              <Slider
+                value={ambient.speed ?? 1}
+                min={0.25}
+                max={3}
+                step={0.05}
+                onChange={(speed) => update({ ambient: { ...ambient, speed } })}
+                format={(v) => `${v.toFixed(2)}×`}
+              />
+            </Row>
+            <p className="mt-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+              {AMBIENTS.find((a) => a.id === ambient.kind)?.use}
+            </p>
+          </>
+        )}
+      </div>
+
       <p className="mt-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-500">
         An animation never takes more than half the time the element is on
         screen, so a short caption still gets its full entrance.
       </p>
+    </Section>
+  );
+}
+
+/* --------------------------------- counter --------------------------------- */
+
+/**
+ * A number that counts up.
+ *
+ * Separate from the text field it replaces rather than a mode of it, because
+ * the text is still there underneath: turn the counter off and the element has
+ * something to say again, which is not true if the number overwrote it.
+ */
+function CounterSection({ element }: { element: TextElement }) {
+  const update = useUpdate(element.id);
+  const counter = element.counter;
+
+  return (
+    <Section title="Count up">
+      <Row label="Animate">
+        <Toggle
+          checked={Boolean(counter)}
+          label="Count the number up rather than showing the text"
+          onChange={(on) =>
+            update({
+              counter: on
+                ? { from: 0, to: 100, decimals: 0, hold: 0.6 }
+                : undefined,
+            })
+          }
+        />
+      </Row>
+      {counter && (
+        <>
+          <Row label="From">
+            <NumberInput
+              value={counter.from}
+              step={1}
+              onChange={(from) => update({ counter: { ...counter, from } })}
+            />
+          </Row>
+          <Row label="To">
+            <NumberInput
+              value={counter.to}
+              step={1}
+              onChange={(to) => update({ counter: { ...counter, to } })}
+            />
+          </Row>
+          <Row label="Before">
+            <TextInput
+              value={counter.prefix ?? ""}
+              onChange={(prefix) => update({ counter: { ...counter, prefix } })}
+            />
+          </Row>
+          <Row label="After">
+            <TextInput
+              value={counter.suffix ?? ""}
+              onChange={(suffix) => update({ counter: { ...counter, suffix } })}
+            />
+          </Row>
+          <Row label="Decimals">
+            <Slider
+              value={counter.decimals ?? 0}
+              min={0}
+              max={3}
+              step={1}
+              onChange={(decimals) => update({ counter: { ...counter, decimals } })}
+              format={(v) => String(Math.round(v))}
+            />
+          </Row>
+          <Row label="Counts for">
+            <Slider
+              value={counter.hold ?? 0.6}
+              min={0.1}
+              max={1}
+              step={0.05}
+              onChange={(hold) => update({ counter: { ...counter, hold } })}
+              format={(v) => `${Math.round(v * 100)}% of its life`}
+            />
+          </Row>
+          <p className="mt-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+            It lands before it leaves, on purpose: a figure still climbing as it
+            fades out has not been read.
+          </p>
+        </>
+      )}
     </Section>
   );
 }

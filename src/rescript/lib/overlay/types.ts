@@ -85,6 +85,66 @@ export interface AnimationSpec {
   stagger?: number;
 }
 
+/**
+ * What an element does while it is *on* screen, as opposed to how it arrives.
+ *
+ * Enter and exit animations are the two ends of an element's life, and a
+ * composition made only of those is a slideshow: everything lands, freezes for
+ * three seconds, and leaves. What separates motion graphics from captions is
+ * that nothing on screen is ever completely still.
+ *
+ * These run for the element's whole life and compose on top of whatever the
+ * enter or exit is doing, so they need no coordination with either. Every one
+ * is continuous from the first frame, which is what lets it start under an
+ * entrance without a jump at the handover.
+ */
+export interface AmbientSpec {
+  kind: AmbientKind;
+  /** Multiplier on the built-in amplitude. 1 is the tuned value. */
+  amount?: number;
+  /** Multiplier on the built-in rate. 1 is the tuned value. */
+  speed?: number;
+}
+
+export type AmbientKind =
+  | "none"
+  | "float"
+  | "sway"
+  | "bob"
+  | "breathe"
+  | "pulse"
+  | "wobble"
+  | "tilt"
+  | "drift"
+  | "shimmer"
+  | "throb";
+
+/**
+ * A number that counts up while it is on screen.
+ *
+ * The one piece of motion graphics that cannot be expressed as a transform:
+ * the *content* changes, not the drawing of it. Held on the text element
+ * because that is what it replaces — the element still has its `text`, which
+ * is what shows if the counter is removed.
+ */
+export interface CounterSpec {
+  from: number;
+  to: number;
+  /** Decimal places. 0 for a count, 1 for a percentage that needs the detail. */
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
+  /** Thousands separators. On unless turned off — 1,240 reads, 1240 is a code. */
+  grouped?: boolean;
+  /**
+   * Fraction of the element's life the count takes, so it lands and then holds
+   * rather than still climbing as it fades out. A number that is still moving
+   * when it leaves has not been read.
+   */
+  hold?: number;
+  easing?: EasingName;
+}
+
 export const DEFAULT_ENTER: AnimationSpec = {
   kind: "fade",
   duration: 0.4,
@@ -116,6 +176,15 @@ interface Common {
   hidden: boolean;
   enter: AnimationSpec;
   exit: AnimationSpec;
+  /**
+   * What it does while it is on screen. Absent means it holds still.
+   *
+   * Named `ambient` rather than `motion` because `ImageElement.motion` is
+   * already the slow camera move over a still, which is a different thing
+   * entirely — that one moves the picture inside its own box, this one moves
+   * the box.
+   */
+  ambient?: AmbientSpec;
 }
 
 export type TextAlign = "left" | "center" | "right";
@@ -123,6 +192,8 @@ export type TextAlign = "left" | "center" | "right";
 export interface TextElement extends Common {
   kind: "text";
   text: string;
+  /** When set, the text drawn is this number counting up rather than `text`. */
+  counter?: CounterSpec;
   fontFamily: string;
   fontWeight: number;
   italic: boolean;
