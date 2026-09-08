@@ -58,6 +58,10 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
       { label: "Examples", href: "/#production-entry-hub" },
       { label: "Pricing", href: "/#pricing" },
       { label: "Sign in", href: "/sign-in" },
+      // Several of the licences this app is built on require their notice to
+      // reach the people who receive the software. A link in a footer is the
+      // only place that can happen.
+      { label: "Third-party notices", href: "/notices" },
     ],
   },
 ];

@@ -49,6 +49,18 @@ const ROUTES: Check[] = [
   { path: "/sign-in" },
   { path: "/sign-up" },
   { path: "/video-editor", expect: ["MotionScript"], reject: ["Rescript"], isolated: true },
+  // The notices are an obligation, not a page: four of the licences this app is
+  // built on require their text to reach the people who receive the software,
+  // and a page that 404s or silently loses a notice satisfies none of them.
+  {
+    path: "/notices",
+    expect: [
+      "Required Notice: Copyright (c) 2026 Wassim Gharbi",
+      "PolyForm Noncommercial",
+      "General Public License",
+      "CC-BY-4.0",
+    ],
+  },
 ];
 
 const API: Check[] = [{ path: "/api/capabilities" }, { path: "/api/models" }];

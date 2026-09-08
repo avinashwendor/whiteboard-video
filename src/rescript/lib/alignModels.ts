@@ -42,6 +42,18 @@ export const ALIGN_MODELS: Partial<
     id: "onnx-community/wav2vec2-large-xlsr-53-chinese-zh-cn-ONNX",
     normalize: "cjk",
   },
+  /**
+   * LICENCE: the MMS forced aligner is CC-BY-NC-4.0 — noncommercial.
+   *
+   * It is the aligner for Spanish, French, German, Telugu and Hindi. Every
+   * other entry in this table is Apache-2.0 and carries no such restriction.
+   * Dropping an entry is not a breaking change: `alignModelFor` returns null,
+   * CTC alignment is skipped, and the words are timed by the envelope
+   * heuristic instead — less precise, and the same fallback every language
+   * without an aligner already takes.
+   *
+   * See /notices.
+   */
   // Telugu shares the multilingual MMS forced-aligner. Its vocabulary is
   // Latin-only, so `indic-roman` transliterates the native script to Latin
   // (uroman-style) before encoding — see forcedAlign.ts / indic.ts. A weak
