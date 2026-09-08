@@ -38,6 +38,23 @@ export interface SceneBoundary {
   time: number;
 }
 
+/**
+ * One of the recordings a project was made from, placed on the joined media's
+ * clock.
+ *
+ * Only present when a project was built from more than one file. The clips are
+ * joined into a single continuous source on the way in — everything from the
+ * transcript to the exporter is built on there being exactly one media clock —
+ * so this is not a timeline model. It is a label: which stretch of the video
+ * came out of which file.
+ */
+export interface SourceClip {
+  name: string;
+  /** Seconds on the joined media's clock. */
+  start: number;
+  end: number;
+}
+
 /** Named speaker in the project (id matches Word.speaker). */
 export interface SpeakerInfo {
   id: number;

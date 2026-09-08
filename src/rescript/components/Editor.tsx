@@ -5,7 +5,12 @@ import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panel
 import { useEditorStore } from "@/rescript/lib/store";
 import { useOverlayStore } from "@/rescript/lib/overlay/store";
 import { getCutRanges, isWordCutOut } from "@/rescript/lib/edits";
-import { extractAudio, getFFmpeg, releaseFFmpeg } from "@/rescript/lib/ffmpeg";
+import {
+  extractAudio,
+  getFFmpeg,
+  joinClips,
+  releaseFFmpeg,
+} from "@/rescript/lib/ffmpeg";
 import { VAD_SAMPLE_RATE } from "@/rescript/lib/vad";
 import { isNetworkError } from "@/rescript/lib/network";
 import { isElectron } from "@/rescript/lib/platform";
@@ -17,6 +22,7 @@ import { useDesktopMenu } from "@/rescript/hooks/useDesktopMenu";
 import { useIsDesktopLayout } from "@/rescript/hooks/useIsDesktopLayout";
 import { useTranscriber } from "@/rescript/hooks/useTranscriber";
 import { detectMediaKind, MEDIA_ACCEPT } from "@/rescript/lib/media";
+import type { SpeakerInfo, Word } from "@/rescript/lib/types";
 import TopBar from "./TopBar";
 import UploadScreen from "./UploadScreen";
 import TranscriptPanel from "./TranscriptPanel";
@@ -226,6 +232,51 @@ export default function Editor() {
     [isolated, startMenuFile, t]
   );
 
+  /**
+   * Several recordings, joined on the way in.
+   *
+   * The join happens before the project exists, so it cannot use the editor's
+   * own progress screen — there is nothing loaded to show progress for. It runs
+   * over the upload screen instead, and until it finishes the app is exactly
+   * where it was: no half-created project to back out of if the user cancels or
+   * a file turns out to be unreadable.
+   */
+  const [joining, setJoining] = useState<{ count: number; ratio: number } | null>(
+    null
+  );
+
+  const startFiles = useCallback(
+    async (files: File[], options?: { words?: Word[]; speakers?: SpeakerInfo[] }) => {
+      if (files.length === 0) return;
+      if (files.length === 1) {
+        loadVideo(files[0], options);
+        return;
+      }
+      setJoining({ count: files.length, ratio: 0 });
+      try {
+        // The engine download is most of the wait on a cold page, and it has a
+        // ratio of its own — folded into the first fifth of the bar so it moves
+        // from the start rather than sitting at zero for thirty seconds.
+        await getFFmpeg((ratio) =>
+          setJoining((j) => (j ? { ...j, ratio: ratio * 0.2 } : j))
+        );
+        const joined = await joinClips(files, (ratio) =>
+          setJoining((j) => (j ? { ...j, ratio: 0.2 + ratio * 0.8 } : j))
+        );
+        loadVideo(joined.file, { ...options, clips: joined.clips });
+      } catch (err) {
+        console.error("Joining clips failed:", err);
+        reportError(err, "join-clips");
+        alert(
+          err instanceof Error ? err.message : en["error.join"]
+        );
+      } finally {
+        setJoining(null);
+      }
+    },
+    [loadVideo]
+  );
+
   // Daily-active signal: reports the launch, then again on each day rollover so
   // a long-running window doesn't look churned.
   useEffect(() => startSessionReporting(), []);
@@ -401,7 +452,25 @@ export default function Editor() {
             <div className="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-700" />
             <SettingsMenu />
           </TopBar>}
-          <UploadScreen onFile={loadVideo} />
+          <UploadScreen onFiles={startFiles} />
+          {joining && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-50/90 backdrop-blur-sm dark:bg-zinc-950/90">
+              <div className="w-full max-w-xs px-8 text-center">
+                <p className="text-[15px] font-medium text-zinc-800 dark:text-zinc-100">
+                  {t("upload.joining", { count: String(joining.count) })}
+                </p>
+                <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div
+                    className="h-full rounded-full bg-zinc-900 transition-[width] duration-200 dark:bg-zinc-100"
+                    style={{ width: `${Math.round(joining.ratio * 100)}%` }}
+                  />
+                </div>
+                <p className="mt-3 text-[12px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+                  {t("upload.joiningHint")}
+                </p>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>

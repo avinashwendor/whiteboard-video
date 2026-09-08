@@ -49,6 +49,23 @@ export const de: Record<MessageKey, string> = {
   "upload.chooseTranscriptFirst": "Wähle oben im Menü ein Transkript und lege dann deine Medien ab",
   "upload.willUseTranscript": "{name} wird verwendet · MP4, WebM, MOV, MP3, WAV, …",
   "upload.mediaFormats": "MP4, WebM, MOV, MP3, WAV, M4A, …",
+  "upload.mediaFormatsMulti":
+    "MP4, WebM, MOV, MP3, WAV, M4A — mehrere ablegen, um sie zu verbinden",
+  "upload.addMore": "Weitere ablegen, um sie zur Liste hinzuzufügen",
+  "upload.oneFileForTranscript":
+    "Ein importiertes Transkript ist auf eine Aufnahme getimt. Verbinde die Clips zuerst und transkribiere dann.",
+  "upload.clipsTitle": "{count} Clips, in dieser Reihenfolge verbunden",
+  "upload.clipsHint":
+    "{size} insgesamt. Jeder Clip wird ein eigenes Segment auf der Timeline.",
+  "upload.clipsTooBig":
+    "{size} ist mehr, als der Browser auf einmal verbinden kann. Entferne einen Clip oder verwende kleinere Exporte.",
+  "upload.clearClips": "Leeren",
+  "upload.combine": "Verbinden und bearbeiten",
+  "upload.moveUp": "Nach vorne",
+  "upload.moveDown": "Nach hinten",
+  "upload.joining": "{count} Clips werden verbunden",
+  "upload.joiningHint":
+    "Wird neu kodiert, damit die Nahtstellen genau sitzen. Ungefähr so lange wie das Material.",
   "upload.gettingReady": "Alles wird vorbereitet",
   "upload.gettingReadyHelp": "Die Medien-Engine wird eingerichtet. Das passiert nur einmal.",
   "upload.unsupported": "Dieser Browser kann den Editor nicht ausführen",
@@ -201,6 +218,14 @@ export const de: Record<MessageKey, string> = {
   "error.mediaEngineNetwork": "Die Medien-Engine konnte nicht geladen werden — die Verbindung wurde unterbrochen. Prüfe deine Internetverbindung und versuche es erneut.",
   "error.processFile": "Diese Datei konnte nicht verarbeitet werden.",
   "error.extractAudio": "Audio konnte aus dieser Datei nicht extrahiert werden.",
+  "error.join": "Diese Clips konnten nicht zusammengefügt werden.",
+  "error.joinNothing": "Keine Clips zum Zusammenfügen.",
+  "error.joinTooBig":
+    "Diese Clips sind zu groß, um sie im Browser zusammenzufügen — etwa 700 MB sind die Grenze. Füge weniger auf einmal zusammen oder verwende kleinere Exporte.",
+  "error.joinUnreadable":
+    "„{name}“ konnte nicht gelesen werden. Möglicherweise ein nicht unterstütztes Format.",
+  "error.joinNoPicture":
+    "„{name}“ hat kein Bild. Füge Videoclips mit Videoclips zusammen und Audio mit Audio.",
   "error.nothingToExport": "Alles wurde gelöscht — nichts zu exportieren.",
   "error.videoExport": "Export beim Rendern des Videos fehlgeschlagen.",
   "error.audioExport": "Export beim Rendern des Audios fehlgeschlagen.",

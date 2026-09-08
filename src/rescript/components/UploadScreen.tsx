@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import {
+  ArrowDown,
+  ArrowUp,
   AudioLines,
   Clapperboard,
   Film,
@@ -25,6 +27,7 @@ import { MODEL_ORDER } from "@/rescript/lib/models";
 import { useCrossOriginIsolated } from "@/rescript/hooks/useCrossOriginIsolated";
 import { detectMediaKind, MEDIA_ACCEPT } from "@/rescript/lib/media";
 import { formatTime } from "@/rescript/lib/edits";
+import { MAX_JOIN_BYTES } from "@/rescript/lib/ffmpeg";
 import {
   listProjects,
   loadLastProjectId,
@@ -178,11 +181,127 @@ function RecentProjects({
   );
 }
 
-export default function UploadScreen({
-  onFile,
+/** Human file size, to one decimal where it helps. */
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * The clips about to be joined, in the order they will be joined in.
+ *
+ * The order is settled here rather than afterwards because joining re-encodes:
+ * once the clips are one file, moving the second one to the front means doing
+ * it all again. Deciding first is also where people expect to decide it —
+ * nobody drops four files without an order in mind.
+ */
+function ClipQueue({
+  files,
+  total,
+  onMove,
+  onRemove,
+  onClear,
+  onStart,
+  disabled,
 }: {
-  onFile: (
-    file: File,
+  files: File[];
+  total: number;
+  onMove: (index: number, by: -1 | 1) => void;
+  onRemove: (index: number) => void;
+  onClear: () => void;
+  onStart: () => void;
+  disabled: boolean;
+}) {
+  const { t } = useI18n();
+  const tooBig = total > MAX_JOIN_BYTES;
+
+  return (
+    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white/90 p-3 dark:border-zinc-700 dark:bg-zinc-900/70">
+      <div className="mb-2 flex items-baseline justify-between gap-2 px-1">
+        <p className="text-[13px] font-medium text-zinc-800 dark:text-zinc-100">
+          {t("upload.clipsTitle", { count: String(files.length) })}
+        </p>
+        <button
+          type="button"
+          onClick={onClear}
+          className="cursor-pointer text-[12px] text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-200"
+        >
+          {t("upload.clearClips")}
+        </button>
+      </div>
+
+      <ol className="space-y-1">
+        {files.map((file, i) => (
+          <li
+            key={`${file.name}-${i}`}
+            className="flex items-center gap-2 rounded-lg border border-zinc-100 px-2 py-1.5 dark:border-zinc-800"
+          >
+            <span className="w-4 shrink-0 text-right text-[11px] tabular-nums text-zinc-400">
+              {i + 1}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] text-zinc-800 dark:text-zinc-100">
+                {file.name}
+              </span>
+              <span className="block text-[11px] text-zinc-400 dark:text-zinc-500">
+                {formatSize(file.size)}
+              </span>
+            </span>
+            <button
+              type="button"
+              title={t("upload.moveUp")}
+              disabled={i === 0}
+              onClick={() => onMove(i, -1)}
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 disabled:cursor-default disabled:opacity-25 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <ArrowUp size={13} />
+            </button>
+            <button
+              type="button"
+              title={t("upload.moveDown")}
+              disabled={i === files.length - 1}
+              onClick={() => onMove(i, 1)}
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 disabled:cursor-default disabled:opacity-25 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <ArrowDown size={13} />
+            </button>
+            <button
+              type="button"
+              title={t("common.remove")}
+              onClick={() => onRemove(i)}
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+            >
+              <Trash2 size={13} />
+            </button>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-2.5 flex items-center justify-between gap-3 px-1">
+        <p className="min-w-0 text-[11px] leading-tight text-zinc-400 dark:text-zinc-500">
+          {tooBig
+            ? t("upload.clipsTooBig", { size: formatSize(total) })
+            : t("upload.clipsHint", { size: formatSize(total) })}
+        </p>
+        <button
+          type="button"
+          disabled={disabled || tooBig || files.length < 2}
+          onClick={onStart}
+          className="shrink-0 cursor-pointer rounded-lg bg-zinc-900 px-3 py-1.5 text-[13px] font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+        >
+          {t("upload.combine")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function UploadScreen({
+  onFiles,
+}: {
+  onFiles: (
+    files: File[],
     options?: { words?: Word[]; speakers?: SpeakerInfo[] }
   ) => void;
 }) {
@@ -197,6 +316,16 @@ export default function UploadScreen({
    */
   const [lastId] = useState<string | null>(() => loadLastProjectId());
   const [busyId, setBusyId] = useState<string | null>(null);
+  /**
+   * Clips waiting to be joined.
+   *
+   * Empty for the ordinary case — one file goes straight through, because
+   * making somebody confirm a single drop would be a worse editor for the sake
+   * of a feature they are not using. It fills the moment there is more than one
+   * file, because the order they are joined in is a decision, and it is one that
+   * cannot be revisited afterwards without joining again.
+   */
+  const [queued, setQueued] = useState<File[]>([]);
   // The pipeline needs SharedArrayBuffer, so don't accept a file until the page
   // is confirmed cross-origin isolated — transcription would fail immediately.
   const isolation = useCrossOriginIsolated();
@@ -232,28 +361,58 @@ export default function UploadScreen({
     };
   }, []);
 
-  const handleFiles = useCallback(
-    (files: FileList | null) => {
-      if (!ready) return;
-      const file = files?.[0];
-      if (!file) return;
-      if (!detectMediaKind(file)) {
-        alert(t("editor.chooseMedia"));
-        return;
-      }
+  /** Start on what is queued, with whatever transcript was imported. */
+  const start = useCallback(
+    (files: File[]) => {
+      if (!files.length) return;
       const { source, pendingTranscript: pending } = useEditorStore.getState();
       if (source === "import") {
         if (!pending) {
           alert(t("editor.chooseTranscript"));
           return;
         }
-        onFile(file, { words: pending.words, speakers: pending.speakers });
+        onFiles(files, { words: pending.words, speakers: pending.speakers });
         return;
       }
-      onFile(file);
+      onFiles(files);
     },
-    [onFile, ready, t]
+    [onFiles, t]
   );
+
+  const handleFiles = useCallback(
+    (list: FileList | null) => {
+      if (!ready || !list?.length) return;
+      const files = Array.from(list);
+      if (!files.every(detectMediaKind)) {
+        alert(t("editor.chooseMedia"));
+        return;
+      }
+      // An imported transcript is timed against one recording, so joining
+      // several and laying that transcript over the result would put every word
+      // in the wrong place.
+      const importing = useEditorStore.getState().source === "import";
+      if (importing && files.length + queued.length > 1) {
+        alert(t("upload.oneFileForTranscript"));
+        return;
+      }
+      if (!queued.length && files.length === 1) {
+        start(files);
+        return;
+      }
+      setQueued((current) => [...current, ...files]);
+    },
+    [queued.length, ready, start, t]
+  );
+
+  const move = useCallback((index: number, by: -1 | 1) => {
+    setQueued((current) => {
+      const to = index + by;
+      if (to < 0 || to >= current.length) return current;
+      const next = current.slice();
+      [next[index], next[to]] = [next[to], next[index]];
+      return next;
+    });
+  }, []);
 
   const handleOpen = useCallback(
     async (id: string) => {
@@ -348,6 +507,18 @@ export default function UploadScreen({
             input.click(). display:none inputs + .click() fail in some Chromium
             setups (DnD still works), which matches "browse does nothing".
           */}
+          {queued.length > 0 && (
+            <ClipQueue
+              files={queued}
+              total={queued.reduce((sum, f) => sum + f.size, 0)}
+              onMove={move}
+              onRemove={(i) => setQueued((c) => c.filter((_, j) => j !== i))}
+              onClear={() => setQueued([])}
+              onStart={() => start(queued)}
+              disabled={!ready}
+            />
+          )}
+
           <label
             htmlFor={inputId}
             aria-disabled={!ready}
@@ -419,7 +590,9 @@ export default function UploadScreen({
                           name: pendingTranscript.name,
                         })
                       : t("upload.chooseTranscriptFirst")
-                    : t("upload.mediaFormats")}
+                    : queued.length > 0
+                      ? t("upload.addMore")
+                      : t("upload.mediaFormatsMulti")}
                 </p>
               </>
             ) : (
@@ -435,6 +608,7 @@ export default function UploadScreen({
               ref={inputRef}
               type="file"
               accept={MEDIA_ACCEPT}
+              multiple
               disabled={!ready}
               // Visually hidden but present in the layout tree — display:none
               // breaks programmatic / label-activated pickers in some browsers.

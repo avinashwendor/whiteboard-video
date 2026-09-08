@@ -215,6 +215,318 @@ export async function extractAudio(file: File): Promise<Float32Array | null> {
   return new Float32Array(buf as ArrayBuffer);
 }
 
+
+/* ------------------------------ joining clips ------------------------------ */
+
+/**
+ * Several recordings, edited as one video.
+ *
+ * The rest of the editor is built on a single continuous source: one media
+ * clock, one transcript timed against it, one set of cuts, one export. That is
+ * not an accident or a limitation to route around — it is what makes a
+ * transcript the timeline, and rebuilding it around a list of sources would
+ * mean a source-and-offset pair everywhere a second currently is.
+ *
+ * So the clips are joined on the way in, once, and everything downstream is
+ * unchanged. What the editor then holds is one file whose scene boundaries fall
+ * exactly where the joins are, which is also what you would want: each clip is
+ * its own segment on the timeline, trimmable, with a transition available at
+ * every seam.
+ *
+ * The cost is honest and worth stating: this re-encodes, it takes about as long
+ * as the footage is, and reordering afterwards means joining again. Reordering
+ * therefore happens before the join, on the upload screen, which is where
+ * people expect to decide the order anyway.
+ */
+
+export interface ClipProbe {
+  /** Seconds. Zero when ffmpeg could not tell us, which is treated as an error. */
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  hasVideo: boolean;
+  hasAudio: boolean;
+}
+
+/** Where one source clip ended up on the joined timeline. */
+export interface JoinedClip {
+  name: string;
+  start: number;
+  end: number;
+}
+
+export interface JoinedMedia {
+  file: File;
+  clips: JoinedClip[];
+}
+
+/**
+ * Total input we are willing to hold in the media engine at once.
+ *
+ * ffmpeg-core is built with a fixed 1 GiB heap that never grows, and joining
+ * holds every input plus the output in it. Past this the run does not fail
+ * cleanly — it aborts somewhere inside the wasm with a message nobody can act
+ * on — so the limit is checked here, where it can be said in a sentence.
+ */
+export const MAX_JOIN_BYTES = 700 * 1024 * 1024;
+
+/** Nothing bigger than this is worth re-encoding to; it is already 1080p. */
+const MAX_JOIN_WIDTH = 1920;
+const MAX_JOIN_HEIGHT = 1080;
+
+const DURATION_RE = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/;
+const VIDEO_RE = /Stream #\d+:\d+.*: Video:.*?(\d{2,5})x(\d{2,5})/;
+const FPS_RE = /([\d.]+)\s*fps/;
+
+/**
+ * What is in a file: how long, how big, and which tracks.
+ *
+ * Read out of ffmpeg's own log rather than from a `<video>` element. The
+ * element knows the duration and the display size, but not whether there is an
+ * audio stream — and a filtergraph that references `[1:a]` on a clip with no
+ * audio fails the whole join with a message about an invalid stream specifier.
+ * Asking the tool that will do the work is the only answer that agrees with it.
+ */
+export function readProbe(log: string): ClipProbe {
+  const duration = DURATION_RE.exec(log);
+  const video = VIDEO_RE.exec(log);
+  const fps = video ? FPS_RE.exec(log.slice(video.index)) : null;
+
+  return {
+    duration: duration
+      ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])
+      : 0,
+    width: video ? Number(video[1]) : 0,
+    height: video ? Number(video[2]) : 0,
+    fps: fps ? Math.min(60, Math.max(1, Math.round(Number(fps[1])))) : 30,
+    hasVideo: Boolean(video),
+    hasAudio: /Stream #\d+:\d+.*: Audio:/.test(log),
+  };
+}
+
+/** Even dimensions, capped: libx264 refuses odd ones. */
+function evenTo(value: number, cap: number): number {
+  return Math.max(2, Math.min(cap, Math.floor(value / 2) * 2));
+}
+
+/** The frame every clip is fitted into. */
+export function joinFrame(probes: ClipProbe[]): { width: number; height: number; fps: number } {
+  const withVideo = probes.filter((p) => p.hasVideo);
+  if (!withVideo.length) return { width: 0, height: 0, fps: 30 };
+  return {
+    width: evenTo(Math.max(...withVideo.map((p) => p.width)), MAX_JOIN_WIDTH),
+    height: evenTo(Math.max(...withVideo.map((p) => p.height)), MAX_JOIN_HEIGHT),
+    // The highest of the sources: dropping 60 to 30 is visible on anything that
+    // moves, and lifting 24 to 30 costs nothing but duplicated frames.
+    fps: Math.max(...withVideo.map((p) => p.fps)),
+  };
+}
+
+/**
+ * The filtergraph that turns N inputs into one stream.
+ *
+ * Every clip is scaled to fit the common frame and padded rather than cropped —
+ * a portrait phone clip between two landscape ones keeps its whole picture with
+ * bars at the sides, which is a choice somebody made, where a crop would be a
+ * decision the tool made for them and cannot be undone afterwards.
+ *
+ * Clips with no audio get silence from an `anullsrc` input, listed in the
+ * returned `silences` so the caller knows how many extra `-i` arguments to
+ * pass. Without it, concat fails on the first silent clip: the audio stream
+ * count has to match across every segment.
+ */
+export function joinFilter(
+  probes: ClipProbe[],
+  frame: { width: number; height: number; fps: number }
+): { filter: string; silences: number[] } {
+  const video = frame.width > 0;
+  const parts: string[] = [];
+  const labels: string[] = [];
+  const silences: number[] = [];
+
+  probes.forEach((probe, i) => {
+    if (video) {
+      parts.push(
+        `[${i}:v]scale=${frame.width}:${frame.height}:force_original_aspect_ratio=decrease,` +
+          `pad=${frame.width}:${frame.height}:(ow-iw)/2:(oh-ih)/2:color=black,` +
+          `setsar=1,fps=${frame.fps},format=yuv420p[v${i}]`
+      );
+      labels.push(`[v${i}]`);
+    }
+    const source = probe.hasAudio ? `${i}:a` : `${probes.length + silences.length}:a`;
+    if (!probe.hasAudio) silences.push(i);
+    parts.push(
+      `[${source}]atrim=0:${probe.duration.toFixed(3)},asetpts=PTS-STARTPTS,` +
+        `aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`
+    );
+    labels.push(`[a${i}]`);
+  });
+
+  parts.push(
+    `${labels.join("")}concat=n=${probes.length}:v=${video ? 1 : 0}:a=1` +
+      `${video ? "[outv]" : ""}[outa]`
+  );
+  return { filter: parts.join(";"), silences };
+}
+
+/** Where each clip lands once they are laid end to end. */
+export function joinLayout(names: string[], probes: ClipProbe[]): JoinedClip[] {
+  const clips: JoinedClip[] = [];
+  let at = 0;
+  probes.forEach((probe, i) => {
+    clips.push({ name: names[i], start: at, end: at + probe.duration });
+    at += probe.duration;
+  });
+  return clips;
+}
+
+
+/**
+ * Read one file's streams by asking ffmpeg to open it and saying nothing else.
+ *
+ * `ffmpeg -i x` with no output is an error by design — "At least one output
+ * file must be specified" — and prints the stream table on its way out. That
+ * non-zero exit is the expected result, not a failure.
+ */
+async function probeOne(ffmpeg: FFmpeg, name: string): Promise<ClipProbe> {
+  let log = "";
+  const onLog = ({ message }: { type: string; message: string }) => {
+    log += message + "\n";
+  };
+  ffmpeg.on("log", onLog);
+  try {
+    await ffmpeg.exec(["-i", name]);
+  } catch {
+    // Same path: the probe is the log, not the exit code.
+  } finally {
+    ffmpeg.off("log", onLog);
+  }
+  return readProbe(log);
+}
+
+/** Probe several files without loading the engine once per file. */
+export async function probeClips(files: File[]): Promise<ClipProbe[]> {
+  const ffmpeg = await getFFmpeg();
+  const { fetchFile } = await import("@ffmpeg/util");
+  const probes: ClipProbe[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const name = `probe_${i}`;
+    await ffmpeg.writeFile(name, await fetchFile(files[i]));
+    try {
+      probes.push(await probeOne(ffmpeg, name));
+    } finally {
+      await ffmpeg.deleteFile(name).catch(() => {});
+    }
+  }
+  return probes;
+}
+
+/**
+ * Join several recordings into one file, end to end.
+ *
+ * One ffmpeg run rather than normalising each clip to its own intermediate and
+ * concatenating those: the intermediates would sit in the same 1 GiB heap as
+ * the inputs and the output, and the whole reason this has a size limit is that
+ * the heap does not grow.
+ */
+export async function joinClips(
+  files: File[],
+  onProgress?: (ratio: number) => void
+): Promise<JoinedMedia> {
+  if (files.length === 0) throw new Error(en["error.joinNothing"]);
+  if (files.length === 1) {
+    const probe = (await probeClips(files))[0];
+    return { file: files[0], clips: joinLayout([files[0].name], [probe]) };
+  }
+
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  if (total > MAX_JOIN_BYTES) throw new Error(en["error.joinTooBig"]);
+
+  const probes = await probeClips(files);
+
+  const missing = probes.findIndex((p) => p.duration <= 0);
+  if (missing >= 0) {
+    throw new Error(
+      localizedJoinError("error.joinUnreadable", files[missing].name)
+    );
+  }
+
+  // All video or all audio. A silent voice memo dropped in among camera clips
+  // is nearly always a mistake, and turning it into ten seconds of black is a
+  // worse answer than saying so.
+  const withVideo = probes.filter((p) => p.hasVideo).length;
+  if (withVideo !== 0 && withVideo !== probes.length) {
+    const odd = probes.findIndex((p) => !p.hasVideo);
+    throw new Error(localizedJoinError("error.joinNoPicture", files[odd].name));
+  }
+
+  const ffmpeg = await getFFmpeg();
+  const { fetchFile } = await import("@ffmpeg/util");
+  const frame = joinFrame(probes);
+  const { filter, silences } = joinFilter(probes, frame);
+  const names = files.map((_, i) => `join_${i}`);
+  const out = frame.width > 0 ? "joined.mp4" : "joined.m4a";
+  const seconds = probes.reduce((sum, p) => sum + p.duration, 0);
+
+  const progressHandler = ({ time }: { progress: number; time: number }) => {
+    onProgress?.(Math.max(0, Math.min(1, time / 1e6 / Math.max(0.001, seconds))));
+  };
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      await ffmpeg.writeFile(names[i], await fetchFile(files[i]));
+    }
+
+    const inputs = names.flatMap((name) => ["-i", name]);
+    // One silent input per clip that has no audio track, long enough to cover
+    // it. `-t` before `-i` bounds the generated stream; anullsrc is infinite.
+    for (const i of silences) {
+      inputs.push(
+        "-f", "lavfi",
+        "-t", probes[i].duration.toFixed(3),
+        "-i", "anullsrc=r=48000:cl=stereo"
+      );
+    }
+
+    ffmpeg.on("progress", progressHandler);
+    const code = await ffmpeg.exec([
+      ...inputs,
+      "-filter_complex", filter,
+      ...(frame.width > 0 ? ["-map", "[outv]"] : []),
+      "-map", "[outa]",
+      ...(frame.width > 0
+        ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+        : []),
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-movflags", "+faststart",
+      "-y", out,
+    ]);
+    if (code !== 0) throw new Error(en["error.join"]);
+
+    const data = (await ffmpeg.readFile(out)) as Uint8Array;
+    const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    const file = new File(
+      [buf as ArrayBuffer],
+      frame.width > 0 ? "joined.mp4" : "joined.m4a",
+      { type: frame.width > 0 ? "video/mp4" : "audio/mp4" }
+    );
+    return { file, clips: joinLayout(files.map((f) => f.name), probes) };
+  } finally {
+    ffmpeg.off("progress", progressHandler);
+    for (const name of names) await ffmpeg.deleteFile(name).catch(() => {});
+    await ffmpeg.deleteFile(out).catch(() => {});
+    // The inputs are the largest thing this app ever puts in the heap and the
+    // caller is about to transcribe, which needs all of it back.
+    writtenFor = null;
+  }
+}
+
+function localizedJoinError(key: "error.joinUnreadable" | "error.joinNoPicture", name: string) {
+  return en[key].replace("{name}", name);
+}
+
 /** Container / codec presets for video export. */
 export type VideoExportFormat = "mp4" | "webm";
 

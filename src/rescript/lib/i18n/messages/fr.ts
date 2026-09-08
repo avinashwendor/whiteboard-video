@@ -49,6 +49,23 @@ export const fr: Record<MessageKey, string> = {
   "upload.chooseTranscriptFirst": "Choisissez une transcription dans le menu ci-dessus, puis déposez votre média",
   "upload.willUseTranscript": "Utilisera {name} · MP4, WebM, MOV, MP3, WAV, …",
   "upload.mediaFormats": "MP4, WebM, MOV, MP3, WAV, M4A, …",
+  "upload.mediaFormatsMulti":
+    "MP4, WebM, MOV, MP3, WAV, M4A — déposez-en plusieurs pour les assembler",
+  "upload.addMore": "Déposez-en d'autres pour les ajouter à la liste",
+  "upload.oneFileForTranscript":
+    "Une transcription importée est calée sur un seul enregistrement. Assemblez d'abord les clips, puis transcrivez.",
+  "upload.clipsTitle": "{count} clips, assemblés dans cet ordre",
+  "upload.clipsHint":
+    "{size} au total. Chaque clip devient son propre segment sur la timeline.",
+  "upload.clipsTooBig":
+    "{size}, c'est plus que ce que le navigateur peut assembler d'un coup. Retirez un clip ou utilisez des exports plus légers.",
+  "upload.clearClips": "Vider",
+  "upload.combine": "Assembler et monter",
+  "upload.moveUp": "Déplacer avant",
+  "upload.moveDown": "Déplacer après",
+  "upload.joining": "Assemblage de {count} clips",
+  "upload.joiningHint":
+    "Réencodage pour que les raccords tombent juste. À peu près la durée des rushes.",
   "upload.gettingReady": "Préparation",
   "upload.gettingReadyHelp": "Configuration du moteur multimédia, cela n’arrive qu’une fois.",
   "upload.unsupported": "Ce navigateur ne peut pas lancer l’éditeur",
@@ -201,6 +218,14 @@ export const fr: Record<MessageKey, string> = {
   "error.mediaEngineNetwork": "Impossible de charger le moteur multimédia — la connexion a été interrompue. Vérifiez votre connexion internet et réessayez.",
   "error.processFile": "Impossible de traiter ce fichier.",
   "error.extractAudio": "Impossible d’extraire l’audio de ce fichier.",
+  "error.join": "Impossible de combiner ces clips.",
+  "error.joinNothing": "Aucun clip à combiner.",
+  "error.joinTooBig":
+    "Ces clips sont trop volumineux pour être combinés dans le navigateur — la limite est d'environ 700 Mo. Combinez-en moins à la fois, ou des exports plus légers.",
+  "error.joinUnreadable":
+    "Impossible de lire « {name} ». Le format n'est peut-être pas pris en charge.",
+  "error.joinNoPicture":
+    "« {name} » n'a pas d'image. Combinez les vidéos entre elles et l'audio avec l'audio.",
   "error.nothingToExport": "Tout a été supprimé — rien à exporter.",
   "error.videoExport": "L’export a échoué pendant le rendu de la vidéo.",
   "error.audioExport": "L’export a échoué pendant le rendu de l’audio.",

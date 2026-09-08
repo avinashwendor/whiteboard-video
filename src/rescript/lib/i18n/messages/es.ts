@@ -49,6 +49,22 @@ export const es: Record<MessageKey, string> = {
   "upload.chooseTranscriptFirst": "Elige una transcripción en el menú de arriba y luego suelta el medio",
   "upload.willUseTranscript": "Se usará {name} · MP4, WebM, MOV, MP3, WAV, …",
   "upload.mediaFormats": "MP4, WebM, MOV, MP3, WAV, M4A, …",
+  "upload.mediaFormatsMulti": "MP4, WebM, MOV, MP3, WAV, M4A: suelta varios para unirlos",
+  "upload.addMore": "Suelta más para añadirlos a la lista",
+  "upload.oneFileForTranscript":
+    "Una transcripción importada está sincronizada con una sola grabación. Une los clips primero y luego transcribe.",
+  "upload.clipsTitle": "{count} clips, unidos en este orden",
+  "upload.clipsHint":
+    "{size} en total. Cada clip será su propio segmento en la línea de tiempo.",
+  "upload.clipsTooBig":
+    "{size} es más de lo que el navegador puede unir de una vez. Quita un clip o usa exportaciones más pequeñas.",
+  "upload.clearClips": "Vaciar",
+  "upload.combine": "Unir y editar",
+  "upload.moveUp": "Mover antes",
+  "upload.moveDown": "Mover después",
+  "upload.joining": "Uniendo {count} clips",
+  "upload.joiningHint":
+    "Recodificando para que las uniones queden exactas. Tarda más o menos lo que dura el metraje.",
   "upload.gettingReady": "Preparando todo",
   "upload.gettingReadyHelp": "Configurando el motor multimedia; esto solo ocurre una vez.",
   "upload.unsupported": "Este navegador no puede ejecutar el editor",
@@ -201,6 +217,14 @@ export const es: Record<MessageKey, string> = {
   "error.mediaEngineNetwork": "No se pudo cargar el motor multimedia — se cortó la conexión. Revisa tu internet e inténtalo de nuevo.",
   "error.processFile": "No se pudo procesar este archivo.",
   "error.extractAudio": "No se pudo extraer audio de este archivo.",
+  "error.join": "No se pudieron combinar esos clips.",
+  "error.joinNothing": "No hay clips que combinar.",
+  "error.joinTooBig":
+    "Esos clips son demasiado grandes para combinarlos en el navegador: el límite ronda los 700 MB. Combina menos a la vez, o exportaciones más pequeñas.",
+  "error.joinUnreadable":
+    "No se pudo leer «{name}». Puede que sea un formato no compatible.",
+  "error.joinNoPicture":
+    "«{name}» no tiene imagen. Combina vídeo con vídeo y audio con audio.",
   "error.nothingToExport": "Todo se ha eliminado — no hay nada que exportar.",
   "error.videoExport": "La exportación falló al renderizar el video.",
   "error.audioExport": "La exportación falló al renderizar el audio.",

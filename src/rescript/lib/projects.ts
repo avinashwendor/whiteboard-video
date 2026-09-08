@@ -13,7 +13,13 @@ import {
   isTranscriptLanguage,
 } from "./languages";
 import type { MediaKind } from "./media";
-import type { ManualCut, SceneBoundary, SpeakerInfo, Word } from "./types";
+import type {
+  ManualCut,
+  SceneBoundary,
+  SourceClip,
+  SpeakerInfo,
+  Word,
+} from "./types";
 import type { Composition } from "./overlay/types";
 import type { ChatThread } from "./chat/store";
 
@@ -49,6 +55,12 @@ export interface ProjectRecord extends ProjectMeta {
   manualCuts?: ManualCut[];
   /** Scene split points in original media time (optional for older saves). */
   sceneBoundaries?: SceneBoundary[];
+  /**
+   * The recordings this project was joined from, when it was joined from more
+   * than one. The media stored alongside is the joined file, so this is only a
+   * label for the timeline — losing it costs the clip names, nothing else.
+   */
+  sourceClips?: SourceClip[];
   /** Named speakers (optional for older saves — derived from words when missing). */
   speakers?: SpeakerInfo[];
   /**
@@ -216,6 +228,7 @@ export async function putProject(input: ProjectWrite): Promise<string> {
     showDeleted: input.showDeleted,
     manualCuts: input.manualCuts ?? [],
     sceneBoundaries: input.sceneBoundaries ?? [],
+    sourceClips: input.sourceClips ?? [],
     speakers: input.speakers ?? [],
     composition: input.composition,
     assets: input.assets,

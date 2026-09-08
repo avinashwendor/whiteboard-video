@@ -7,6 +7,7 @@ import type {
   ManualCut,
   ProgressInfo,
   SceneBoundary,
+  SourceClip,
   SpeakerInfo,
   TimeRange,
   Word,
@@ -123,6 +124,17 @@ interface EditorState {
   waveform: WaveformPeaks | null;
   /** Whether the media has an audio track at all. */
   hasAudio: boolean;
+  /**
+   * The recordings this project was made from, when it was made from more than
+   * one — where each landed on the joined media's clock.
+   *
+   * The clips are joined into a single file on the way in, so nothing
+   * downstream has to know there was ever more than one. This is what remains:
+   * enough to label the segments on the timeline with the file they came from,
+   * which is the difference between a two-hour timeline and a two-hour timeline
+   * you can find your way around.
+   */
+  sourceClips: SourceClip[];
   /** Transcript source selected on the upload screen (speech model or import). */
   source: TranscriptSource;
   /** Language hint sent to Whisper when transcribing (Parakeet auto-detects). */
@@ -201,7 +213,12 @@ interface EditorState {
   /** Load media for editing. Pass `words` to skip Whisper and use that transcript. */
   loadVideo: (
     file: File,
-    options?: { words?: Word[]; speakers?: SpeakerInfo[] }
+    options?: {
+      words?: Word[];
+      speakers?: SpeakerInfo[];
+      /** Where each joined recording sits, when several were combined. */
+      clips?: SourceClip[];
+    }
   ) => void;
   /** Restore a saved project from IndexedDB (no re-transcription). */
   openProject: (id: string) => Promise<void>;
@@ -472,6 +489,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   currentTime: 0,
   playing: false,
   videoEl: null,
+  sourceClips: [],
 
   exportUrl: null,
   exportOpen: false,
@@ -532,6 +550,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       waveform: null,
       hasAudio: false,
       duration: 0,
+      sourceClips: options?.clips?.length && options.clips.length > 1 ? options.clips : [],
+      // A join is a cut somebody already made, so it starts life as a scene
+      // boundary: each recording is its own segment on the timeline, and every
+      // seam has a transition available at it without splitting anything first.
+      ...(options?.clips && options.clips.length > 1
+        ? {
+            sceneBoundaries: options.clips
+              .slice(1)
+              .map((clip, i) => ({ id: i + 1, time: clip.start })),
+            nextBoundaryId: options.clips.length,
+          }
+        : {}),
     });
     // Funnel step between opening the app and getting a transcript. `kind` and
     // `source` are fixed vocabulary — nothing derived from the file itself.
@@ -593,6 +623,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       speakers,
       manualCuts,
       sceneBoundaries,
+      sourceClips: record.sourceClips ?? [],
       showDeleted: record.showDeleted,
       past: [],
       future: [],
@@ -682,6 +713,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       speakers: speakersFromWords(displayed, speakers ?? []),
       manualCuts: [],
       sceneBoundaries: [],
+      sourceClips: [],
       past: [],
       future: [],
       selectedClipIndex: null,
@@ -709,6 +741,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       speakers: speakersFromWords(displayed, speakers ?? []),
       manualCuts: [],
       sceneBoundaries: [],
+      sourceClips: [],
       past: [],
       future: [],
       selectedClipIndex: null,
@@ -1188,6 +1221,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       speakers: [],
       manualCuts: [],
       sceneBoundaries: [],
+      sourceClips: [],
       past: [],
       future: [],
       selectedClipIndex: null,

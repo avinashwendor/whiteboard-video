@@ -150,6 +150,7 @@ async function writeSnapshot() {
       showDeleted: s.showDeleted,
       manualCuts: s.manualCuts,
       sceneBoundaries: s.sceneBoundaries,
+      sourceClips: s.sourceClips,
       speakers: s.speakers,
       composition,
       assets,

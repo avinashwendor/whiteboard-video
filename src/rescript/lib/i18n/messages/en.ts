@@ -48,6 +48,22 @@ export const en = {
   "upload.chooseTranscriptFirst": "Pick a transcript in the menu above, then drop your media",
   "upload.willUseTranscript": "Will use {name} · MP4, WebM, MOV, MP3, WAV, …",
   "upload.mediaFormats": "MP4, WebM, MOV, MP3, WAV, M4A, …",
+  "upload.mediaFormatsMulti": "MP4, WebM, MOV, MP3, WAV, M4A — drop several to join them",
+  "upload.addMore": "Drop more to add them to the list",
+  "upload.oneFileForTranscript":
+    "An imported transcript is timed against one recording. Combine the clips first, then transcribe.",
+  "upload.clipsTitle": "{count} clips, joined in this order",
+  "upload.clipsHint":
+    "{size} in total. Each clip becomes its own segment on the timeline.",
+  "upload.clipsTooBig":
+    "{size} is more than the browser can combine at once. Remove a clip, or use smaller exports.",
+  "upload.clearClips": "Clear",
+  "upload.combine": "Combine and edit",
+  "upload.moveUp": "Move earlier",
+  "upload.moveDown": "Move later",
+  "upload.joining": "Combining {count} clips",
+  "upload.joiningHint":
+    "Re-encoding so the seams land exactly. Roughly as long as the footage.",
   "upload.gettingReady": "Getting things ready",
   "upload.gettingReadyHelp": "Setting up the media engine, this only happens once.",
   "upload.unsupported": "This browser can't run the editor",
@@ -201,6 +217,13 @@ export const en = {
     "Couldn't load the media engine — the connection dropped. Check your internet and try again.",
   "error.processFile": "Failed to process this file.",
   "error.extractAudio": "Could not extract audio from this file.",
+  "error.join": "Could not combine those clips.",
+  "error.joinNothing": "No clips to combine.",
+  "error.joinTooBig":
+    "Those clips are too large to combine in the browser — about 700 MB is the ceiling. Combine fewer at a time, or a smaller export of each.",
+  "error.joinUnreadable": "Could not read “{name}”. It may be an unsupported format.",
+  "error.joinNoPicture":
+    "“{name}” has no picture. Combine video clips with video clips, and audio with audio.",
   "error.nothingToExport": "Everything has been deleted — nothing to export.",
   "error.videoExport": "Export failed while rendering the video.",
   "error.audioExport": "Export failed while rendering the audio.",

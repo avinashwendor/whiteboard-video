@@ -113,6 +113,7 @@ export default function Timeline() {
   const status = useEditorStore((s) => s.status);
 
   const cuts = useCutRanges();
+  const sourceClips = useEditorStore((s) => s.sourceClips);
   const keeps = useMemo(() => getKeepRanges(cuts, duration), [cuts, duration]);
   const clips = useMemo(
     () => getClipSegments(keeps, sceneBoundaries),
@@ -230,6 +231,42 @@ export default function Timeline() {
       ctx.fillStyle = dark ? "#71717a" : "#a1a1aa";
       ctx.fillText(formatTime(t), x + 4, 3);
     }
+    // Which recording you are looking at.
+    //
+    // A project joined from several files is one continuous media clock by the
+    // time it reaches here, which is exactly what makes it editable — and also
+    // what makes a two-hour timeline of four recordings impossible to navigate
+    // without saying where each one starts. The name is pinned to the left edge
+    // while you are inside a clip, so it answers the question at any scroll
+    // position rather than only at the seam.
+    if (sourceClips.length > 1) {
+      ctx.save();
+      ctx.font = "9px ui-sans-serif, system-ui";
+      ctx.textBaseline = "top";
+      sourceClips.forEach((clip, i) => {
+        const from = clip.start * pps - scrollLeft;
+        const to = clip.end * pps - scrollLeft;
+        if (to < 0 || from > width) return;
+        if (i % 2 === 1) {
+          ctx.fillStyle = dark ? "#18181b" : "#f4f4f5";
+          ctx.fillRect(Math.max(0, from), 0, Math.min(width, to) - Math.max(0, from), RULER_H - 6);
+        }
+        if (from > 0) {
+          ctx.fillStyle = dark ? "#3f3f46" : "#d4d4d8";
+          ctx.fillRect(from, 0, 1, RULER_H - 6);
+        }
+        const label = clip.name.length > 26 ? `${clip.name.slice(0, 25)}…` : clip.name;
+        const textX = Math.max(3, from + 4);
+        // Only while there is room for it: a name drawn over the next clip's
+        // name is worse than no name.
+        if (to - textX > ctx.measureText(label).width + 6) {
+          ctx.fillStyle = dark ? "#52525b" : "#a1a1aa";
+          ctx.fillText(label, textX, 3);
+        }
+      });
+      ctx.restore();
+    }
+
     ctx.strokeStyle = dark ? "#27272a" : "#f0f0f2";
     ctx.beginPath();
     ctx.moveTo(0, RULER_H - 0.5);
@@ -346,6 +383,7 @@ export default function Timeline() {
     waveform,
     cuts,
     clips,
+    sourceClips,
     duration,
     pps,
     scrollLeft,
