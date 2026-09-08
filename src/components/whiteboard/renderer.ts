@@ -1,6 +1,6 @@
 "use client";
 
-import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
+import { BOARD_HEIGHT, BOARD_WIDTH, BOARDS, type Board } from "@/lib/whiteboard/scene";
 import { boardStock, COLOURS, type BoardStock } from "@/lib/whiteboard/palette";
 import { withAlpha } from "@/lib/video/grade";
 import { clamp01, easeOutCubic, lerp, noise1, range, smootherstep } from "@/lib/video/easing";
@@ -62,11 +62,11 @@ function grain(ctx: CanvasRenderingContext2D, stock: BoardStock): CanvasPattern 
   return pattern;
 }
 
-export function drawBoard(ctx: CanvasRenderingContext2D) {
+export function drawBoard(ctx: CanvasRenderingContext2D, b: Board = BOARDS.landscape) {
   const stock = boardStock();
 
   ctx.fillStyle = stock.colours.paper;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, b.width, b.height);
 
   ctx.save();
   // Light falling on a surface: brighter where the room light is, dirtier
@@ -74,23 +74,23 @@ export function drawBoard(ctx: CanvasRenderingContext2D) {
   // above a board rather than as a wash over paper, which is why the values
   // belong to the stock instead of being written here.
   const wash = ctx.createRadialGradient(
-    BOARD_WIDTH * 0.46,
-    BOARD_HEIGHT * 0.38,
-    BOARD_HEIGHT * 0.18,
-    BOARD_WIDTH * 0.5,
-    BOARD_HEIGHT * 0.5,
-    BOARD_WIDTH * 0.82,
+    b.width * 0.46,
+    b.height * 0.38,
+    b.height * 0.18,
+    b.width * 0.5,
+    b.height * 0.5,
+    b.width * 0.82,
   );
   wash.addColorStop(0, stock.wash[0]);
   wash.addColorStop(0.55, stock.wash[1]);
   wash.addColorStop(1, stock.wash[2]);
   ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, b.width, b.height);
 
   const texture = grain(ctx, stock);
   if (texture) {
     ctx.fillStyle = texture;
-    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.fillRect(0, 0, b.width, b.height);
   }
 
   // Bezel: the shadow the frame casts onto the board, then a hairline.
@@ -98,11 +98,11 @@ export function drawBoard(ctx: CanvasRenderingContext2D) {
   bezel.addColorStop(0, stock.bezel);
   bezel.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = bezel;
-  ctx.fillRect(0, 0, BOARD_WIDTH, 26);
+  ctx.fillRect(0, 0, b.width, 26);
 
   ctx.strokeStyle = stock.edge;
   ctx.lineWidth = 3;
-  ctx.strokeRect(1.5, 1.5, BOARD_WIDTH - 3, BOARD_HEIGHT - 3);
+  ctx.strokeRect(1.5, 1.5, b.width - 3, b.height - 3);
   ctx.restore();
 }
 
@@ -119,6 +119,8 @@ export interface RenderScene {
 }
 
 export interface RenderOptions {
+  /** The shape being drawn. Defaults to the widescreen board. */
+  board?: Board;
   /** Seconds into this scene. */
   time: number;
   /** How long the scene runs in total. */
@@ -151,21 +153,22 @@ export function renderFrame(
   scene: RenderScene,
   options: RenderOptions,
 ) {
-  drawBoard(ctx);
+  const b = options.board ?? BOARDS.landscape;
+  drawBoard(ctx, b);
 
   const { time, duration, cues } = options;
 
   if (scene.scene && scene.scene.beats.length) {
     const camera = sceneCamera(scene.scene, cues, time, {
-      width: BOARD_WIDTH,
-      height: BOARD_HEIGHT,
+      width: b.width,
+      height: b.height,
     }, duration);
 
     ctx.save();
     // Zoom about the centre of the board, then pan.
-    ctx.translate(BOARD_WIDTH / 2, BOARD_HEIGHT / 2);
+    ctx.translate(b.width / 2, b.height / 2);
     ctx.scale(camera.scale, camera.scale);
-    ctx.translate(-BOARD_WIDTH / 2 + camera.x, -BOARD_HEIGHT / 2 + camera.y);
+    ctx.translate(-b.width / 2 + camera.x, -b.height / 2 + camera.y);
 
     drawTitleHighlight(ctx, scene.scene, cues, time, options.fontHand);
     drawScene(ctx, scene.scene, cues, time, options.fontHand);
@@ -297,6 +300,7 @@ function drawImageScene(
   scene: RenderScene,
   options: RenderOptions,
 ) {
+  const b = options.board ?? BOARDS.landscape;
   const { time, duration } = options;
   const cue = options.cues[0];
   const headingFrom = cue?.at ?? 0;
@@ -310,22 +314,32 @@ function drawImageScene(
   const heading = scene.heading.toUpperCase();
   const reveal = easeOutCubic(range(time, headingFrom, headingFrom + headingSpan));
   const width = ctx.measureText(heading).width;
+  const headingY = b.titleY + 4;
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(BOARD_WIDTH / 2 - width / 2 - 4, 38, width * reveal + 8, 90);
+  ctx.rect(b.width / 2 - width / 2 - 4, headingY - 66, width * reveal + 8, 90);
   ctx.clip();
-  ctx.fillText(heading, BOARD_WIDTH / 2, 104);
+  ctx.fillText(heading, b.width / 2, headingY);
   ctx.restore();
   ctx.textAlign = "left";
 
   if (reveal > 0.02 && reveal < 0.99) {
-    drawMarkerPen(ctx, BOARD_WIDTH / 2 - width / 2 + width * reveal, 104, COLOURS.ink);
+    drawMarkerPen(ctx, b.width / 2 - width / 2 + width * reveal, headingY, COLOURS.ink);
   }
 
   if (!(scene.image?.complete && scene.image.naturalWidth > 0)) return;
 
-  const box = { x: 130, y: 150, width: BOARD_WIDTH - 260, height: BOARD_HEIGHT - 210 };
+  // The whole content band, inset. `contain` keeps the picture's own shape, so
+  // a landscape photograph in a portrait frame sits in a letterboxed band
+  // rather than being cropped to something nobody chose.
+  const inset = b.margin + 34;
+  const box = {
+    x: inset,
+    y: b.contentTop - 12,
+    width: b.width - inset * 2,
+    height: b.contentBottom - b.contentTop + 24,
+  };
   const fitted = contain(scene.image, box);
   const develop = smootherstep(range(time, headingFrom + headingSpan * 0.6, duration * 0.62));
   if (develop <= 0) return;
@@ -368,12 +382,15 @@ export function renderCover(
     fontHand: string;
     fontSans: string;
     progress?: number;
+    /** The shape being drawn. Defaults to the widescreen board. */
+    board?: Board;
   },
 ) {
-  drawBoard(ctx);
+  const b = options.board ?? BOARDS.landscape;
+  drawBoard(ctx, b);
 
   const progress = clamp01(options.progress ?? 1);
-  const centreX = BOARD_WIDTH / 2;
+  const centreX = b.width / 2;
 
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
@@ -381,9 +398,11 @@ export function renderCover(
   ctx.font = `400 78px ${options.fontHand}`;
 
   const title = options.title.toUpperCase();
-  const lines = wrapText(ctx, title, BOARD_WIDTH - 220, 3);
+  // A narrow board wraps a title to more lines, so it gets more of them and a
+  // little less size — a 78px title in a 720-wide frame is three words a line.
+  const lines = wrapText(ctx, title, b.width - b.margin * 2 - 60, b.tall ? 4 : 3);
   const lineHeight = 96;
-  const startY = BOARD_HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2 - 30;
+  const startY = b.height / 2 - ((lines.length - 1) * lineHeight) / 2 - 30;
 
   const widths = lines.map((line) => ctx.measureText(line).width);
   const total = widths.reduce((sum, value) => sum + value, 0) || 1;
@@ -475,12 +494,15 @@ export function renderOutro(
     fontHand: string;
     fontSans: string;
     progress: number;
+    /** The shape being drawn. Defaults to the widescreen board. */
+    board?: Board;
   },
 ) {
-  drawBoard(ctx);
+  const b = options.board ?? BOARDS.landscape;
+  drawBoard(ctx, b);
 
   const progress = clamp01(options.progress);
-  const centreX = BOARD_WIDTH / 2;
+  const centreX = b.width / 2;
 
   // A rule above the line, drawn first, to frame it.
   const rule = easeOutCubic(range(progress, 0.04, 0.3));
@@ -501,9 +523,9 @@ export function renderOutro(
   ctx.fillStyle = COLOURS.ink;
   ctx.font = `400 56px ${options.fontHand}`;
 
-  const lines = wrapText(ctx, options.description, BOARD_WIDTH - 260, 4);
+  const lines = wrapText(ctx, options.description, b.width - b.margin * 2 - 60, b.tall ? 6 : 4);
   const lineHeight = 74;
-  const startY = BOARD_HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2 + 8;
+  const startY = b.height / 2 - ((lines.length - 1) * lineHeight) / 2 + 8;
 
   const widths = lines.map((line) => ctx.measureText(line).width);
   const total = widths.reduce((sum, value) => sum + value, 0) || 1;

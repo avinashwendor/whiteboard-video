@@ -1,4 +1,3 @@
-import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
 import {
   clamp,
   clamp01,
@@ -9,6 +8,7 @@ import {
   range,
   smootherstep,
 } from "@/lib/video/easing";
+import { frameH, frameW } from "./frame";
 import { withAlpha } from "@/lib/video/grade";
 import type { Theme } from "./theme";
 import {
@@ -33,9 +33,9 @@ import {
   wrapAt,
 } from "./type";
 import {
-  CONTENT_WIDTH,
-  MARGIN,
-  SAFE_BOTTOM,
+  contentWidth,
+  margin,
+  safeBottom,
   display,
   drawMark,
   drawRule,
@@ -63,7 +63,7 @@ import {
  * putting a process rail under content that is not a process, which is the
  * single most common way generated video stops meaning anything.
  *
- * Every screen obeys the same three house rules. Nothing crosses `SAFE_BOTTOM`
+ * Every screen obeys the same three house rules. Nothing crosses `safeBottom()`
  * -- the subtitle band lives below it. Everything arrives on a cue rather than
  * on a timer, so the picture changes on the word that describes it. And the
  * accent is used once: one plate, one dot, or one rule, never all three.
@@ -120,10 +120,10 @@ function label(
   options: ModernRenderOptions,
   text?: string,
 ) {
-  drawSectionMark(ctx, theme, MARGIN * 0.7, 74, text ?? eyebrowFor(scene), {
+  drawSectionMark(ctx, theme, margin() * 0.7, 74, text ?? eyebrowFor(scene), {
     family: options.fontSans,
     progress: range(options.time, 0.05, 0.6),
-    width: BOARD_WIDTH - MARGIN * 0.7,
+    width: frameW() - margin() * 0.7,
   });
 }
 
@@ -146,12 +146,12 @@ const shotQuote: Shot = (ctx, scene, plan, theme, options) => {
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = withAlpha(theme.mark, 0.5);
-  ctx.fillText("“", MARGIN * 0.55, 300);
+  ctx.fillText("“", margin() * 0.55, 300);
   ctx.restore();
 
   const laid = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * 0.92,
+    maxWidth: contentWidth() * 0.92,
     maxSize: 64,
     minSize: 32,
     weight: 700,
@@ -159,9 +159,9 @@ const shotQuote: Shot = (ctx, scene, plan, theme, options) => {
     lineRatio: 1.2,
     emphasis: scene.keywords,
   });
-  const top = BOARD_HEIGHT * 0.44 - laid.height / 2 + laid.size;
+  const top = frameH() * 0.44 - laid.height / 2 + laid.size;
   drawDisplay(ctx, laid, {
-    x: MARGIN + 40,
+    x: margin() + 40,
     y: top,
     align: "left",
     theme,
@@ -172,9 +172,9 @@ const shotQuote: Shot = (ctx, scene, plan, theme, options) => {
   const attribution = scene.bullets[0];
   if (attribution) {
     const cue = beat(plan, 0);
-    drawRule(ctx, theme, MARGIN + 40, top + (laid.lines.length - 1) * laid.lineHeight + 44, 54, range(time, cue.at, cue.at + 0.4), 4);
+    drawRule(ctx, theme, margin() + 40, top + (laid.lines.length - 1) * laid.lineHeight + 44, 54, range(time, cue.at, cue.at + 0.4), 4);
     drawBodyLines(ctx, [attribution], {
-      x: MARGIN + 40,
+      x: margin() + 40,
       y: top + (laid.lines.length - 1) * laid.lineHeight + 92,
       align: "left",
       theme,
@@ -211,9 +211,9 @@ const shotBigWord: Shot = (ctx, scene, plan, theme, options) => {
   const caption = scene.bullets[0];
   if (caption) {
     const cue = beat(plan, 0);
-    drawBodyLines(ctx, wrapAt(ctx, caption, options.fontSans, 26, CONTENT_WIDTH * 0.6, 2), {
-      x: BOARD_WIDTH / 2,
-      y: SAFE_BOTTOM - 40,
+    drawBodyLines(ctx, wrapAt(ctx, caption, options.fontSans, 26, contentWidth() * 0.6, 2), {
+      x: frameW() / 2,
+      y: safeBottom() - 40,
       align: "center",
       theme,
       family: options.fontSans,
@@ -237,18 +237,18 @@ const shotChapter: Shot = (ctx, scene, plan, theme, options) => {
   const number = String(scene.index + 1).padStart(2, "0");
   const enter = range(time, plan.heading.at, plan.heading.at + 0.8);
 
-  drawGhostNumeral(ctx, number, BOARD_WIDTH / 2, BOARD_HEIGHT * 0.36, 300, {
+  drawGhostNumeral(ctx, number, frameW() / 2, frameH() * 0.36, 300, {
     family: display(options),
     colour: withAlpha(theme.ink, 0.16),
     align: "center",
     progress: enter,
   });
 
-  drawRule(ctx, theme, BOARD_WIDTH / 2 - 60, BOARD_HEIGHT * 0.52, 120, range(time, plan.heading.at + 0.2, plan.heading.at + 0.7), 5);
+  drawRule(ctx, theme, frameW() / 2 - 60, frameH() * 0.52, 120, range(time, plan.heading.at + 0.2, plan.heading.at + 0.7), 5);
 
   const laid = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * 0.8,
+    maxWidth: contentWidth() * 0.8,
     maxSize: 58,
     minSize: 30,
     weight: 800,
@@ -256,8 +256,8 @@ const shotChapter: Shot = (ctx, scene, plan, theme, options) => {
     lineRatio: 1.08,
   });
   drawDisplay(ctx, laid, {
-    x: BOARD_WIDTH / 2,
-    y: BOARD_HEIGHT * 0.52 + 78,
+    x: frameW() / 2,
+    y: frameH() * 0.52 + 78,
     align: "center",
     theme,
     shadow: false,
@@ -330,23 +330,23 @@ function chromeFillLocal(
 const shotMetricTrio: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const figures = [scene.stat ?? "", ...scene.bullets].filter(Boolean).slice(0, 3);
-  const width = CONTENT_WIDTH / Math.max(1, figures.length);
+  const width = contentWidth() / Math.max(1, figures.length);
 
   figures.forEach((figure, index) => {
     const cue = index === 0 ? (plan.stat ?? plan.heading) : beat(plan, index - 1);
     const t = range(time, cue.at, cue.at + 1);
-    const x = MARGIN + width * index + width / 2;
+    const x = margin() + width * index + width / 2;
 
     // Split "84% of failures" into the number and what it measures.
     const match = figure.match(/^([^\sA-Za-z]*[\d][\d.,]*\s*[%x×+]*)\s*(.*)$/);
     const value = match?.[1]?.trim() || figure;
     const caption = match?.[2]?.trim() || (index === 0 ? scene.statCaption : "");
 
-    bigNumber(ctx, value, x, BOARD_HEIGHT * 0.5, 108, theme, options, t);
+    bigNumber(ctx, value, x, frameH() * 0.5, 108, theme, options, t);
     if (caption) {
       drawBodyLines(ctx, wrapAt(ctx, caption, options.fontSans, 21, width - 40, 2), {
         x,
-        y: BOARD_HEIGHT * 0.5 + 52,
+        y: frameH() * 0.5 + 52,
         align: "center",
         theme,
         family: options.fontSans,
@@ -361,17 +361,17 @@ const shotMetricTrio: Shot = (ctx, scene, plan, theme, options) => {
       ctx.strokeStyle = theme.hairline;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(MARGIN + width * index, BOARD_HEIGHT * 0.5 - 92);
-      ctx.lineTo(MARGIN + width * index, BOARD_HEIGHT * 0.5 + 82);
+      ctx.moveTo(margin() + width * index, frameH() * 0.5 - 92);
+      ctx.lineTo(margin() + width * index, frameH() * 0.5 + 82);
       ctx.stroke();
       ctx.restore();
     }
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 188,
-    width: CONTENT_WIDTH * 0.8,
+    width: contentWidth() * 0.8,
     align: "center",
     size: 44,
     lines: 2,
@@ -403,8 +403,8 @@ const shotGauge: Shot = (ctx, scene, plan, theme, options) => {
   const t = easeOutQuint(range(time, cue.at, cue.at + 1.3));
   const share = shareOf(scene.stat);
 
-  const cx = BOARD_WIDTH / 2;
-  const cy = BOARD_HEIGHT * 0.48;
+  const cx = frameW() / 2;
+  const cy = frameH() * 0.48;
   const radius = 150;
   const from = Math.PI * 0.75;
   const sweep = Math.PI * 1.5;
@@ -442,9 +442,9 @@ const shotGauge: Shot = (ctx, scene, plan, theme, options) => {
   }
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 176,
-    width: CONTENT_WIDTH * 0.76,
+    width: contentWidth() * 0.76,
     align: "center",
     size: 42,
     lines: 2,
@@ -464,7 +464,7 @@ const shotProgress: Shot = (ctx, scene, plan, theme, options) => {
   const t = easeOutQuint(range(time, cue.at, cue.at + 1.2));
   const share = shareOf(scene.stat);
 
-  const track = { x: MARGIN, y: BOARD_HEIGHT * 0.5 - 17, width: CONTENT_WIDTH, height: 34 };
+  const track = { x: margin(), y: frameH() * 0.5 - 17, width: contentWidth(), height: 34 };
 
   ctx.save();
   ctx.fillStyle = withAlpha(theme.ink, 0.1);
@@ -508,9 +508,9 @@ const shotProgress: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 176,
-    width: CONTENT_WIDTH * 0.8,
+    width: contentWidth() * 0.8,
     align: "left",
     size: 44,
     lines: 2,
@@ -528,9 +528,9 @@ const shotProgress: Shot = (ctx, scene, plan, theme, options) => {
 const shotBars: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
-  const base = SAFE_BOTTOM - 70;
+  const base = safeBottom() - 70;
   const top = 250;
-  const slot = CONTENT_WIDTH / Math.max(1, items.length);
+  const slot = contentWidth() / Math.max(1, items.length);
   const width = Math.min(120, slot * 0.5);
 
   items.forEach((item, index) => {
@@ -540,7 +540,7 @@ const shotBars: Shot = (ctx, scene, plan, theme, options) => {
     // carry numbers of their own.
     const share = 1 - index * (0.62 / Math.max(1, items.length));
     const height = (base - top) * share * t;
-    const x = MARGIN + slot * index + slot / 2 - width / 2;
+    const x = margin() + slot * index + slot / 2 - width / 2;
 
     if (height > 1) {
       ctx.save();
@@ -566,15 +566,15 @@ const shotBars: Shot = (ctx, scene, plan, theme, options) => {
   ctx.strokeStyle = theme.hairline;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(MARGIN, base + 0.5);
-  ctx.lineTo(BOARD_WIDTH - MARGIN, base + 0.5);
+  ctx.moveTo(margin(), base + 0.5);
+  ctx.lineTo(frameW() - margin(), base + 0.5);
   ctx.stroke();
   ctx.restore();
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 176,
-    width: CONTENT_WIDTH * 0.8,
+    width: contentWidth() * 0.8,
     align: "left",
     size: 42,
     lines: 2,
@@ -591,8 +591,8 @@ const shotBars: Shot = (ctx, scene, plan, theme, options) => {
 const shotDonut: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 4);
-  const cx = BOARD_WIDTH * 0.34;
-  const cy = BOARD_HEIGHT * 0.5;
+  const cx = frameW() * 0.34;
+  const cy = frameH() * 0.5;
   const radius = 138;
 
   const shares = items.map((_, index) => 1 / Math.max(1, items.length) + (index === 0 ? 0.12 : -0.04));
@@ -619,12 +619,12 @@ const shotDonut: Shot = (ctx, scene, plan, theme, options) => {
     ctx.globalAlpha = clamp01(t);
     ctx.fillStyle = index === 0 ? theme.accent : withAlpha(theme.ink, 0.3 + index * 0.1);
     ctx.beginPath();
-    ctx.arc(BOARD_WIDTH * 0.6, y - 6, 7, 0, Math.PI * 2);
+    ctx.arc(frameW() * 0.6, y - 6, 7, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 23, CONTENT_WIDTH * 0.34, 2), {
-      x: BOARD_WIDTH * 0.6 + 24,
+    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 23, contentWidth() * 0.34, 2), {
+      x: frameW() * 0.6 + 24,
       y,
       align: "left",
       theme,
@@ -642,9 +642,9 @@ const shotDonut: Shot = (ctx, scene, plan, theme, options) => {
   }
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 168,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "left",
     size: 40,
     lines: 1,
@@ -664,9 +664,9 @@ const shotDonut: Shot = (ctx, scene, plan, theme, options) => {
 const shotTimeline: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
-  const y = BOARD_HEIGHT * 0.46;
-  const from = MARGIN + 30;
-  const to = BOARD_WIDTH - MARGIN - 30;
+  const y = frameH() * 0.46;
+  const from = margin() + 30;
+  const to = frameW() - margin() - 30;
   const draw = easeOutQuint(range(time, plan.heading.at, plan.heading.at + 1.1));
 
   ctx.save();
@@ -715,9 +715,9 @@ const shotTimeline: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 172,
-    width: CONTENT_WIDTH * 0.72,
+    width: contentWidth() * 0.72,
     align: "left",
     size: 42,
     lines: 1,
@@ -735,8 +735,8 @@ const shotTimeline: Shot = (ctx, scene, plan, theme, options) => {
 const shotCycle: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
-  const cx = BOARD_WIDTH / 2;
-  const cy = BOARD_HEIGHT * 0.5;
+  const cx = frameW() / 2;
+  const cy = frameH() * 0.5;
   const radius = 132;
 
   items.forEach((item, index) => {
@@ -781,9 +781,9 @@ const shotCycle: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 158,
-    width: CONTENT_WIDTH * 0.5,
+    width: contentWidth() * 0.5,
     align: "center",
     size: 36,
     lines: 2,
@@ -801,8 +801,8 @@ const shotFunnel: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
   const top = 236;
-  const bandHeight = Math.min(74, (SAFE_BOTTOM - top - 24) / Math.max(1, items.length));
-  const widest = CONTENT_WIDTH * 0.62;
+  const bandHeight = Math.min(74, (safeBottom() - top - 24) / Math.max(1, items.length));
+  const widest = contentWidth() * 0.62;
 
   items.forEach((item, index) => {
     const cue = beat(plan, index);
@@ -812,7 +812,7 @@ const shotFunnel: Shot = (ctx, scene, plan, theme, options) => {
     const shrink = 1 - (index / Math.max(1, items.length)) * 0.55;
     const width = widest * shrink;
     const y = top + index * (bandHeight + 10);
-    const x = BOARD_WIDTH * 0.42 - width / 2;
+    const x = frameW() * 0.42 - width / 2;
 
     ctx.save();
     ctx.globalAlpha = clamp01(t * 1.4);
@@ -821,15 +821,15 @@ const shotFunnel: Shot = (ctx, scene, plan, theme, options) => {
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + width, y);
-    ctx.lineTo(BOARD_WIDTH * 0.42 + nextWidth / 2, y + bandHeight);
-    ctx.lineTo(BOARD_WIDTH * 0.42 - nextWidth / 2, y + bandHeight);
+    ctx.lineTo(frameW() * 0.42 + nextWidth / 2, y + bandHeight);
+    ctx.lineTo(frameW() * 0.42 - nextWidth / 2, y + bandHeight);
     ctx.closePath();
     ctx.fillStyle = index === 0 ? theme.accent : withAlpha(theme.accent, 0.7 - index * 0.13);
     ctx.fill();
     ctx.restore();
 
-    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 21, CONTENT_WIDTH * 0.3, 2), {
-      x: BOARD_WIDTH * 0.42 + widest / 2 + 40,
+    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 21, contentWidth() * 0.3, 2), {
+      x: frameW() * 0.42 + widest / 2 + 40,
       y: y + bandHeight * 0.62,
       align: "left",
       theme,
@@ -842,9 +842,9 @@ const shotFunnel: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 172,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "left",
     size: 40,
     lines: 1,
@@ -863,9 +863,9 @@ const shotPyramid: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 4);
   const rows = items.length;
-  const base = SAFE_BOTTOM - 40;
+  const base = safeBottom() - 40;
   const height = Math.min(70, (base - 240) / Math.max(1, rows));
-  const widest = CONTENT_WIDTH * 0.56;
+  const widest = contentWidth() * 0.56;
 
   items.forEach((item, index) => {
     // Item 0 is the apex in the script's order, so it is drawn at the top and
@@ -878,14 +878,14 @@ const shotPyramid: Shot = (ctx, scene, plan, theme, options) => {
     const y = base - (fromBottom + 1) * height;
     const scale = (fromBottom + 1) / rows;
     const width = widest * scale;
-    const x = BOARD_WIDTH * 0.42 - width / 2;
+    const x = frameW() * 0.42 - width / 2;
     const narrower = widest * (fromBottom / rows);
 
     ctx.save();
     ctx.globalAlpha = clamp01(t * 1.4);
     ctx.beginPath();
-    ctx.moveTo(BOARD_WIDTH * 0.42 - narrower / 2, y);
-    ctx.lineTo(BOARD_WIDTH * 0.42 + narrower / 2, y);
+    ctx.moveTo(frameW() * 0.42 - narrower / 2, y);
+    ctx.lineTo(frameW() * 0.42 + narrower / 2, y);
     ctx.lineTo(x + width, y + height - 6);
     ctx.lineTo(x, y + height - 6);
     ctx.closePath();
@@ -893,8 +893,8 @@ const shotPyramid: Shot = (ctx, scene, plan, theme, options) => {
     ctx.fill();
     ctx.restore();
 
-    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 20, CONTENT_WIDTH * 0.32, 2), {
-      x: BOARD_WIDTH * 0.42 + widest / 2 + 36,
+    drawBodyLines(ctx, wrapAt(ctx, item, options.fontSans, 20, contentWidth() * 0.32, 2), {
+      x: frameW() * 0.42 + widest / 2 + 36,
       y: y + height * 0.55,
       align: "left",
       theme,
@@ -907,9 +907,9 @@ const shotPyramid: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 170,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "left",
     size: 40,
     lines: 1,
@@ -928,9 +928,9 @@ const shotPyramid: Shot = (ctx, scene, plan, theme, options) => {
 const shotRoadmap: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 4);
-  const y = BOARD_HEIGHT * 0.47;
-  const from = MARGIN;
-  const to = BOARD_WIDTH - MARGIN;
+  const y = frameH() * 0.47;
+  const from = margin();
+  const to = frameW() - margin();
 
   ctx.save();
   ctx.strokeStyle = withAlpha(theme.ink, 0.16);
@@ -991,9 +991,9 @@ const shotRoadmap: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 152,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "left",
     size: 38,
     lines: 1,
@@ -1013,16 +1013,16 @@ const shotRoadmap: Shot = (ctx, scene, plan, theme, options) => {
 const shotVersus: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const sides = scene.bullets.slice(0, 2);
-  const mid = BOARD_WIDTH / 2;
+  const mid = frameW() / 2;
 
   sides.forEach((side, index) => {
     const cue = beat(plan, index);
     const t = range(time, cue.at, cue.at + 0.75);
     const box = {
-      x: index === 0 ? MARGIN : mid + 44,
+      x: index === 0 ? margin() : mid + 44,
       y: 230,
-      width: (CONTENT_WIDTH - 88) / 2,
-      height: SAFE_BOTTOM - 268,
+      width: (contentWidth() - 88) / 2,
+      height: safeBottom() - 268,
     };
     drawSurface(ctx, box, theme, { enter: t, radius: 20, glow: 0.7 });
 
@@ -1059,26 +1059,26 @@ const shotVersus: Shot = (ctx, scene, plan, theme, options) => {
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(mid, 230);
-    ctx.lineTo(mid, 230 + (SAFE_BOTTOM - 268) * split);
+    ctx.lineTo(mid, 230 + (safeBottom() - 268) * split);
     ctx.stroke();
 
     ctx.globalAlpha = split;
     ctx.fillStyle = theme.ground;
     ctx.beginPath();
-    ctx.arc(mid, BOARD_HEIGHT * 0.5, 30, 0, Math.PI * 2);
+    ctx.arc(mid, frameH() * 0.5, 30, 0, Math.PI * 2);
     ctx.fill();
     ctx.font = `800 22px ${display(options)}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = theme.mark;
-    ctx.fillText("VS", mid, BOARD_HEIGHT * 0.5 + 1);
+    ctx.fillText("VS", mid, frameH() * 0.5 + 1);
     ctx.restore();
   }
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 172,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "center",
     size: 40,
     lines: 1,
@@ -1095,8 +1095,8 @@ const shotVersus: Shot = (ctx, scene, plan, theme, options) => {
 const shotMatrix: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 4);
-  const size = Math.min(CONTENT_WIDTH * 0.52, SAFE_BOTTOM - 250);
-  const left = BOARD_WIDTH * 0.5 - size / 2;
+  const size = Math.min(contentWidth() * 0.52, safeBottom() - 250);
+  const left = frameW() * 0.5 - size / 2;
   const top = 232;
   const cell = size / 2;
 
@@ -1143,9 +1143,9 @@ const shotMatrix: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 170,
-    width: CONTENT_WIDTH * 0.68,
+    width: contentWidth() * 0.68,
     align: "center",
     size: 38,
     lines: 1,
@@ -1163,7 +1163,7 @@ const shotMatrix: Shot = (ctx, scene, plan, theme, options) => {
 const shotVenn: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const sides = scene.bullets.slice(0, 2);
-  const cy = BOARD_HEIGHT * 0.48;
+  const cy = frameH() * 0.48;
   const radius = 148;
   const offset = 96;
 
@@ -1171,7 +1171,7 @@ const shotVenn: Shot = (ctx, scene, plan, theme, options) => {
     const cue = beat(plan, index);
     const t = easeOutQuint(range(time, cue.at, cue.at + 0.75));
     if (t <= 0.001) return;
-    const cx = BOARD_WIDTH / 2 + (index === 0 ? -offset : offset);
+    const cx = frameW() / 2 + (index === 0 ? -offset : offset);
 
     ctx.save();
     ctx.globalAlpha = clamp01(t);
@@ -1204,10 +1204,10 @@ const shotVenn: Shot = (ctx, scene, plan, theme, options) => {
     ctx.save();
     ctx.globalAlpha = meet;
     ctx.beginPath();
-    ctx.arc(BOARD_WIDTH / 2 - offset, cy, radius, 0, Math.PI * 2);
+    ctx.arc(frameW() / 2 - offset, cy, radius, 0, Math.PI * 2);
     ctx.clip();
     ctx.beginPath();
-    ctx.arc(BOARD_WIDTH / 2 + offset, cy, radius, 0, Math.PI * 2);
+    ctx.arc(frameW() / 2 + offset, cy, radius, 0, Math.PI * 2);
     ctx.fillStyle = withAlpha(theme.accent, 0.55);
     ctx.fill();
     ctx.restore();
@@ -1219,15 +1219,15 @@ const shotVenn: Shot = (ctx, scene, plan, theme, options) => {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = theme.accentInk;
-      ctx.fillText(shared.toUpperCase(), BOARD_WIDTH / 2, cy + 1);
+      ctx.fillText(shared.toUpperCase(), frameW() / 2, cy + 1);
       ctx.restore();
     }
   }
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 166,
-    width: CONTENT_WIDTH * 0.6,
+    width: contentWidth() * 0.6,
     align: "center",
     size: 38,
     lines: 1,
@@ -1245,10 +1245,10 @@ const shotProsCons: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const half = Math.ceil(scene.bullets.length / 2);
   const columns = [scene.bullets.slice(0, half), scene.bullets.slice(half)];
-  const width = (CONTENT_WIDTH - 60) / 2;
+  const width = (contentWidth() - 60) / 2;
 
   columns.forEach((column, side) => {
-    const x = MARGIN + side * (width + 60);
+    const x = margin() + side * (width + 60);
     const good = side === 0;
 
     column.forEach((item, row) => {
@@ -1298,9 +1298,9 @@ const shotProsCons: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
+    x: margin(),
     y: 178,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "left",
     size: 42,
     lines: 1,
@@ -1321,8 +1321,8 @@ const shotStack: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
   const rows = items.length;
-  const height = Math.min(66, (SAFE_BOTTOM - 250) / Math.max(1, rows));
-  const base = SAFE_BOTTOM - 30;
+  const height = Math.min(66, (safeBottom() - 250) / Math.max(1, rows));
+  const base = safeBottom() - 30;
 
   items.forEach((item, index) => {
     const fromBottom = rows - 1 - index;
@@ -1332,9 +1332,9 @@ const shotStack: Shot = (ctx, scene, plan, theme, options) => {
 
     const inset = fromBottom * 16;
     const box = {
-      x: MARGIN + 40 + inset,
+      x: margin() + 40 + inset,
       y: base - (fromBottom + 1) * (height + 8),
-      width: CONTENT_WIDTH * 0.52 - inset * 2,
+      width: contentWidth() * 0.52 - inset * 2,
       height,
     };
     drawSurface(ctx, box, theme, {
@@ -1358,9 +1358,9 @@ const shotStack: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH * 0.66,
+    x: frameW() * 0.66,
     y: 300,
-    width: CONTENT_WIDTH * 0.34,
+    width: contentWidth() * 0.34,
     align: "left",
     size: 40,
     lines: 4,
@@ -1378,8 +1378,8 @@ const shotStack: Shot = (ctx, scene, plan, theme, options) => {
 const shotOrbit: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 5);
-  const cx = BOARD_WIDTH / 2;
-  const cy = BOARD_HEIGHT * 0.5;
+  const cx = frameW() / 2;
+  const cy = frameH() * 0.5;
   const radius = 172;
   const core = easeOutQuint(range(time, plan.heading.at, plan.heading.at + 0.7));
 
@@ -1454,10 +1454,10 @@ const shotOrbit: Shot = (ctx, scene, plan, theme, options) => {
 const shotFlow: Shot = (ctx, scene, plan, theme, options) => {
   const { time } = options;
   const items = scene.bullets.slice(0, 4);
-  const y = BOARD_HEIGHT * 0.5;
-  const boxWidth = Math.min(230, (CONTENT_WIDTH - (items.length - 1) * 56) / Math.max(1, items.length));
+  const y = frameH() * 0.5;
+  const boxWidth = Math.min(230, (contentWidth() - (items.length - 1) * 56) / Math.max(1, items.length));
   const total = boxWidth * items.length + 56 * (items.length - 1);
-  const startX = BOARD_WIDTH / 2 - total / 2;
+  const startX = frameW() / 2 - total / 2;
 
   items.forEach((item, index) => {
     const cue = beat(plan, index);
@@ -1511,9 +1511,9 @@ const shotFlow: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 176,
-    width: CONTENT_WIDTH * 0.7,
+    width: contentWidth() * 0.7,
     align: "center",
     size: 40,
     lines: 1,
@@ -1533,8 +1533,8 @@ const shotList: Shot = (ctx, scene, plan, theme, options) => {
   const items = scene.bullets.slice(0, 5);
   const size = items.length > 3 ? 34 : 42;
   const lineHeight = size * 1.9;
-  const top = BOARD_HEIGHT * 0.46 - (items.length - 1) * lineHeight * 0.5;
-  const right = BOARD_WIDTH - MARGIN;
+  const top = frameH() * 0.46 - (items.length - 1) * lineHeight * 0.5;
+  const right = frameW() - margin();
 
   let active = -1;
   items.forEach((_, index) => {
@@ -1568,9 +1568,9 @@ const shotList: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: MARGIN,
-    y: BOARD_HEIGHT * 0.42,
-    width: CONTENT_WIDTH * 0.32,
+    x: margin(),
+    y: frameH() * 0.42,
+    width: contentWidth() * 0.32,
     align: "left",
     size: 34,
     lines: 4,
@@ -1592,29 +1592,29 @@ const shotFullBleed: Shot = (ctx, scene, plan, theme, options) => {
   const picture = pictureOf(scene);
 
   if (picture) {
-    const scale = Math.max(BOARD_WIDTH / picture.naturalWidth, BOARD_HEIGHT / picture.naturalHeight);
+    const scale = Math.max(frameW() / picture.naturalWidth, frameH() / picture.naturalHeight);
     // A slow push across the whole scene, so the plate is never a still.
     const push = 1 + (time / Math.max(1, options.duration)) * 0.06;
     const width = picture.naturalWidth * scale * push;
     const height = picture.naturalHeight * scale * push;
     ctx.save();
     ctx.globalAlpha = smootherstep(range(time, 0, 0.8));
-    ctx.drawImage(picture, (BOARD_WIDTH - width) / 2, (BOARD_HEIGHT - height) / 2, width, height);
+    ctx.drawImage(picture, (frameW() - width) / 2, (frameH() - height) / 2, width, height);
     ctx.restore();
   }
 
-  const scrim = ctx.createLinearGradient(0, BOARD_HEIGHT * 0.28, 0, BOARD_HEIGHT);
+  const scrim = ctx.createLinearGradient(0, frameH() * 0.28, 0, frameH());
   scrim.addColorStop(0, withAlpha(theme.ground, 0));
   scrim.addColorStop(0.55, withAlpha(theme.ground, 0.72));
   scrim.addColorStop(1, withAlpha(theme.ground, 0.96));
   ctx.save();
   ctx.fillStyle = scrim;
-  ctx.fillRect(0, BOARD_HEIGHT * 0.28, BOARD_WIDTH, BOARD_HEIGHT * 0.72);
+  ctx.fillRect(0, frameH() * 0.28, frameW(), frameH() * 0.72);
   ctx.restore();
 
   const laid = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * 0.8,
+    maxWidth: contentWidth() * 0.8,
     maxSize: 66,
     minSize: 32,
     weight: 800,
@@ -1623,8 +1623,8 @@ const shotFullBleed: Shot = (ctx, scene, plan, theme, options) => {
     emphasis: scene.keywords,
   });
   drawDisplay(ctx, laid, {
-    x: MARGIN,
-    y: SAFE_BOTTOM - 40 - (laid.lines.length - 1) * laid.lineHeight,
+    x: margin(),
+    y: safeBottom() - 40 - (laid.lines.length - 1) * laid.lineHeight,
     align: "left",
     theme,
     reveal: staggered(plan.heading, laid.count, time, 0.06),
@@ -1633,7 +1633,7 @@ const shotFullBleed: Shot = (ctx, scene, plan, theme, options) => {
   const caption = scene.bullets[0];
   if (caption) {
     const cue = beat(plan, 0);
-    drawRule(ctx, theme, MARGIN, SAFE_BOTTOM - 120 - (laid.lines.length - 1) * laid.lineHeight, 62, range(time, cue.at, cue.at + 0.4), 4);
+    drawRule(ctx, theme, margin(), safeBottom() - 120 - (laid.lines.length - 1) * laid.lineHeight, 62, range(time, cue.at, cue.at + 0.4), 4);
   }
   label(ctx, scene, theme, options);
 };
@@ -1650,11 +1650,11 @@ const shotGrid: Shot = (ctx, scene, plan, theme, options) => {
   const items = scene.bullets.slice(0, 6);
   const columns = items.length <= 4 ? Math.min(items.length, 2) : 3;
   const rows = Math.ceil(items.length / columns);
-  const tile = Math.min(216, (CONTENT_WIDTH - (columns - 1) * 26) / columns);
-  const height = Math.min(tile, (SAFE_BOTTOM - 250 - (rows - 1) * 26) / rows);
+  const tile = Math.min(216, (contentWidth() - (columns - 1) * 26) / columns);
+  const height = Math.min(tile, (safeBottom() - 250 - (rows - 1) * 26) / rows);
   const gridWidth = tile * columns + 26 * (columns - 1);
-  const startX = BOARD_WIDTH / 2 - gridWidth / 2;
-  const startY = BOARD_HEIGHT * 0.52 - (height * rows + 26 * (rows - 1)) / 2 + 40;
+  const startX = frameW() / 2 - gridWidth / 2;
+  const startY = frameH() * 0.52 - (height * rows + 26 * (rows - 1)) / 2 + 40;
 
   items.forEach((item, index) => {
     const cue = beat(plan, index);
@@ -1689,9 +1689,9 @@ const shotGrid: Shot = (ctx, scene, plan, theme, options) => {
   });
 
   heading(ctx, scene, plan, theme, options, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 176,
-    width: CONTENT_WIDTH * 0.72,
+    width: contentWidth() * 0.72,
     align: "center",
     size: 40,
     lines: 1,

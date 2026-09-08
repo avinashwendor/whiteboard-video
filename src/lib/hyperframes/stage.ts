@@ -1,4 +1,5 @@
-import { BOARD_WIDTH } from "@/lib/whiteboard/scene";
+import { frame, frameH, frameW } from "./frame";
+import type { Board } from "@/lib/whiteboard/scene";
 import {
   clamp01,
   easeOutCubic,
@@ -101,6 +102,11 @@ export interface ModernRenderOptions {
   fontPoster?: string;
   /** 0..1 through the whole video, for the chapter rail. */
   globalProgress?: number;
+  /**
+   * The shape being painted. Set on the module before anything is drawn — see
+   * `./frame` for why that is state rather than an argument on every helper.
+   */
+  board?: Board;
 }
 
 
@@ -123,13 +129,30 @@ export function poster(options: ModernRenderOptions): string {
   return options.fontPoster ?? display(options);
 }
 
-export const MARGIN = 96;
-export const CONTENT_WIDTH = BOARD_WIDTH - MARGIN * 2;
+/**
+ * The gutter, the line length, and the floor — all read off the frame.
+ *
+ * A 96-pixel gutter is a tenth of a widescreen frame and a seventh of a
+ * portrait one, which is the difference between breathing room and a column.
+ * The floor is measured up from the bottom rather than written down, so the
+ * subtitle band is the same band whatever shape the frame is.
+ */
+export function margin(): number {
+  return frame().tall ? 64 : 96;
+}
+
+export function contentWidth(): number {
+  return frameW() - margin() * 2;
+}
+
 /**
  * Nothing a shot composes may cross this line: below it lives the subtitle
  * band, and type over type is the fastest way to make a video look unfinished.
  */
-export const SAFE_BOTTOM = 552;
+export function safeBottom(): number {
+  // 552 on the widescreen board, which is where it has always been.
+  return frameH() - (frame().tall ? 236 : 168);
+}
 
 /** Word-by-word entrance timing, in reading order. */
 export function staggered(cue: Cue, count: number, time: number, per = 0.075) {

@@ -1,4 +1,3 @@
-import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
 import {
   clamp,
   clamp01,
@@ -9,6 +8,8 @@ import {
   range,
   smootherstep,
 } from "@/lib/video/easing";
+import { frameH, frameW, setFrame } from "./frame";
+import type { Board } from "@/lib/whiteboard/scene";
 import { lerp } from "@/lib/video/easing";
 import { supportsFilter, withAlpha } from "@/lib/video/grade";
 import {
@@ -24,9 +25,9 @@ import type { SceneRole } from "./roles";
 import { panelAt, planPanels, type Panel } from "./casting";
 import { EXTRA_SHOTS } from "./screens";
 import {
-  CONTENT_WIDTH,
-  MARGIN,
-  SAFE_BOTTOM,
+  contentWidth,
+  margin,
+  safeBottom,
   display,
   drawChromeLine,
   drawMark,
@@ -124,7 +125,18 @@ export function planModernScene(
   recentRoles?: SceneRole[],
   /** Glyphs already used in this video, so no two frames wear the same one. */
   usedGlyphs?: Set<string>,
+  /**
+   * The shape being planned for.
+   *
+   * Planning measures — a card's box, where a glyph can sit without leaving the
+   * frame — so it needs the frame as much as painting does, and it happens in a
+   * separate pass. Without this the plan would be laid out against whatever
+   * shape was painted last, which on a first render is the default and on a
+   * later one is right by luck.
+   */
+  board?: Board,
 ): ModernPlan {
+  setFrame(board);
   const { lead, speech, tail } = timing;
 
   /**
@@ -236,10 +248,10 @@ function shotHero(
   const picture = pictureOf(scene);
 
   const card = {
-    x: MARGIN * 0.62,
+    x: margin() * 0.62,
     y: 70,
-    width: BOARD_WIDTH - MARGIN * 1.55,
-    height: SAFE_BOTTOM - 88,
+    width: frameW() - margin() * 1.55,
+    height: safeBottom() - 88,
   };
   drawSurface(ctx, card, theme, {
     fill: theme.accent,
@@ -324,7 +336,7 @@ function shotHero(
     drawFramedPhoto(ctx, picture, {
       // Overlapping the card edge, but never the frame edge -- a picture the
       // canvas crops looks like a mistake rather than a composition.
-      x: Math.min(card.x + card.width - size * 0.46, BOARD_WIDTH - size - 26),
+      x: Math.min(card.x + card.width - size * 0.46, frameW() - size - 26),
       y: card.y + card.height * 0.46 - size / 2,
       width: size,
       height: size,
@@ -365,14 +377,14 @@ function shotStatement(
   drawEdgeShape(
     ctx,
     "circle",
-    { x: BOARD_WIDTH * 0.52, y: 96 + drift, width: 420, height: 420 },
+    { x: frameW() * 0.52, y: 96 + drift, width: 420, height: 420 },
     theme.surface,
     0.9 * enter,
   );
 
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * (picture ? 0.62 : 0.86),
+    maxWidth: contentWidth() * (picture ? 0.62 : 0.86),
     maxSize: 92,
     minSize: 42,
     weight: 800,
@@ -381,10 +393,10 @@ function shotStatement(
     emphasis: scene.keywords,
   });
 
-  const baseY = BOARD_HEIGHT * 0.44 - heading.height / 2 + heading.size * 0.82;
+  const baseY = frameH() * 0.44 - heading.height / 2 + heading.size * 0.82;
 
   drawEyebrow(ctx, eyebrowFor(scene), {
-    x: MARGIN,
+    x: margin(),
     y: baseY - heading.size * 0.95 - 40,
     align: "left",
     theme,
@@ -393,7 +405,7 @@ function shotStatement(
   });
 
   drawDisplay(ctx, heading, {
-    x: MARGIN,
+    x: margin(),
     y: baseY,
     align: "left",
     theme,
@@ -404,8 +416,8 @@ function shotStatement(
 
   const kicker = scene.bullets[0];
   if (kicker && plan.beats[0]) {
-    drawBodyLines(ctx, wrapAt(ctx, kicker, options.fontSans, 29, CONTENT_WIDTH * 0.54, 2), {
-      x: MARGIN,
+    drawBodyLines(ctx, wrapAt(ctx, kicker, options.fontSans, 29, contentWidth() * 0.54, 2), {
+      x: margin(),
       y: baseY + (heading.lines.length - 1) * heading.lineHeight + 78,
       align: "left",
       theme,
@@ -417,7 +429,7 @@ function shotStatement(
   }
 
   if (!picture) {
-    drawMark(ctx, scene, plan, 0, BOARD_WIDTH - MARGIN - 96, 214, 168, theme, {
+    drawMark(ctx, scene, plan, 0, frameW() - margin() - 96, 214, 168, theme, {
       enter: smootherstep(range(time, 0.35, 1.05)),
       time,
       tilt: 9,
@@ -427,7 +439,7 @@ function shotStatement(
 
   if (picture) {
     drawFramedPhoto(ctx, picture, {
-      x: BOARD_WIDTH - MARGIN - 330,
+      x: frameW() - margin() - 330,
       y: 132,
       width: 330,
       height: 300,
@@ -458,13 +470,13 @@ function shotSplit(
   const mediaLeft = scene.index % 2 === 0;
 
   const mediaBox = {
-    x: mediaLeft ? MARGIN : BOARD_WIDTH - MARGIN - 470,
+    x: mediaLeft ? margin() : frameW() - margin() - 470,
     y: 118,
     width: 470,
     height: 372,
   };
-  const textX = mediaLeft ? MARGIN + 470 + 62 : MARGIN;
-  const textWidth = CONTENT_WIDTH - 470 - 62;
+  const textX = mediaLeft ? margin() + 470 + 62 : margin();
+  const textWidth = contentWidth() - 470 - 62;
 
   if (picture) {
     drawFramedPhoto(ctx, picture, mediaBox, {
@@ -572,8 +584,8 @@ function shotMetric(
   const enter = smootherstep(range(time, 0, 0.8));
 
   const cardBox = picture
-    ? { x: MARGIN, y: 128, width: CONTENT_WIDTH * 0.52, height: 352 }
-    : { x: BOARD_WIDTH / 2 - 420, y: 132, width: 840, height: 348 };
+    ? { x: margin(), y: 128, width: contentWidth() * 0.52, height: 352 }
+    : { x: frameW() / 2 - 420, y: 132, width: 840, height: 348 };
 
   drawSurface(ctx, cardBox, theme, {
     fill: theme.card,
@@ -638,7 +650,7 @@ function shotMetric(
     drawFramedPhoto(ctx, picture, {
       x: cardBox.x + cardBox.width + 54,
       y: 128,
-      width: CONTENT_WIDTH - cardBox.width - 54,
+      width: contentWidth() - cardBox.width - 54,
       height: 352,
     }, {
       time,
@@ -650,7 +662,7 @@ function shotMetric(
   } else {
     const heading = layoutDisplay(ctx, scene.heading, {
       family: display(options),
-      maxWidth: CONTENT_WIDTH * 0.7,
+      maxWidth: contentWidth() * 0.7,
       maxSize: 44,
       minSize: 26,
       weight: 700,
@@ -658,7 +670,7 @@ function shotMetric(
       lineRatio: 1.12,
     });
     drawDisplay(ctx, heading, {
-      x: BOARD_WIDTH / 2,
+      x: frameW() / 2,
       y: cardBox.y + cardBox.height + 82,
       align: "center",
       theme,
@@ -689,7 +701,7 @@ function shotProcess(
 
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * 0.8,
+    maxWidth: contentWidth() * 0.8,
     maxSize: 58,
     minSize: 32,
     weight: 800,
@@ -698,7 +710,7 @@ function shotProcess(
   });
 
   drawDisplay(ctx, heading, {
-    x: MARGIN,
+    x: margin(),
     y: 118,
     align: "left",
     theme,
@@ -711,16 +723,16 @@ function shotProcess(
   ctx.save();
   ctx.globalAlpha = enter;
   ctx.fillStyle = withAlpha(theme.accent, theme.dark ? 0.22 : 0.34);
-  ctx.fillRect(0, bandY, BOARD_WIDTH * easeOutQuint(enter), bandHeight);
+  ctx.fillRect(0, bandY, frameW() * easeOutQuint(enter), bandHeight);
   ctx.restore();
 
   const steps = scene.bullets.slice(0, 3);
   const gap = 46;
   // Cards keep the width they would have in a row of three, so two steps do
   // not stretch into slabs -- the row is centred in the gap instead.
-  const cardWidth = (CONTENT_WIDTH - gap * 2) / 3;
+  const cardWidth = (contentWidth() - gap * 2) / 3;
   const rowWidth = cardWidth * steps.length + gap * (steps.length - 1);
-  const rowX = (BOARD_WIDTH - rowWidth) / 2;
+  const rowX = (frameW() - rowWidth) / 2;
   const cardHeight = 196;
   const cardY = bandY + bandHeight / 2 - cardHeight / 2;
 
@@ -803,7 +815,7 @@ function shotContrast(
 
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH * 0.78,
+    maxWidth: contentWidth() * 0.78,
     maxSize: 54,
     minSize: 30,
     weight: 800,
@@ -812,7 +824,7 @@ function shotContrast(
   });
 
   drawDisplay(ctx, heading, {
-    x: MARGIN,
+    x: margin(),
     y: 112,
     align: "left",
     theme,
@@ -822,9 +834,9 @@ function shotContrast(
 
   const pair = scene.bullets.slice(0, 2);
   const gap = 44;
-  const cardWidth = (CONTENT_WIDTH - gap) / 2;
+  const cardWidth = (contentWidth() - gap) / 2;
   const cardY = 196;
-  const cardHeight = SAFE_BOTTOM - cardY - 16;
+  const cardHeight = safeBottom() - cardY - 16;
 
   pair.forEach((entry, index) => {
     const cue = plan.beats[index];
@@ -832,7 +844,7 @@ function shotContrast(
     const reveal = smootherstep(range(time, cue.at, cue.at + 0.55));
     if (reveal <= 0) return;
 
-    const x = MARGIN + index * (cardWidth + gap);
+    const x = margin() + index * (cardWidth + gap);
     drawSurface(ctx, { x, y: cardY, width: cardWidth, height: cardHeight }, theme, {
       fill: theme.surface,
       radius: 30,
@@ -894,14 +906,14 @@ function shotTakeaway(
   ctx.save();
   ctx.globalAlpha = enter;
   ctx.fillStyle = theme.accent;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
   ctx.restore();
 
   drawOutlineNumeral(
     ctx,
     String(scene.index + 1).padStart(2, "0"),
-    MARGIN * 0.34,
-    SAFE_BOTTOM * 0.74,
+    margin() * 0.34,
+    safeBottom() * 0.74,
     300,
     {
       family: options.fontSans,
@@ -914,7 +926,7 @@ function shotTakeaway(
     },
   );
 
-  drawMark(ctx, scene, plan, 0, MARGIN * 1.1, SAFE_BOTTOM - 40, 92, theme, {
+  drawMark(ctx, scene, plan, 0, margin() * 1.1, safeBottom() - 40, 92, theme, {
     enter: smootherstep(range(time, 0.5, 1.15)),
     time,
     tilt: -10,
@@ -922,10 +934,10 @@ function shotTakeaway(
   });
 
   const card = {
-    x: BOARD_WIDTH * 0.345,
+    x: frameW() * 0.345,
     y: 122,
-    width: BOARD_WIDTH * 0.74,
-    height: SAFE_BOTTOM - 210,
+    width: frameW() * 0.74,
+    height: safeBottom() - 210,
   };
   drawSurface(ctx, card, theme, {
     fill: theme.card,
@@ -937,7 +949,7 @@ function shotTakeaway(
 
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: BOARD_WIDTH * 0.46,
+    maxWidth: frameW() * 0.46,
     maxSize: 70,
     minSize: 34,
     weight: 700,
@@ -959,7 +971,7 @@ function shotTakeaway(
   });
 
   if (kicker && plan.beats[0]) {
-    drawBodyLines(ctx, wrapAt(ctx, kicker, options.fontSans, 30, BOARD_WIDTH * 0.42, 2), {
+    drawBodyLines(ctx, wrapAt(ctx, kicker, options.fontSans, 30, frameW() * 0.42, 2), {
       x: card.x + 78,
       y: baseY + (heading.lines.length - 1) * heading.lineHeight + 66,
       align: "left",
@@ -1010,8 +1022,8 @@ export function drawSubtitles(
   const widths = phrase.words.map((entry) => ctx.measureText(entry.word).width);
   const total = widths.reduce((sum, width) => sum + width, 0) + gap * (widths.length - 1);
 
-  const baseline = BOARD_HEIGHT - 74;
-  const left = (BOARD_WIDTH - total) / 2;
+  const baseline = frameH() - 74;
+  const left = (frameW() - total) / 2;
 
   // Every word's box up front, so the marker can be placed between two of them
   // rather than redrawn from scratch on each one.
@@ -1035,7 +1047,7 @@ export function drawSubtitles(
     scrim.addColorStop(0.45, withAlpha(ground, 0.92));
     scrim.addColorStop(1, withAlpha(ground, 1));
     ctx.fillStyle = scrim;
-    ctx.fillRect(0, baseline - 82, BOARD_WIDTH, 126);
+    ctx.fillRect(0, baseline - 82, frameW(), 126);
   } else {
     const padding = 30;
     const pill = {
@@ -1130,12 +1142,12 @@ function drawChapterRail(
   index: number,
   total: number,
 ) {
-  const y = BOARD_HEIGHT - 5;
+  const y = frameH() - 5;
   ctx.save();
   ctx.fillStyle = withAlpha(theme.ink, 0.1);
-  ctx.fillRect(0, y, BOARD_WIDTH, 3);
+  ctx.fillRect(0, y, frameW(), 3);
 
-  const width = BOARD_WIDTH * clamp01(progress);
+  const width = frameW() * clamp01(progress);
   ctx.fillStyle = theme.accent;
   ctx.fillRect(0, y, width, 3);
   ctx.restore();
@@ -1144,7 +1156,7 @@ function drawChapterRail(
   if (total <= 1) return;
   ctx.save();
   for (let i = 1; i < total; i += 1) {
-    const x = (BOARD_WIDTH * i) / total;
+    const x = (frameW() * i) / total;
     ctx.fillStyle = withAlpha(theme.ink, i <= index ? 0.5 : 0.22);
     ctx.fillRect(x - 1, y - 2, 2, 7);
   }
@@ -1195,8 +1207,8 @@ function shotBracket(
   const plateWidth = 302;
   const plateHeight = 384;
   const plate = {
-    x: BOARD_WIDTH / 2 - plateWidth / 2,
-    y: BOARD_HEIGHT * 0.47 - plateHeight / 2,
+    x: frameW() / 2 - plateWidth / 2,
+    y: frameH() * 0.47 - plateHeight / 2,
     width: plateWidth,
     height: plateHeight,
   };
@@ -1264,10 +1276,10 @@ function shotBracket(
   });
   ctx.restore();
 
-  drawSectionMark(ctx, theme, MARGIN * 0.7, 78, eyebrowFor(scene), {
+  drawSectionMark(ctx, theme, margin() * 0.7, 78, eyebrowFor(scene), {
     family: options.fontSans,
     progress: range(time, 0.1, 0.7),
-    width: BOARD_WIDTH - MARGIN * 0.7,
+    width: frameW() - margin() * 0.7,
   });
 }
 
@@ -1296,7 +1308,7 @@ function shotDeck(
   const spread = 52;
   const totalWidth = cardWidth + spread * (count - 1);
   const box = {
-    x: BOARD_WIDTH / 2 - totalWidth / 2,
+    x: frameW() / 2 - totalWidth / 2,
     y: 246,
     width: cardWidth,
     height: cardHeight,
@@ -1321,7 +1333,7 @@ function shotDeck(
   /* the count, in metal, above the deck */
   const label = `${count} ${(scene.keywords?.[0]?.trim() || "things").toLowerCase()}`;
   drawChromeLine(ctx, label, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: 186,
     size: 96,
     family: display(options),
@@ -1368,10 +1380,10 @@ function shotDeck(
     });
   }
 
-  drawSectionMark(ctx, theme, MARGIN * 0.7, 82, scene.heading, {
+  drawSectionMark(ctx, theme, margin() * 0.7, 82, scene.heading, {
     family: options.fontSans,
     progress: range(time, 0.05, 0.6),
-    width: BOARD_WIDTH - MARGIN * 0.7,
+    width: frameW() - margin() * 0.7,
   });
 }
 
@@ -1400,7 +1412,7 @@ function shotTree(
   const enter = smootherstep(range(time, plan.heading.at, plan.heading.at + 0.65));
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: BOARD_WIDTH * 0.62,
+    maxWidth: frameW() * 0.62,
     maxSize: 64,
     minSize: 34,
     weight: 800,
@@ -1408,10 +1420,10 @@ function shotTree(
     lineRatio: 1.1,
   });
 
-  const pillWidth = Math.min(BOARD_WIDTH * 0.72, heading.lines[0]?.width ?? 400) + 108;
+  const pillWidth = Math.min(frameW() * 0.72, heading.lines[0]?.width ?? 400) + 108;
   const pillHeight = heading.height + 58;
   const pill = {
-    x: BOARD_WIDTH / 2 - pillWidth / 2,
+    x: frameW() / 2 - pillWidth / 2,
     y: 92,
     width: pillWidth,
     height: pillHeight,
@@ -1419,7 +1431,7 @@ function shotTree(
   drawSurface(ctx, pill, theme, { enter, radius: pillHeight / 2, glow: 1.2 });
 
   drawDisplay(ctx, heading, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: pill.y + pillHeight / 2 + heading.size * 0.34 - (heading.lines.length - 1) * heading.lineHeight * 0.5,
     align: "center",
     theme,
@@ -1430,18 +1442,18 @@ function shotTree(
   /* the routes */
   const busY = pill.y + pill.height + 108;
   const nodeY = busY + 96;
-  const spread = Math.min(BOARD_WIDTH * 0.66, 210 * count);
+  const spread = Math.min(frameW() * 0.66, 210 * count);
   const step = count > 1 ? spread / (count - 1) : 0;
-  const firstX = BOARD_WIDTH / 2 - spread / 2;
+  const firstX = frameW() / 2 - spread / 2;
 
   items.forEach((item, index) => {
     const cue = plan.beats[index] ?? plan.heading;
     const draw = range(time, cue.at, cue.at + 0.7);
-    const x = count > 1 ? firstX + step * index : BOARD_WIDTH / 2;
+    const x = count > 1 ? firstX + step * index : frameW() / 2;
 
     const route: Point[] = [
-      { x: BOARD_WIDTH / 2, y: pill.y + pill.height + 6 },
-      { x: BOARD_WIDTH / 2, y: busY },
+      { x: frameW() / 2, y: pill.y + pill.height + 6 },
+      { x: frameW() / 2, y: busY },
       { x, y: busY },
       { x, y: nodeY - 30 },
     ];
@@ -1572,7 +1584,7 @@ function shotCollage(
   /* the heading, sitting under the spread on one line */
   const heading = layoutDisplay(ctx, scene.heading, {
     family: display(options),
-    maxWidth: CONTENT_WIDTH,
+    maxWidth: contentWidth(),
     maxSize: 46,
     minSize: 28,
     weight: 800,
@@ -1581,18 +1593,18 @@ function shotCollage(
     emphasis: scene.keywords,
   });
   drawDisplay(ctx, heading, {
-    x: BOARD_WIDTH / 2,
-    y: SAFE_BOTTOM - 6,
+    x: frameW() / 2,
+    y: safeBottom() - 6,
     align: "center",
     theme,
     shadow: false,
     reveal: staggered(plan.heading, heading.count, time, 0.06),
   });
 
-  drawSectionMark(ctx, theme, MARGIN * 0.7, 74, eyebrowFor(scene), {
+  drawSectionMark(ctx, theme, margin() * 0.7, 74, eyebrowFor(scene), {
     family: options.fontSans,
     progress: range(time, 0.05, 0.6),
-    width: BOARD_WIDTH - MARGIN * 0.7,
+    width: frameW() - margin() * 0.7,
   });
 }
 
@@ -1771,9 +1783,9 @@ function drawFurniture(
     // panel look lit rather than merely translucent.
     drawBloom(
       ctx,
-      BOARD_WIDTH * (0.5 + noise1(time * 0.06, 13) * 0.16),
-      BOARD_HEIGHT * (0.42 + noise1(time * 0.05, 29) * 0.12),
-      BOARD_WIDTH * 0.44,
+      frameW() * (0.5 + noise1(time * 0.06, 13) * 0.16),
+      frameH() * (0.42 + noise1(time * 0.05, 29) * 0.12),
+      frameW() * 0.44,
       theme.accentAlt,
       0.18,
     );
@@ -1825,6 +1837,9 @@ export function renderModernScene(
   plan: ModernPlan,
   options: ModernRenderOptions,
 ) {
+  // First, before a single stroke: every helper below reads the frame off the
+  // module rather than taking it as an argument.
+  setFrame(options.board);
   const theme = themeOf(scene.visualTheme);
   const { panel, index: panelIndex } = panelAt(plan.panels, options.time);
   const view = viewFor(scene, plan, panel);
@@ -1864,9 +1879,9 @@ export function renderModernScene(
   if (transition.blur > 0.2 && supportsFilter(ctx)) {
     ctx.filter = `blur(${transition.blur.toFixed(2)}px)`;
   }
-  ctx.translate(BOARD_WIDTH / 2 + transition.shift, BOARD_HEIGHT / 2);
+  ctx.translate(frameW() / 2 + transition.shift, frameH() / 2);
   ctx.scale(transition.scale * push, transition.scale * push);
-  ctx.translate(-BOARD_WIDTH / 2 + driftX, -BOARD_HEIGHT / 2 + driftY);
+  ctx.translate(-frameW() / 2 + driftX, -frameH() / 2 + driftY);
 
   // The ground is whatever the palette's finish is made of. A screen that
   // wants its picture behind the type washes it over the ground itself; the
@@ -1912,7 +1927,7 @@ export function renderModernScene(
     ctx.save();
     ctx.globalAlpha = clamp(transition.dip, 0, 1);
     ctx.fillStyle = theme.ground;
-    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.fillRect(0, 0, frameW(), frameH());
     ctx.restore();
   }
 }
@@ -1938,10 +1953,12 @@ export function renderModernCover(
     fontDisplay?: string;
     fontPoster?: string;
     progress: number;
+    board?: Board;
     theme?: ThemeName;
     image?: HTMLImageElement | null;
   },
 ) {
+  setFrame(options.board);
   const theme = themeOf(options.theme);
   const p = clamp01(options.progress);
   const time = p * 3;
@@ -1967,7 +1984,7 @@ export function renderModernCover(
     drawEdgeShape(
       ctx,
       "circle",
-      { x: BOARD_WIDTH - 150, y: BOARD_HEIGHT - 190, width: 320, height: 320 },
+      { x: frameW() - 150, y: frameH() - 190, width: 320, height: 320 },
       theme.surface,
       0.85,
     );
@@ -1989,7 +2006,7 @@ export function renderModernCover(
 
   const title = layoutDisplay(ctx, options.title, {
     family: titleFace,
-    maxWidth: CONTENT_WIDTH * 0.84,
+    maxWidth: contentWidth() * 0.84,
     maxSize: 92,
     minSize: 44,
     weight: 900,
@@ -1997,23 +2014,23 @@ export function renderModernCover(
     lineRatio: 1.02,
   });
 
-  const centreY = BOARD_HEIGHT * 0.52 - title.height / 2 + title.size;
+  const centreY = frameH() * 0.52 - title.height / 2 + title.size;
   // Still settling when it cuts away: the push runs past the end of the plate.
   const push = 1 + (1 - easeOutCubic(p)) * 0.05;
 
   ctx.save();
-  ctx.translate(BOARD_WIDTH / 2, BOARD_HEIGHT / 2);
+  ctx.translate(frameW() / 2, frameH() / 2);
   ctx.scale(push, push);
-  ctx.translate(-BOARD_WIDTH / 2, -BOARD_HEIGHT / 2);
+  ctx.translate(-frameW() / 2, -frameH() / 2);
 
-  drawRule(ctx, theme, BOARD_WIDTH / 2 - 44, centreY - title.size - 58, 88, range(p, 0.02, 0.3), 5);
+  drawRule(ctx, theme, frameW() / 2 - 44, centreY - title.size - 58, 88, range(p, 0.02, 0.3), 5);
 
   if (theme.finish !== "print" && theme.dark) {
     // Metal, line by line, so a two-line title still arrives as two beats.
     title.lines.forEach((line, index) => {
       const text = line.words.map((word) => word.text).join(" ");
       drawChromeLine(ctx, text, {
-        x: BOARD_WIDTH / 2,
+        x: frameW() / 2,
         y: centreY + index * title.lineHeight,
         size: title.size,
         family: title.family,
@@ -2023,7 +2040,7 @@ export function renderModernCover(
     });
   } else {
     drawDisplay(ctx, title, {
-      x: BOARD_WIDTH / 2,
+      x: frameW() / 2,
       y: centreY,
       align: "center",
       theme,
@@ -2034,9 +2051,9 @@ export function renderModernCover(
   if (options.description) {
     drawBodyLines(
       ctx,
-      wrapAt(ctx, options.description, options.fontSans, 29, CONTENT_WIDTH * 0.7, 2),
+      wrapAt(ctx, options.description, options.fontSans, 29, contentWidth() * 0.7, 2),
       {
-        x: BOARD_WIDTH / 2,
+        x: frameW() / 2,
         y: centreY + (title.lines.length - 1) * title.lineHeight + 68,
         align: "center",
         theme,
@@ -2057,7 +2074,7 @@ export function renderModernCover(
     ctx.save();
     ctx.globalAlpha = clamp(dip, 0, 1);
     ctx.fillStyle = theme.ground;
-    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.fillRect(0, 0, frameW(), frameH());
     ctx.restore();
   }
 }
@@ -2083,9 +2100,11 @@ export function renderModernOutro(
     fontDisplay?: string;
     fontPoster?: string;
     progress: number;
+    board?: Board;
     theme?: ThemeName;
   },
 ) {
+  setFrame(options.board);
   const theme = themeOf(options.theme);
   const p = clamp01(options.progress);
   const time = p * 4;
@@ -2109,13 +2128,13 @@ export function renderModernOutro(
     }
     drawFrameRule(ctx, theme, 34, range(p, 0.05, 0.5));
   } else if (theme.finish === "glass") {
-    drawBloom(ctx, BOARD_WIDTH / 2, BOARD_HEIGHT * 0.44, BOARD_WIDTH * 0.4, theme.accentAlt, 0.2);
+    drawBloom(ctx, frameW() / 2, frameH() * 0.44, frameW() * 0.4, theme.accentAlt, 0.2);
   }
 
   /* the takeaway */
   const line = layoutDisplay(ctx, options.description, {
     family: titleFace,
-    maxWidth: CONTENT_WIDTH * 0.86,
+    maxWidth: contentWidth() * 0.86,
     maxSize: 62,
     minSize: 32,
     weight: 800,
@@ -2123,13 +2142,13 @@ export function renderModernOutro(
     lineRatio: 1.14,
   });
 
-  const centreY = BOARD_HEIGHT * 0.47 - line.height / 2 + line.size;
+  const centreY = frameH() * 0.47 - line.height / 2 + line.size;
 
   // A rule above it, the same mark the film opened on.
-  drawRule(ctx, theme, BOARD_WIDTH / 2 - 44, centreY - line.size - 62, 88, range(p, 0.04, 0.3), 5);
+  drawRule(ctx, theme, frameW() / 2 - 44, centreY - line.size - 62, 88, range(p, 0.04, 0.3), 5);
 
   drawDisplay(ctx, line, {
-    x: BOARD_WIDTH / 2,
+    x: frameW() / 2,
     y: centreY,
     align: "center",
     theme,
@@ -2149,7 +2168,7 @@ export function renderModernOutro(
     ctx.fillStyle = theme.inkMuted;
     ctx.fillText(
       options.title.toUpperCase(),
-      BOARD_WIDTH / 2,
+      frameW() / 2,
       centreY + (line.lines.length - 1) * line.lineHeight + 86,
     );
     ctx.letterSpacing = "0px";
@@ -2162,7 +2181,7 @@ export function renderModernOutro(
     ctx.save();
     ctx.globalAlpha = clamp(dip, 0, 1);
     ctx.fillStyle = theme.ground;
-    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.fillRect(0, 0, frameW(), frameH());
     ctx.restore();
   }
 }

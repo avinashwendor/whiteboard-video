@@ -60,7 +60,8 @@
     "test:join": "tsx tests/join-test.ts",
     "test:motiongfx": "tsx tests/motion-graphics-test.ts",
     "test:wired": "tsx tests/wired-test.ts",
-    "test:handoff": "tsx tests/handoff-test.ts"
+    "test:handoff": "tsx tests/handoff-test.ts",
+    "test:boards": "tsx tests/board-shapes-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

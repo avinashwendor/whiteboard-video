@@ -21,7 +21,8 @@ import type { ProjectAsset, SceneAsset } from "@/lib/studio/types";
 import { clamp01, range, smootherstep } from "@/lib/video/easing";
 import { boardStock, setBoardStock } from "@/lib/whiteboard/palette";
 import { resolveWordTimings, type WordTiming } from "@/lib/video/timing";
-import { BOARD_HEIGHT, BOARD_WIDTH, renderCover, renderFrame, renderOutro } from "./renderer";
+import { renderCover, renderFrame, renderOutro } from "./renderer";
+import { boardOf } from "@/lib/whiteboard/scene";
 import {
   planModernScene,
   renderModernCover,
@@ -243,6 +244,18 @@ export function WhiteboardPlayer({
   const coverDuration = project.introDuration ?? DEFAULT_COVER_SECONDS;
   const voiceDelay = project.voiceDelay ?? DEFAULT_VOICE_DELAY;
   const isHyperframes = project.videoStyle === "hyperframes";
+  /**
+   * The shape everything is drawn in.
+   *
+   * One value, read once, used for the canvas, every render call and the
+   * export — so a vertical project cannot end up with a widescreen preview and
+   * a vertical file, or the other way round.
+   *
+   * Called `shape` rather than `board`: inside the schedule below, a "board" is
+   * one scene's prepared drawing, and two meanings of the same word in one
+   * component is how the wrong one gets passed.
+   */
+  const shape = useMemo(() => boardOf(project.format), [project.format]);
 
   const playable = useMemo(
     () =>
@@ -291,7 +304,7 @@ export function WhiteboardPlayer({
       // lays itself out in the narrower column rather than being covered.
       const board =
         !isHyperframes && scene.scene
-          ? prepareScene(scene.scene, { photo: Boolean(scene.image?.url) })
+          ? prepareScene(scene.scene, { photo: Boolean(scene.image?.url), board: shape })
           : null;
       const timing = { lead, speech, tail };
 
@@ -331,6 +344,7 @@ export function WhiteboardPlayer({
           { lead: entry.lead, speech: entry.speech, tail: entry.tail },
           recentRoles,
           usedGlyphs,
+          shape,
         );
         recentRoles.push(entry.modern.role);
       });
@@ -343,8 +357,13 @@ export function WhiteboardPlayer({
     // composed, not when it is painted. Without it, switching to a chalkboard
     // repaints the paper dark and leaves the drawing in the ink it was built
     // with -- a board that is genuinely there and completely invisible.
+    //
+    // `shape` is here for the same reason and it matters more: a layout is
+    // *arranged* for its frame, not scaled into it, so a board composed as a
+    // row of four and then painted into a vertical frame is a row of four
+    // hanging off both edges.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenes, voiceDelay, isHyperframes, project.boardStock]);
+  }, [scenes, voiceDelay, isHyperframes, project.boardStock, shape]);
 
   useEffect(
     () => () => {
@@ -412,13 +431,13 @@ export function WhiteboardPlayer({
   const [renderable, setRenderable] = useState<boolean | null>(null);
   useEffect(() => {
     let alive = true;
-    void canRenderOffline(BOARD_WIDTH, BOARD_HEIGHT, EXPORT_FPS).then((ok) => {
+    void canRenderOffline(shape.width, shape.height, EXPORT_FPS).then((ok) => {
       if (alive) setRenderable(ok);
     });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [shape.width, shape.height]);
   /** Fullscreen puts the controls out of reach, so they move onto the stage. */
   const [immersive, setImmersive] = useState(false);
   /** The bed the director asked for, if any. */
@@ -500,6 +519,7 @@ export function WhiteboardPlayer({
             progress,
             image: images[0] ?? null,
             theme: scenes[0]?.visualTheme,
+            board: shape,
           });
         } else {
           renderCover(ctx, {
@@ -508,6 +528,7 @@ export function WhiteboardPlayer({
             fontHand: fonts.hand,
             fontSans: fonts.sans,
             progress,
+            board: shape,
           });
         }
         return;
@@ -527,6 +548,7 @@ export function WhiteboardPlayer({
             fontPoster: fonts.poster,
             progress,
             theme: scenes[scenes.length - 1]?.visualTheme ?? scenes[0]?.visualTheme,
+            board: shape,
           });
           return;
         }
@@ -536,6 +558,7 @@ export function WhiteboardPlayer({
           fontHand: fonts.hand,
           fontSans: fonts.sans,
           progress,
+          board: shape,
         });
         return;
       }
@@ -572,6 +595,7 @@ export function WhiteboardPlayer({
             fontDisplay: fonts.display,
             fontPoster: fonts.poster,
             globalProgress: clamp01((before + time) / total),
+            board: shape,
           },
         );
         return;
@@ -592,6 +616,7 @@ export function WhiteboardPlayer({
           cues: entry.cues,
           fontHand: fonts.hand,
           fontSans: fonts.sans,
+          board: shape,
         },
       );
 
@@ -608,11 +633,12 @@ export function WhiteboardPlayer({
         ctx.save();
         ctx.globalAlpha = veil;
         ctx.fillStyle = boardStock().colours.paper;
-        ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+        ctx.fillRect(0, 0, shape.width, shape.height);
         ctx.restore();
       }
     },
     [
+      shape,
       coverDuration,
       durations,
       fonts,
@@ -1251,8 +1277,8 @@ export function WhiteboardPlayer({
           });
 
           const blob = await exportVideoFile({
-            width: BOARD_WIDTH,
-            height: BOARD_HEIGHT,
+            width: shape.width,
+            height: shape.height,
             fps: EXPORT_FPS,
             duration: total,
             paint: paintAt,
@@ -1364,6 +1390,8 @@ export function WhiteboardPlayer({
     }
   }, [
     advance,
+    shape.width,
+    shape.height,
     coverDuration,
     durations,
     exporting,
@@ -1597,8 +1625,8 @@ export function WhiteboardPlayer({
       >
         <canvas
           ref={canvasRef}
-          width={BOARD_WIDTH}
-          height={BOARD_HEIGHT}
+          width={shape.width}
+          height={shape.height}
           className={cn(
             "block aspect-video",
             immersive ? "max-h-full max-w-full object-contain" : "w-full",

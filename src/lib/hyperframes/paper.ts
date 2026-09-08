@@ -1,5 +1,5 @@
-import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
 import { clamp01, easeOutBack, noise1, smootherstep, range } from "@/lib/video/easing";
+import { frameH, frameW } from "./frame";
 import { EMOJI_FONT } from "./emoji";
 import type { Theme } from "./theme";
 
@@ -42,7 +42,7 @@ export function drawGround(
 
   ctx.save();
   ctx.fillStyle = theme.ground;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
 
   const drift = (time * 1.6) % cell;
   ctx.strokeStyle = theme.grid;
@@ -50,8 +50,8 @@ export function drawGround(
   ctx.lineWidth = 1;
 
   if (options.dots) {
-    for (let y = -cell + drift; y < BOARD_HEIGHT + cell; y += cell) {
-      for (let x = -cell + drift; x < BOARD_WIDTH + cell; x += cell) {
+    for (let y = -cell + drift; y < frameH() + cell; y += cell) {
+      for (let x = -cell + drift; x < frameW() + cell; x += cell) {
         ctx.beginPath();
         ctx.arc(x, y, 1.6, 0, Math.PI * 2);
         ctx.fill();
@@ -59,13 +59,13 @@ export function drawGround(
     }
   } else {
     ctx.beginPath();
-    for (let x = -cell + drift; x < BOARD_WIDTH + cell; x += cell) {
+    for (let x = -cell + drift; x < frameW() + cell; x += cell) {
       ctx.moveTo(Math.round(x) + 0.5, 0);
-      ctx.lineTo(Math.round(x) + 0.5, BOARD_HEIGHT);
+      ctx.lineTo(Math.round(x) + 0.5, frameH());
     }
-    for (let y = -cell + drift; y < BOARD_HEIGHT + cell; y += cell) {
+    for (let y = -cell + drift; y < frameH() + cell; y += cell) {
       ctx.moveTo(0, Math.round(y) + 0.5);
-      ctx.lineTo(BOARD_WIDTH, Math.round(y) + 0.5);
+      ctx.lineTo(frameW(), Math.round(y) + 0.5);
     }
     ctx.stroke();
   }
@@ -328,7 +328,7 @@ export function drawWashedPhoto(
 ) {
   if (!image.complete || image.naturalWidth <= 0) return;
 
-  const full: Box = { x: 0, y: 0, width: BOARD_WIDTH, height: BOARD_HEIGHT };
+  const full: Box = { x: 0, y: 0, width: frameW(), height: frameH() };
   ctx.save();
   const progress = clamp01(options.time / Math.max(0.001, options.duration));
   const eased = smootherstep(progress);
@@ -336,16 +336,16 @@ export function drawWashedPhoto(
   const zoom = 1.1 + eased * 0.08;
   const fitted = contain(image, full);
 
-  ctx.translate(BOARD_WIDTH / 2 + direction * 30 * (eased - 0.5) * 2, BOARD_HEIGHT / 2);
+  ctx.translate(frameW() / 2 + direction * 30 * (eased - 0.5) * 2, frameH() / 2);
   ctx.scale(zoom, zoom);
-  ctx.translate(-BOARD_WIDTH / 2, -BOARD_HEIGHT / 2);
+  ctx.translate(-frameW() / 2, -frameH() / 2);
   ctx.drawImage(image, fitted.x, fitted.y, fitted.width, fitted.height);
   ctx.restore();
 
   ctx.save();
   ctx.fillStyle = theme.ground;
   ctx.globalAlpha = options.wash ?? 0.82;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
   ctx.restore();
 }
 

@@ -1,6 +1,12 @@
 "use client";
 
-import { composeScene, type Beat, type Prim, type SceneSpec } from "@/lib/whiteboard/scene";
+import {
+  composeScene,
+  type Beat,
+  type ComposeOptions,
+  type Prim,
+  type SceneSpec,
+} from "@/lib/whiteboard/scene";
 import { boardStock, COLOURS } from "@/lib/whiteboard/palette";
 import {
   clamp,
@@ -138,7 +144,7 @@ function labelOf(beat: Beat): string {
     .join(" ");
 }
 
-export function prepareScene(spec: SceneSpec, options: { photo?: boolean } = {}): PreparedScene {
+export function prepareScene(spec: SceneSpec, options: ComposeOptions = {}): PreparedScene {
   const composed = composeScene(spec, options);
   const beats: PreparedBeat[] = [];
   let seed = 3;

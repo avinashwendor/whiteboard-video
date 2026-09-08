@@ -726,6 +726,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 ...plan.storyboard,
                 scenes,
                 videoStyle,
+                // The shape has to travel with the project: the boards were
+                // composed for it, and a widescreen player given a project of
+                // vertical drawings would paint them into the wrong frame.
+                format: settings.format ?? "landscape",
                 introDuration: settings.introDuration ?? 3.0,
                 voiceDelay: settings.voiceDelay ?? 0.6,
                 musicMood: plan.storyboard.music_mood ?? "calm",
@@ -1036,6 +1040,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
                 videoStyle,
                 theme,
                 boardStock: plan.storyboard.board_stock,
+                format: settings.format ?? "landscape",
               });
               if (thumbnail) {
                 project.cover = {

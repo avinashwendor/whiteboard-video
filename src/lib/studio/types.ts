@@ -1,4 +1,4 @@
-import type { SceneSpec } from "@/lib/whiteboard/scene";
+import type { BoardFormat, SceneSpec } from "@/lib/whiteboard/scene";
 import type { ImageProviderId, ImageStyle } from "@/lib/ai/types";
 import type { Storyboard } from "@/lib/validation/schemas";
 import type { WordTiming } from "@/lib/video/timing";
@@ -89,6 +89,17 @@ export interface ProjectAsset extends Omit<Storyboard, "scenes"> {
   cover?: ImageAsset;
   /** Visual engine mode */
   videoStyle?: VideoStyle;
+  /**
+   * The shape of the frame: widescreen, vertical or square.
+   *
+   * Stored on the project rather than chosen at export, because it is not a
+   * crop. A vertical board lays four icons out in a column, a pie's labels
+   * become a legend and bars lie on their side — the drawing is composed for
+   * the shape it is going into, so the shape has to be known while it is being
+   * made. Absent means widescreen, which is what every project made before this
+   * existed was.
+   */
+  format?: BoardFormat;
   /** Intro card duration in seconds */
   introDuration?: number;
   /** Voice start delay in seconds after scene opens */
@@ -171,6 +182,8 @@ export interface Settings {
    * whichever one actually suits it before writing the script.
    */
   videoStyle: VideoStyle | "auto";
+  /** Widescreen, vertical or square. See `ProjectAsset.format`. */
+  format: BoardFormat;
   /**
    * Whiteboard scene artwork. "rich" is the default: every board is drawn, and
    * the director decides per scene whether it also carries a real photograph
@@ -209,6 +222,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sceneCount: 6,
   tone: "explainer",
   videoStyle: "auto",
+  format: "landscape",
   sceneArt: "rich",
   modernArt: "photo",
   voiceSource: "verbatim",

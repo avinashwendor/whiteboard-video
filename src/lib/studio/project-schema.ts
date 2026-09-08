@@ -77,6 +77,11 @@ export const editableProjectSchema = z.looseObject({
   scenes: z.array(editableSceneSchema).min(1, "a video needs at least one scene").max(12),
   cover: imageAssetSchema.optional(),
   videoStyle: z.enum(["whiteboard", "hyperframes"]).optional(),
+  /**
+   * The shape the boards were composed for. Absent on every project made
+   * before shapes existed, which is exactly what "landscape" means.
+   */
+  format: z.enum(["landscape", "portrait", "square"]).optional(),
   visual_theme: themeSchema.optional(),
   introDuration: z.number().min(0).max(20).optional(),
   voiceDelay: z.number().min(0).max(10).optional(),

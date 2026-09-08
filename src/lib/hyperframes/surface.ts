@@ -1,4 +1,3 @@
-import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/whiteboard/scene";
 import {
   clamp,
   clamp01,
@@ -10,6 +9,7 @@ import {
   range,
   smootherstep,
 } from "@/lib/video/easing";
+import { frameH, frameW } from "./frame";
 import { drawGrain, drawVignette, supportsFilter, withAlpha } from "@/lib/video/grade";
 import { drawGround, type Box } from "./paper";
 import type { Theme } from "./theme";
@@ -41,7 +41,7 @@ import type { Glyph } from "./glyphs";
 function drawMesh(ctx: CanvasRenderingContext2D, theme: Theme, time: number) {
   ctx.save();
   ctx.fillStyle = theme.mesh[2];
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
 
   const fields: Array<{ colour: string; cx: number; cy: number; radius: number; seed: number }> = [
     { colour: theme.mesh[0], cx: 0.22, cy: 0.16, radius: 0.82, seed: 3 },
@@ -52,9 +52,9 @@ function drawMesh(ctx: CanvasRenderingContext2D, theme: Theme, time: number) {
   for (const [index, field] of fields.entries()) {
     // Slow enough that nobody sees it move, fast enough that no two frames of
     // the finished file are identical.
-    const x = BOARD_WIDTH * (field.cx + noise1(time * 0.055, field.seed) * 0.06);
-    const y = BOARD_HEIGHT * (field.cy + noise1(time * 0.047, field.seed + 5) * 0.07);
-    const radius = BOARD_WIDTH * field.radius * (1 + noise1(time * 0.03, field.seed + 9) * 0.05);
+    const x = frameW() * (field.cx + noise1(time * 0.055, field.seed) * 0.06);
+    const y = frameH() * (field.cy + noise1(time * 0.047, field.seed + 5) * 0.07);
+    const radius = frameW() * field.radius * (1 + noise1(time * 0.03, field.seed + 9) * 0.05);
 
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
     const strength = index === 2 ? 0.3 : 1;
@@ -64,7 +64,7 @@ function drawMesh(ctx: CanvasRenderingContext2D, theme: Theme, time: number) {
 
     ctx.globalCompositeOperation = index === 2 ? "screen" : "source-over";
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.fillRect(0, 0, frameW(), frameH());
   }
   ctx.restore();
 }
@@ -90,7 +90,7 @@ export function drawFinishGround(
     drawMesh(ctx, theme, time);
     // Grain over a bloom is what stops the gradient banding on a dark screen,
     // which is the one artefact that makes a good palette look cheap.
-    drawGrain(ctx, BOARD_WIDTH, BOARD_HEIGHT, time, options.grain ?? 0.035);
+    drawGrain(ctx, frameW(), frameH(), time, options.grain ?? 0.035);
     return;
   }
 
@@ -98,24 +98,24 @@ export function drawFinishGround(
   // vignette that the corners fall away from the type.
   ctx.save();
   ctx.fillStyle = theme.ground;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
 
   const lift = ctx.createRadialGradient(
-    BOARD_WIDTH * 0.5,
-    BOARD_HEIGHT * 0.42,
+    frameW() * 0.5,
+    frameH() * 0.42,
     0,
-    BOARD_WIDTH * 0.5,
-    BOARD_HEIGHT * 0.42,
-    BOARD_WIDTH * 0.72,
+    frameW() * 0.5,
+    frameH() * 0.42,
+    frameW() * 0.72,
   );
   lift.addColorStop(0, withAlpha(theme.dark ? "#FFFFFF" : "#000000", theme.dark ? 0.045 : 0.03));
   lift.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = lift;
-  ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+  ctx.fillRect(0, 0, frameW(), frameH());
   ctx.restore();
 
-  if (theme.dark) drawVignette(ctx, BOARD_WIDTH, BOARD_HEIGHT, 0.42);
-  drawGrain(ctx, BOARD_WIDTH, BOARD_HEIGHT, time, options.grain ?? 0.045);
+  if (theme.dark) drawVignette(ctx, frameW(), frameH(), 0.42);
+  drawGrain(ctx, frameW(), frameH(), time, options.grain ?? 0.045);
 }
 
 /* --------------------------------- framing --------------------------------- */
@@ -138,7 +138,7 @@ export function drawFrameRule(
   ctx.strokeStyle = theme.hairline;
   ctx.lineWidth = 1.5;
   ctx.globalAlpha = t;
-  ctx.strokeRect(inset, inset, BOARD_WIDTH - inset * 2, BOARD_HEIGHT - inset * 2);
+  ctx.strokeRect(inset, inset, frameW() - inset * 2, frameH() - inset * 2);
   ctx.restore();
 }
 
@@ -229,7 +229,7 @@ export function drawSectionMark(
   ctx.letterSpacing = "0px";
 
   const ruleFrom = x + size * 0.95 + textWidth + size * 0.9;
-  const ruleTo = options.width ?? BOARD_WIDTH - 96;
+  const ruleTo = options.width ?? frameW() - 96;
   if (ruleTo > ruleFrom) {
     ctx.strokeStyle = theme.hairline;
     ctx.lineWidth = 1.5;
@@ -279,7 +279,7 @@ export function drawGhostType(
   const t = clamp01(options.progress ?? 1);
   if (t <= 0.001) return;
 
-  const span = (options.span ?? 1.06) * BOARD_WIDTH;
+  const span = (options.span ?? 1.06) * frameW();
   const weight = options.weight ?? 900;
   const time = options.time ?? 0;
   const drift = (options.drift ?? 1) * (noise1(time * 0.08, 31) * 14 + time * 1.4);
@@ -289,7 +289,7 @@ export function drawGhostType(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  const centreY = BOARD_HEIGHT * (options.at ?? 0.5);
+  const centreY = frameH() * (options.at ?? 0.5);
   const rows = words.length;
 
   words.forEach((word, index) => {
@@ -302,7 +302,7 @@ export function drawGhostType(
     ctx.font = `${weight} ${size}px ${options.family}`;
 
     const y = centreY + (index - (rows - 1) / 2) * size * 0.86;
-    const x = BOARD_WIDTH / 2 + drift * (index % 2 === 0 ? 1 : -1);
+    const x = frameW() / 2 + drift * (index % 2 === 0 ? 1 : -1);
 
     if (options.outline) {
       ctx.strokeStyle = options.colour;
@@ -713,7 +713,7 @@ export function drawScanlines(
   ctx.save();
   ctx.globalAlpha = strength;
   ctx.fillStyle = colour;
-  for (let y = 0; y < BOARD_HEIGHT; y += spacing) ctx.fillRect(0, y, BOARD_WIDTH, 1);
+  for (let y = 0; y < frameH(); y += spacing) ctx.fillRect(0, y, frameW(), 1);
   ctx.restore();
 }
 

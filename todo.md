@@ -37,20 +37,25 @@ Sorted by priority. Source: team dump, 22–23 Aug 2026.
 - [ ] Optimize timings
 
 ### Video format
-- [~] Short-form video support
-- [~] Portrait mode support
-      Answered from the other end rather than in the board. "Edit this video"
-      on the player renders the MP4 and opens it in the transcript editor with
-      the narration as an exact transcript — and that editor already has a
-      real frame: 9:16 with cover/contain, focus point, elements reflowed and
-      captions re-broken for the new shape. So a short is a generated video
-      reframed and cut, which is what one is anyway.
-      A native portrait board is still open and still not a constant change:
-      BOARD_WIDTH/HEIGHT are the single source of truth, but the layout
-      engines mix absolute pixels with them — margins of 160, 62pt type, fixed
-      TITLE_Y, a four-icon row 1052px wide — across scene.ts and renderer.ts.
-      Those need re-tuning per layout, not rescaling. Multi-hour, and it is
-      the pipeline the demo runs on.
+- [x] Short-form video support
+- [x] Portrait mode support
+      Native, not a crop and not a rescale. The board has a shape now
+      (`BOARDS` in lib/whiteboard/scene.ts: landscape 1280×720, portrait
+      720×1280, square 1080×1080) and the layouts arrange themselves for it:
+      four icons are a row on a wide board and a 2×2 grid on a tall one, a
+      sequence runs down the page with its arrows pointing down, a comparison
+      stacks instead of splitting, a pie trades leader lines for a legend, bars
+      lie on their side, and a timeline's spine stands up. The taped photograph
+      moves from beside the drawing to above it.
+      Hyperframes reads the frame from one module every one of its drawing
+      helpers already goes through, so its margins, line lengths and subtitle
+      floor all follow the shape.
+      Chosen in Advanced settings (the plates follow it), stored on the project
+      because the boards are composed for it, and carried through the player,
+      the export, the poster and the capability probe.
+      tests/board-shapes-test.ts composes every layout in every shape at every
+      item count the schema allows and measures all 2,687 primitives against
+      the paper.
 
 ### Landing page content
 - [~] Rescript UI → match website theme — defaults to dark now so crossing

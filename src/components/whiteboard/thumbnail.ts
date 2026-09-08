@@ -1,6 +1,7 @@
 "use client";
 
-import { BOARD_HEIGHT, BOARD_WIDTH, renderCover } from "./renderer";
+import { renderCover } from "./renderer";
+import { boardOf, type BoardFormat } from "@/lib/whiteboard/scene";
 import { renderModernCover } from "@/lib/hyperframes/modern-renderer";
 import type { VideoStyle } from "@/lib/studio/types";
 import type { ThemeName } from "@/lib/hyperframes/theme";
@@ -20,12 +21,15 @@ export function renderThumbnail(options: {
   theme?: ThemeName;
   /** The surface a whiteboard video is drawn on. */
   boardStock?: BoardStockName;
+  /** The shape the film was made in. A vertical poster for a vertical video. */
+  format?: BoardFormat;
 }): { url: string; width: number; height: number } | null {
   if (typeof document === "undefined") return null;
 
+  const board = boardOf(options.format);
   const canvas = document.createElement("canvas");
-  canvas.width = BOARD_WIDTH;
-  canvas.height = BOARD_HEIGHT;
+  canvas.width = board.width;
+  canvas.height = board.height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
@@ -52,6 +56,7 @@ export function renderThumbnail(options: {
         fontPoster: poster ? `${poster}, ${sansStack}` : sansStack,
         theme: options.theme,
         progress: 0.85,
+        board,
       });
     } else {
       renderCover(ctx, {
@@ -60,14 +65,19 @@ export function renderThumbnail(options: {
         fontHand: hand ? `${hand}, cursive` : "cursive",
         fontSans: sansStack,
         progress: 1,
+        board,
       });
     }
 
     // Downscale before encoding: a full-size poster is megabytes, and the
     // gallery never shows it larger than a card.
+    // 640 on the long edge, whatever shape that edge is on — a vertical
+    // poster squeezed into a 16:9 card is the video's first frame with the
+    // wrong story about what shape the video is.
     const thumb = document.createElement("canvas");
-    thumb.width = 640;
-    thumb.height = 360;
+    const scale = 640 / Math.max(board.width, board.height);
+    thumb.width = Math.round(board.width * scale);
+    thumb.height = Math.round(board.height * scale);
     const thumbCtx = thumb.getContext("2d");
     if (!thumbCtx) return null;
     thumbCtx.imageSmoothingQuality = "high";

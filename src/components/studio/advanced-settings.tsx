@@ -411,6 +411,45 @@ export function AdvancedSettings({ mode }: { mode: Mode }) {
                   )}
                 </Field>
 
+                <Field
+                  label="Frame"
+                  hint={
+                    settings.format === "portrait"
+                      ? "Vertical, for a phone. Boards are drawn for it: rows become columns, bars lie on their side, a pie gets a legend."
+                      : settings.format === "square"
+                        ? "Square, for a feed. Same arrangements as widescreen, fitted to the narrower frame."
+                        : "Widescreen, for a player."
+                  }
+                >
+                  {(id) => (
+                    <Select
+                      id={id}
+                      value={settings.format}
+                      onChange={(event) => {
+                        const format = event.target.value as typeof settings.format;
+                        // The plates follow the frame. A vertical video whose
+                        // photographs are widescreen is a video of letterboxes,
+                        // and nobody would think to go and change this second
+                        // setting to fix the first.
+                        updateSettings({
+                          format,
+                          imageSize:
+                            format === "portrait"
+                              ? "720x1280"
+                              : format === "square"
+                                ? "1024x1024"
+                                : "1280x720",
+                        });
+                      }}
+                      options={[
+                        { value: "landscape", label: "Widescreen · 16:9" },
+                        { value: "portrait", label: "Vertical · 9:16" },
+                        { value: "square", label: "Square · 1:1" },
+                      ]}
+                    />
+                  )}
+                </Field>
+
                 {settings.videoStyle === "whiteboard" ? (
                   <Field
                     label="Scene visual style"
