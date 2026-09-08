@@ -567,16 +567,23 @@ export function LanguageSection() {
 }
 
 /**
- * Native/roman output toggle, shown only for a language with a non-Latin script
- * (e.g. Telugu). Flips the transcript in place when nothing has been edited yet.
+ * Native/roman output toggle, shown only for a language with a non-Latin script.
+ * Flips the transcript in place when nothing has been edited yet.
+ *
+ * The romanized side is named after what it produces where there is a name for
+ * it — Hinglish, Tinglish. "Roman" is accurate and nobody is looking for it.
  */
 function ScriptToggle() {
   const script = useEditorStore((s) => s.transcriptScript);
   const setScript = useEditorStore((s) => s.setTranscriptScript);
+  const language = useEditorStore((s) => s.transcriptLanguage);
   const { t } = useI18n();
   const options: Array<{ id: TranscriptScript; label: string }> = [
     { id: "native", label: t("model.scriptNative") },
-    { id: "roman", label: t("model.scriptRoman") },
+    {
+      id: "roman",
+      label: TRANSCRIPT_LANGUAGES[language]?.romanLabel ?? t("model.scriptRoman"),
+    },
   ];
   return (
     <div className="mt-1 px-2.5 pb-1.5">

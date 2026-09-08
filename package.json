@@ -55,7 +55,8 @@
     "test:omegavision": "tsx tests/omega-vision-test.ts",
     "test:gaps": "tsx tests/gaps-test.ts",
     "test:delete": "tsx tests/delete-test.ts",
-    "test:slash": "tsx tests/slash-test.ts"
+    "test:slash": "tsx tests/slash-test.ts",
+    "test:hinglish": "tsx tests/hinglish-test.ts"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.3.0",

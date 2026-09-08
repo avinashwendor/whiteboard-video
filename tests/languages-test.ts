@@ -22,7 +22,7 @@ import {
   const labels = TRANSCRIPT_LANGUAGE_ORDER.map(
     (id) => TRANSCRIPT_LANGUAGES[id].nativeLabel
   );
-  if (labels.join(",") !== "Auto-detect,English,Español,Français,Deutsch,中文,తెలుగు") {
+  if (labels.join(",") !== "Auto-detect,English,Español,Français,Deutsch,中文,हिन्दी,తెలుగు") {
     throw new Error(`unexpected language order: ${labels.join(",")}`);
   }
 }

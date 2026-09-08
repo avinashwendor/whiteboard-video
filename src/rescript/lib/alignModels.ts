@@ -51,6 +51,10 @@ export const ALIGN_MODELS: Partial<
     id: "onnx-community/mms-300m-1130-forced-aligner-ONNX",
     normalize: "indic-roman",
   },
+  hi: {
+    id: "onnx-community/mms-300m-1130-forced-aligner-ONNX",
+    normalize: "indic-roman",
+  },
 };
 
 /** Align model for a transcript language, or null when CTC is unavailable. */

@@ -46,10 +46,12 @@ eq(detectLanguageFromText("这是一个测试句子"), "zh", "pure Han");
     null,
     "Cyrillic has no aligner"
   );
+  // Devanagari used to have no aligner. It shares Telugu's MMS one now, so a
+  // Hindi transcript is timed rather than falling back to the envelope.
   eq(
     detectLanguageFromText("यह हिंदी में एक वाक्य है"),
-    null,
-    "Devanagari has no aligner yet"
+    "hi",
+    "Devanagari should reach the Indic aligner"
   );
 }
 
