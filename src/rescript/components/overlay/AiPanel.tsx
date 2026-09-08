@@ -375,6 +375,7 @@ export default function AiPanel() {
     music: false,
     sfx: false,
     video: false,
+    voice: false,
   });
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
   /** "" means the server picks, which is what this panel always did before. */
@@ -390,6 +391,7 @@ export default function AiPanel() {
         image?: { providers?: Array<{ id: string; configured?: boolean }> };
         visual?: { configured?: boolean };
         media?: { kinds?: Record<string, boolean> };
+        voice?: { configured?: boolean };
       }) => {
         if (!alive) return;
         const providers = json.image?.providers ?? [];
@@ -402,6 +404,7 @@ export default function AiPanel() {
           music: kinds.music === true,
           sfx: kinds.sfx === true,
           video: kinds.video === true,
+          voice: json.voice?.configured === true,
         });
       })
       .catch(() => {

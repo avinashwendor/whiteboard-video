@@ -53,6 +53,8 @@ export interface PlanWorld {
     music: boolean;
     sfx: boolean;
     video: boolean;
+    /** A speech engine is configured, so narration can be spoken. */
+    voice: boolean;
   };
 }
 
@@ -431,6 +433,22 @@ export function verifyPlan(ops: AgentOp[], world: PlanWorld): string[] {
             );
           }
           beds += 1;
+        }
+        break;
+
+      case "addVoiceover":
+        // Same reasoning as addMusic: a plan that writes a line of narration
+        // and then cannot speak it has already told the person it narrated.
+        if (!world.can.voice) {
+          problems.push(
+            "addVoiceover — no speech engine is configured on this deployment, so nothing can be spoken. Put the words on screen with addText instead."
+          );
+          break;
+        }
+        if (op.at !== undefined && op.at >= remaining) {
+          problems.push(
+            `addVoiceover at ${op.at.toFixed(1)}s is past the end of the finished video.`
+          );
         }
         break;
 

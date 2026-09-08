@@ -43,6 +43,8 @@ export interface SlashCapabilities {
   video: boolean;
   sfx: boolean;
   music: boolean;
+  /** A speech engine is configured, so a line can be spoken into the cut. */
+  voice: boolean;
 }
 
 export interface SlashContext {
@@ -519,6 +521,25 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       kind: "ops",
       ops: [{ op: "addSfx", effect: value || "whoosh", at: c.outAt }],
       note: "Sound effect",
+    }),
+  },
+  {
+    id: "voiceover",
+    group: "hear",
+    title: "Say something here",
+    hint: "Narration spoken into the cut, from this word — for a stretch with picture and no voice.",
+    icon: "mic",
+    keywords: ["voice", "narration", "voiceover", "speak", "say", "tts", "read"],
+    when: (c) => c.can.voice,
+    arg: {
+      kind: "text",
+      label: "Line",
+      placeholder: "What should the narrator say?",
+    },
+    run: (c, value) => ({
+      kind: "ops",
+      ops: [{ op: "addVoiceover", text: value, at: c.outAt }],
+      note: "Voiceover",
     }),
   },
   {

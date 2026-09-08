@@ -280,6 +280,8 @@ export const rescriptAgentRequestSchema = z.object({
       music: z.boolean().default(false),
       sfx: z.boolean().default(false),
       video: z.boolean().default(false),
+      /** A speech engine is configured, so narration can be spoken. */
+      voice: z.boolean().default(false),
     }),
   }),
   /**

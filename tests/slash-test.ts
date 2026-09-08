@@ -18,6 +18,7 @@
  * Run with `npx tsx tests/slash-test.ts`.
  */
 
+import { readFileSync } from "node:fs";
 import {
   SLASH_COMMANDS,
   hintFor,
@@ -55,7 +56,7 @@ function context(patch: Partial<SlashContext> = {}): SlashContext {
     },
     pause: { from: 12.5, to: 13.1, seconds: 0.6 },
     canSplit: true,
-    can: { image: true, video: true, sfx: true, music: true },
+    can: { image: true, video: true, sfx: true, music: true, voice: true },
     ...patch,
   };
 }
@@ -133,8 +134,8 @@ function context(patch: Partial<SlashContext> = {}): SlashContext {
   assert(!ids(context({ canSplit: false })).includes("split"), "offered a split where one is refused");
   assert(!ids(context({ sentence: null })).includes("cut-sentence"), "offered to cut a sentence it cannot see");
 
-  const bare = context({ can: { image: false, video: false, sfx: false, music: false } });
-  for (const id of ["picture", "broll", "sfx", "music"]) {
+  const bare = context({ can: { image: false, video: false, sfx: false, music: false, voice: false } });
+  for (const id of ["picture", "broll", "sfx", "music", "voiceover"]) {
     assert(!ids(bare).includes(id), `offered "${id}" with nothing configured to do it`);
   }
   // ...but the things that need no server at all are still there.
@@ -225,6 +226,39 @@ function context(patch: Partial<SlashContext> = {}): SlashContext {
   const seen = new Set(SLASH_COMMANDS.map((c) => c.id));
   assert(seen.size === SLASH_COMMANDS.length, "two commands share an id");
   console.log("✓ every command says what it will do, in one line");
+}
+
+/* ------------------------------- the wiring --------------------------------- */
+
+{
+  // Two things about the menu that live in components and cannot be checked by
+  // calling a function, both of which make it useless if they are wrong.
+  const panel = readFileSync("src/rescript/components/TranscriptPanel.tsx", "utf8");
+  const menu = readFileSync("src/rescript/components/TranscriptSlashMenu.tsx", "utf8");
+
+  // The menu renders through a FloatingPortal, so it is not a descendant of the
+  // transcript however much it looks like one. The transcript closes its caret
+  // on blur, and the menu opens by focusing its own search field — so without
+  // this the menu closes one frame after it appears, every time, and the whole
+  // feature is dead.
+  const blur = panel.slice(panel.indexOf("onBlur={(e) =>"));
+  assert(
+    /data-transcript-slash/.test(blur.slice(0, 900)),
+    "the transcript's blur handler does not recognise focus moving into the / menu"
+  );
+  assert(
+    !/data-transcript-slash[\s\S]{0,400}onMouseDown=\{\(e\) => e\.preventDefault\(\)\}/.test(panel),
+    "the menu still swallows mousedown, so its text fields cannot be clicked into"
+  );
+
+  // A refusal is the useful half of an operation — "no stock catalogue is
+  // configured", "that phrase is not in the transcript" — and it has to appear
+  // where the command was given rather than in a log three tabs away.
+  assert(
+    /setFailed/.test(menu) && /if \(problem\) setFailed/.test(menu),
+    "the menu closes on a failure instead of saying what went wrong"
+  );
+  console.log("✓ the menu can hold focus, and says why a command did not work");
 }
 
 console.log("\nslash menu: all checks passed");

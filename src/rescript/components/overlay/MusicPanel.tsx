@@ -11,7 +11,18 @@ import {
   type AudioKind,
 } from "@/rescript/lib/overlay/audio";
 import { runPlan } from "@/rescript/lib/overlay/ops";
-import { Button, Empty, Row, Section, Segmented, Slider, TextInput, Toggle, formatSeconds } from "./ui";
+import {
+  Button,
+  Empty,
+  Row,
+  Section,
+  Segmented,
+  Select,
+  Slider,
+  TextInput,
+  Toggle,
+  formatSeconds,
+} from "./ui";
 
 /**
  * Music and sound effects.
@@ -55,6 +66,211 @@ const FULL_LENGTH_KINDS = new Set<AudioKind>(["music"]);
  * two copies of the licence handling, which is the part that must not drift.
  */
 type SearchKind = AudioKind | "video";
+
+/* -------------------------------- voiceover -------------------------------- */
+
+interface VoiceEngine {
+  id: string;
+  label: string;
+}
+
+interface VoiceOption {
+  id: string;
+  name: string;
+  accent?: string;
+  isIndian?: boolean;
+}
+
+/**
+ * Narration, spoken into the cut.
+ *
+ * The audio layer has had a `voice` kind since it was written and nothing in
+ * this editor could ever make one: speech was something the studio did to a
+ * script, and this side of the app only ever cut speech that already existed.
+ * But an edit made here is full of places where there is picture and no voice —
+ * a b-roll insert, an opening title, a stretch where the tangent was cut out —
+ * and "say this over that" is the obvious thing to want there.
+ *
+ * The engine is picked before the voice, in that order, because the second
+ * depends on the first: no two engines share a voice id, and a voice chosen
+ * from one engine's catalogue and sent to another resolves to that engine's
+ * default without saying so.
+ */
+function VoiceoverSection({
+  playhead,
+  duration,
+  onPlaced,
+}: {
+  playhead: number;
+  duration: number;
+  onPlaced: (clip: {
+    src: string;
+    name: string;
+    seconds: number;
+    engine: string;
+  }) => void;
+}) {
+  const [engines, setEngines] = useState<VoiceEngine[]>([]);
+  const [engine, setEngine] = useState("");
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [voiceId, setVoiceId] = useState("");
+  const [line, setLine] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The catalogue for whichever engine is selected. Refetched on a change of
+  // engine rather than filtered client-side: the voices are the engine's, and
+  // there is no shared list to filter.
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/models?provider=${encodeURIComponent(engine || "voice")}`)
+      .then((r) => r.json())
+      .then(
+        (json: {
+          provider?: string;
+          voices?: VoiceOption[];
+          engines?: VoiceEngine[];
+          notice?: string;
+        }) => {
+          if (!alive) return;
+          setError(null);
+          setEngines(json.engines ?? []);
+          setNotice(json.notice ?? null);
+          setVoices(json.voices ?? []);
+          // Whatever the server resolved, so the label matches what will speak.
+          if (!engine && json.provider) setEngine(json.provider);
+          setVoiceId((current) =>
+            json.voices?.some((v) => v.id === current)
+              ? current
+              : (json.voices?.[0]?.id ?? "")
+          );
+        }
+      )
+      .catch(() => {
+        if (alive) setError("Couldn't reach the voice catalogue.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [engine]);
+
+  const speak = useCallback(async () => {
+    const transcript = line.trim();
+    if (!transcript || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript,
+          ...(engine ? { provider: engine } : {}),
+          ...(voiceId ? { voiceId } : {}),
+        }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        audioUrl?: string;
+        duration?: number;
+        provider?: string;
+        error?: { message?: string };
+      };
+      if (!json.success || !json.audioUrl) {
+        throw new Error(json.error?.message ?? "The voice came back empty.");
+      }
+
+      // Engines that return word timings hand back a duration; the rest do not,
+      // and a clip whose length is a guess either cuts the last word off or
+      // holds silence after it. Reading it off the file is exact and costs one
+      // metadata fetch of something already in the browser's cache.
+      const seconds = json.duration ?? (await audioDuration(json.audioUrl));
+      onPlaced({
+        src: json.audioUrl,
+        name: transcript.slice(0, 32),
+        seconds,
+        engine: json.provider ?? engine ?? "voice",
+      });
+      setLine("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That couldn't be spoken.");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, engine, line, onPlaced, voiceId]);
+
+  const room = Math.max(0, duration - playhead);
+
+  return (
+    <Section title="Voiceover">
+      {engines.length > 1 && (
+        <Row label="Engine" hint="The voices below belong to it">
+          <Select
+            value={engine}
+            options={engines.map((e) => ({ value: e.id, label: e.label }))}
+            onChange={setEngine}
+          />
+        </Row>
+      )}
+      {voices.length > 0 && (
+        <Row label="Voice">
+          <Select
+            value={voiceId}
+            options={voices.map((v) => ({
+              value: v.id,
+              label: `${v.name}${v.isIndian ? " 🇮🇳" : ""}${v.accent ? ` · ${v.accent}` : ""}`,
+            }))}
+            onChange={setVoiceId}
+          />
+        </Row>
+      )}
+      <textarea
+        value={line}
+        onChange={(e) => setLine(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
+        rows={3}
+        placeholder="What should be said here?"
+        className="mt-1.5 w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+      />
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <p className="min-w-0 text-[10px] leading-tight text-zinc-400 dark:text-zinc-600">
+          {notice ??
+            `Lands at ${formatSeconds(playhead)}, over the ${formatSeconds(room)} that follows.`}
+        </p>
+        <Button
+          variant="solid"
+          onClick={() => void speak()}
+          disabled={busy || !line.trim() || voices.length === 0}
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : "Speak it here"}
+        </Button>
+      </div>
+      {error && (
+        <p className="mt-1.5 px-1 text-[11px] leading-relaxed text-red-500">{error}</p>
+      )}
+    </Section>
+  );
+}
+
+/** Length of an audio file, read off the file rather than estimated. */
+function audioDuration(src: string): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = new Audio();
+    const done = (value: number) => {
+      probe.src = "";
+      resolve(value);
+    };
+    probe.addEventListener("loadedmetadata", () =>
+      done(Number.isFinite(probe.duration) ? probe.duration : 4)
+    );
+    // A file that will not report its length still has to place *something*,
+    // and four seconds of narration is a sentence.
+    probe.addEventListener("error", () => done(4));
+    probe.preload = "metadata";
+    probe.src = src;
+  });
+}
 
 export default function MusicPanel() {
   const [kind, setKind] = useState<SearchKind>("music");
@@ -307,6 +523,54 @@ export default function MusicPanel() {
     [addAudio, addVideo, aspect, kind, query, playhead, timeline.duration]
   );
 
+  /**
+   * Drop a spoken line into the mix where the playhead is.
+   *
+   * No credit and no ducking. It was generated for this video so there is
+   * nobody to attribute, and it is the thing being listened to — a narration
+   * that pulls itself down under the speech it is narrating over would be
+   * fighting the mix rather than sitting in it. What *should* duck is the bed,
+   * and the bed already does.
+   */
+  const placeVoiceover = useCallback(
+    ({
+      src,
+      name,
+      seconds,
+      engine,
+    }: {
+      src: string;
+      name: string;
+      seconds: number;
+      engine: string;
+    }) => {
+      const start = playhead;
+      addAudio({
+        kind: "voice",
+        name: `${name}${name.length >= 32 ? "…" : ""}`,
+        src,
+        start,
+        // Never clipped short by the end of the video: a line that is cut off
+        // mid-word is worse than one that runs to the last frame.
+        end: Math.max(start + 0.2, start + seconds),
+        trimIn: 0,
+        gain: defaultGainFor("voice"),
+        fadeIn: 0.05,
+        fadeOut: 0.15,
+        duck: false,
+        loop: false,
+        muted: false,
+        credit: {
+          title: name,
+          artist: engine,
+          licence: "Generated for this video",
+          attributionRequired: false,
+        },
+      });
+    },
+    [addAudio, playhead]
+  );
+
   const credits = useMemo(() => creditText(clips), [clips]);
   const mediaKind = useEditorStore((s) => s.mediaKind);
 
@@ -381,6 +645,12 @@ export default function MusicPanel() {
           </p>
         )}
       </Section>
+
+      <VoiceoverSection
+        playhead={playhead}
+        duration={timeline.duration}
+        onPlaced={placeVoiceover}
+      />
 
       <Section title="Find">
         <Segmented value={kind} options={KINDS} onChange={setKind} />

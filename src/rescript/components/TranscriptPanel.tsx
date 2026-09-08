@@ -433,11 +433,11 @@ export default function TranscriptPanel() {
    * of everything that has happened to the video, whoever asked for it.
    */
   const runSlash = useCallback(
-    async (result: SlashResult) => {
+    async (result: SlashResult): Promise<string | null> => {
       const chat = useChatStore.getState();
       if (result.kind === "ask") {
         chat.ask(result.prompt);
-        return;
+        return null;
       }
       const results = await runPlan(result.ops, {
         playhead: originalToEdited(
@@ -451,6 +451,12 @@ export default function TranscriptPanel() {
       for (const step of results) {
         chat.append(step.ok ? "ok" : "fail", step.message);
       }
+      // The reasons an operation refuses are all things a person can act on —
+      // no stock catalogue configured, a phrase that is not in the transcript,
+      // a span that is past the end. Reported into the panel's log alone they
+      // would be three tabs away from where the command was given.
+      const failed = results.filter((step) => !step.ok);
+      return failed.length ? failed.map((step) => step.message).join(" ") : null;
     },
     [cuts, outputTimeline, aspect]
   );
@@ -719,10 +725,19 @@ export default function TranscriptPanel() {
               aria-multiline
               onKeyDown={onTranscriptKeyDown}
               onBlur={(e) => {
-                // Keep the caret while focus moves into the slash menu itself.
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                  clearCaret();
-                }
+                // Keep the caret while focus moves into the `/` menu.
+                //
+                // `contains` alone cannot see it: the menu is rendered through
+                // a FloatingPortal, so it is not a descendant of this element
+                // however much it looks like one on screen. That was survivable
+                // while the menu was a list of buttons nobody focused — it is
+                // not now that the menu opens with a search field and focuses
+                // it, because that focus is itself the blur that would close
+                // the menu, one frame after it appeared.
+                const next = e.relatedTarget as HTMLElement | null;
+                if (e.currentTarget.contains(next)) return;
+                if (next?.closest?.("[data-transcript-slash]")) return;
+                clearCaret();
               }}
             >
               {turns.map((turn) => {
@@ -787,11 +802,10 @@ export default function TranscriptPanel() {
               <div
                 ref={setSlashFloating}
                 data-transcript-slash
-                role="menu"
+                role="dialog"
                 aria-label={t("transcript.slashTitle")}
                 className="z-40"
                 style={slashStyles}
-                onMouseDown={(e) => e.preventDefault()}
               >
                 <TranscriptSlashMenu
                   context={slashContext}

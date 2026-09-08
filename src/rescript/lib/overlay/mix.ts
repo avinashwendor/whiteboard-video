@@ -114,36 +114,57 @@ export function buildMixGraph(input: MixInput): MixGraph {
     labels.push(label);
   });
 
-  const wantsDuck = hasVoice && clips.some((c) => c.duck);
+  /**
+   * Ducking is per clip, and it has to stay per clip here.
+   *
+   * Everything that ducks becomes one bed, so the compressor is applied once to
+   * the whole of it rather than once per clip — n compressors keyed off the
+   * same voice would each pump independently. But everything that does *not*
+   * duck has to stay out of that bed, and for a long time it did not: one music
+   * clip with ducking on sent every sting and every line of narration through
+   * the compressor with it. The preview mixer has always ducked per clip, so
+   * the export quietly disagreed with what you heard while editing — and the
+   * clip most obviously wrong was a voiceover, which is the one thing in the
+   * mix that should never be pulled down under the speech it is narrating.
+   */
+  const ducking = labels.filter((_, i) => clips[i].duck);
+  const steady = labels.filter((_, i) => !clips[i].duck);
+  const wantsDuck = hasVoice && ducking.length > 0;
 
-  // Everything that is not the voice becomes one bed first, so ducking is
-  // applied once to the whole bed rather than once per clip — n compressors
-  // keyed off the same voice would each pump independently.
-  let bedLabel = labels[0];
-  if (labels.length > 1) {
+  /** Fold a set of labels into one, or pass the single one straight through. */
+  const fold = (of: string[], name: string): string => {
+    if (of.length === 1) return of[0];
     parts.push(
-      `${labels.map((l) => `[${l}]`).join("")}amix=inputs=${labels.length}:normalize=0[bed]`
+      `${of.map((l) => `[${l}]`).join("")}amix=inputs=${of.length}:normalize=0[${name}]`
     );
-    bedLabel = "bed";
-  }
+    return name;
+  };
 
   if (wantsDuck) {
+    const bed = fold(ducking, "bed");
     // The voice is needed twice — once to key the compressor, once in the mix —
     // and a filter input cannot be consumed twice.
     parts.push("[0:a]asplit=2[voice][key]");
     parts.push(
-      `[${bedLabel}][key]sidechaincompress=` +
+      `[${bed}][key]sidechaincompress=` +
         `threshold=0.05:ratio=${(1 / DUCK_DEPTH).toFixed(1)}:` +
         `attack=${Math.round(DUCK_ATTACK_S * 1000)}:` +
         `release=${Math.round(DUCK_RELEASE_S * 1000)}[ducked]`
     );
-    parts.push(`[voice][ducked]amix=inputs=2:normalize=0:duration=first[mixout]`);
+    const into = ["voice", "ducked", ...steady];
+    parts.push(
+      `${into.map((l) => `[${l}]`).join("")}amix=inputs=${into.length}:normalize=0:duration=first[mixout]`
+    );
   } else if (hasVoice) {
-    parts.push(`[0:a][${bedLabel}]amix=inputs=2:normalize=0:duration=first[mixout]`);
+    const into = ["0:a", ...labels];
+    parts.push(
+      `${into.map((l) => `[${l}]`).join("")}amix=inputs=${into.length}:normalize=0:duration=first[mixout]`
+    );
   } else {
-    // No voice: the bed is the whole track, trimmed to the video's length so a
-    // three-minute song under a forty-second cut does not extend the file.
-    parts.push(`[${bedLabel}]atrim=duration=${secs(duration)}[mixout]`);
+    // No voice: the clips are the whole track, trimmed to the video's length so
+    // a three-minute song under a forty-second cut does not extend the file.
+    const bed = fold(labels, "bed");
+    parts.push(`[${bed}]atrim=duration=${secs(duration)}[mixout]`);
   }
 
   return { filter: parts.join(";"), outputLabel: "[mixout]", ducks: wantsDuck };

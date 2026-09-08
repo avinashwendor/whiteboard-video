@@ -194,7 +194,7 @@ function clip(partial: Partial<VideoElement> = {}): VideoElement {
     subtitlesOn: false,
     subtitlePosition: "bottom",
     transcript: "",
-    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video, voice: true },
   });
 
   const refused = verifyPlan([{ op: "addBroll", query: "rain", start: 5 }], world(false));

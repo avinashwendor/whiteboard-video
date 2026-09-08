@@ -63,7 +63,7 @@ import {
 import type { Composition } from "./overlay/types";
 import { useOverlayStore } from "./overlay/store";
 import { forgetFrames } from "./overlay/glance";
-import { resetImageMotion } from "./overlay/ops";
+import { regenerateCues, resetImageMotion } from "./overlay/ops";
 import { useChatStore } from "./chat/store";
 import {
   addSpeaker as addSpeakerEntry,
@@ -674,6 +674,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         transcriptScript,
         words: applyScript(nativeWordsSnapshot, transcriptScript, transcriptLanguage),
       });
+      // Captions are the transcript, burned into the picture. Switching between
+      // the native script and Hinglish rewrites every word and leaves the
+      // timings alone, so nothing else notices — the video would go on showing
+      // captions in the script the transcript is no longer in, which is the one
+      // way subtitles can be wrong that reads as the tool being broken.
+      if (useOverlayStore.getState().subtitles.cues.length) regenerateCues();
       if (get().status === "ready") bumpAutosave();
     } else {
       set({ transcriptScript });

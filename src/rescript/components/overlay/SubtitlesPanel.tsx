@@ -65,14 +65,24 @@ export default function SubtitlesPanel() {
     [words, cuts, setCues, aspect]
   );
 
-  // Cues drift out of date as words are cut; say so rather than quietly
-  // showing captions for lines that are no longer in the video.
+  /**
+   * Whether the captions still say what the transcript says.
+   *
+   * Timings *and* text. Comparing only the timings was wrong in the one case
+   * that matters most: correcting a misheard word, or switching the transcript
+   * between its native script and Hinglish, changes what every caption should
+   * read while leaving the count and the timings exactly as they were — so the
+   * video burned in captions that disagreed with the transcript on screen
+   * beside them, and nothing anywhere said so.
+   */
   const stale = useMemo(() => {
     if (!subtitles.cues.length) return false;
     const fresh = cuesFromStyle(words, cuts, subtitles.style, aspect);
     if (fresh.length !== subtitles.cues.length) return true;
     return fresh.some(
-      (cue, i) => Math.abs(cue.start - subtitles.cues[i].start) > 0.05
+      (cue, i) =>
+        Math.abs(cue.start - subtitles.cues[i].start) > 0.05 ||
+        cue.text !== subtitles.cues[i].text
     );
   }, [words, cuts, subtitles.cues, subtitles.style, aspect]);
 

@@ -219,7 +219,7 @@ function assert(value: unknown, message: string): asserts value {
     subtitlesOn: false,
     subtitlePosition: "bottom",
     transcript: "",
-    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true, voice: true },
   };
 
   assert(

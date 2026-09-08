@@ -26,7 +26,8 @@ import {
   type AudioClip,
 } from "../src/rescript/lib/overlay/audio";
 import { buildMixGraph } from "../src/rescript/lib/overlay/mix";
-import { siftOps } from "../src/rescript/lib/overlay/ops-schema";
+import { SYSTEM } from "../src/lib/ai/rescript-agent";
+import { addVoiceoverOp, siftOps } from "../src/rescript/lib/overlay/ops-schema";
 import { verifyPlan, type PlanWorld } from "../src/rescript/lib/overlay/verify";
 import {
   emptyComposition,
@@ -294,7 +295,7 @@ function clip(over: Partial<AudioClip> = {}): AudioClip {
     subtitlesOn: false,
     subtitlePosition: "bottom",
     transcript: "[00:00] something was said",
-    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true, voice: true },
   };
 
   assert(
@@ -332,6 +333,165 @@ function clip(over: Partial<AudioClip> = {}): AudioClip {
     verifyPlan([{ op: "addMusic", query: "whoosh", kind: "sfx", start: 500 }], world).length > 0,
     "an effect past the end of the cut must be caught"
   );
+}
+
+/* --------------------------- ducking is per clip ---------------------------- */
+
+{
+  const clip = (patch: Partial<AudioClip>): AudioClip => ({
+    id: patch.id ?? "c",
+    kind: "music",
+    name: "x",
+    src: "/api/asset/x",
+    start: 0,
+    end: 10,
+    trimIn: 0,
+    gain: 0.5,
+    fadeIn: 0,
+    fadeOut: 0,
+    duck: false,
+    loop: false,
+    muted: false,
+    ...patch,
+  });
+
+  // A bed that ducks, a sting that does not, and a line of narration that must
+  // not. One compressor, keyed off the voice, applied to the bed alone.
+  const graph = buildMixGraph({
+    clips: [
+      clip({ id: "bed", kind: "music", duck: true }),
+      clip({ id: "sting", kind: "sfx", start: 4, end: 5 }),
+      clip({ id: "vo", kind: "voice", start: 2, end: 6, gain: 0.95 }),
+    ],
+    hasVoice: true,
+    duration: 20,
+  });
+
+  assert(graph.ducks, "nothing ducked");
+  const compressor = graph.filter.match(/\[(\w+)\]\[key\]sidechaincompress/);
+  assert(compressor !== null, "no sidechain compressor was built");
+  // Exactly one clip goes into the compressor, so it must be that clip's own
+  // label rather than a mix of all three.
+  assert(
+    compressor![1] === "a0",
+    `the compressor is fed "${compressor![1]}" — everything was pushed through it`
+  );
+  assert(
+    !/\[a0\]\[a1\]\[a2\]amix/.test(graph.filter),
+    "all three clips were folded into one bed before ducking"
+  );
+  // The two that do not duck reach the output directly.
+  assert(
+    /\[voice\]\[ducked\]\[a1\]\[a2\]amix=inputs=4/.test(graph.filter),
+    `the un-ducked clips are not mixed alongside: ${graph.filter}`
+  );
+
+  // Several ducking clips still share one compressor: n of them keyed off the
+  // same voice would each pump independently.
+  const two = buildMixGraph({
+    clips: [
+      clip({ id: "a", duck: true }),
+      clip({ id: "b", duck: true }),
+      clip({ id: "c", kind: "sfx" }),
+    ],
+    hasVoice: true,
+    duration: 20,
+  });
+  assert(
+    (two.filter.match(/sidechaincompress/g) ?? []).length === 1,
+    "more than one compressor was built"
+  );
+  assert(/\[a0\]\[a1\]amix=inputs=2:normalize=0\[bed\]/.test(two.filter), "the two ducking clips did not share a bed");
+
+  // Nothing ducking: no compressor at all, and every clip mixed with the voice.
+  const none = buildMixGraph({
+    clips: [clip({ id: "a", kind: "sfx" }), clip({ id: "b", kind: "voice" })],
+    hasVoice: true,
+    duration: 20,
+  });
+  assert(!none.ducks, "ducked with nothing asking to");
+  assert(!/sidechaincompress/.test(none.filter), "built a compressor for nothing");
+  assert(/\[0:a\]\[a0\]\[a1\]amix=inputs=3/.test(none.filter), `voice and clips not mixed: ${none.filter}`);
+
+  // A silent cut: the clips are the whole track and it is trimmed to length.
+  const silent = buildMixGraph({
+    clips: [clip({ id: "a", duck: true })],
+    hasVoice: false,
+    duration: 12,
+  });
+  assert(!silent.ducks, "ducked under a voice that is not there");
+  assert(/atrim=duration=12\.000/.test(silent.filter), "the bed was not trimmed to the video");
+  console.log("ducking is per clip, as the preview mixes it: ok");
+}
+
+/* -------------------------------- voiceover --------------------------------- */
+
+{
+  const world = (voice: boolean): PlanWorld => ({
+    duration: 60,
+    boundaryCount: 2,
+    elementCount: 0,
+    subtitlesOn: false,
+    subtitlePosition: "bottom",
+    transcript: "",
+    can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true, voice },
+  });
+
+  assert(
+    addVoiceoverOp.safeParse({ op: "addVoiceover", text: "Six weeks later." }).success,
+    "a plain line of narration is refused"
+  );
+  assert(
+    addVoiceoverOp.safeParse({
+      op: "addVoiceover",
+      text: "Six weeks later.",
+      at: 12,
+      provider: "elevenlabs",
+      voice: "21m00Tcm4TlvDq8ikWAM",
+    }).success,
+    "a named engine and voice are refused"
+  );
+  assert(
+    !addVoiceoverOp.safeParse({ op: "addVoiceover", text: "" }).success,
+    "narration with nothing to say is accepted"
+  );
+  assert(
+    !addVoiceoverOp.safeParse({ op: "addVoiceover", text: "Hi", provider: "openai" }).success,
+    "an engine that does not exist is accepted"
+  );
+
+  // Refused up front rather than at execution: a plan that writes a line and
+  // then cannot speak it has already told the person it narrated.
+  const refused = verifyPlan([{ op: "addVoiceover", text: "Hello" }], world(false));
+  assert(refused.length === 1, "narration is allowed with no engine configured");
+  assert(
+    /addText/.test(refused[0]),
+    "the refusal does not name the thing to do instead, so the idea is simply dropped"
+  );
+  assert(
+    verifyPlan([{ op: "addVoiceover", text: "Hello" }], world(true)).length === 0,
+    "narration is refused when an engine is configured"
+  );
+  assert(
+    verifyPlan([{ op: "addVoiceover", text: "Hello", at: 900 }], world(true)).length === 1,
+    "a line placed past the end of the video is allowed"
+  );
+
+  // Narration sits on top of the mix. Mixed at an effect's level it ends up
+  // behind the bed it should be in front of, and the control somebody then
+  // reaches for is the music level, which is the wrong one.
+  assert(
+    defaultGainFor("voice") > defaultGainFor("sfx") &&
+      defaultGainFor("sfx") > defaultGainFor("music"),
+    "narration is not the loudest thing in the mix"
+  );
+
+  assert(SYSTEM.includes("addVoiceover"), "the agent is never told narration exists");
+  assert(
+    /NEVER over someone who is already talking/.test(SYSTEM),
+    "nor the one rule that stops it talking over the speaker"
+  );
+  console.log("narration: refused without an engine, and on top of the mix when there is one: ok");
 }
 
 console.log("ALL AUDIO TESTS PASSED");

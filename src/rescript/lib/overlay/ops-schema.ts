@@ -680,6 +680,33 @@ export const addMusicOp = z.object({
   source: z.enum(AUDIO_SOURCES).optional(),
 });
 
+/**
+ * Narration, spoken into the cut.
+ *
+ * Distinct from `addMusic` even though both end up as an audio clip, because
+ * the decision is different in every way that matters: a bed is chosen from a
+ * catalogue and runs under everything, and a line of narration is *written* and
+ * has to land at a moment where there is picture and no voice. The two share a
+ * mixer and nothing else.
+ *
+ * Use it where the edit has left a hole the transcript cannot fill — over a
+ * b-roll insert, under an opening title, across a stretch whose tangent was
+ * cut. Never over someone who is already talking.
+ */
+export const addVoiceoverOp = z.object({
+  op: z.literal("addVoiceover"),
+  /** What to say. Write it as it should be heard, punctuation included. */
+  text: z.string().trim().min(1).max(600),
+  /** Output-clock second it starts on. Defaults to the playhead. */
+  at: seconds.optional(),
+  /** A voice id from the engine's catalogue. Omit to let it cast. */
+  voice: z.string().trim().max(80).optional(),
+  /** Which engine. Omit for whichever is configured. */
+  provider: z.enum(["elevenlabs", "deepgram", "cartesia"]).optional(),
+  /** 0..1. Leave it out — narration is mixed to sit on top. */
+  gain: z.number().min(0).max(1).optional(),
+});
+
 export const setMusicLevelOp = z.object({
   op: z.literal("setMusicLevel"),
   gain: z.number().min(0).max(1),
@@ -757,6 +784,7 @@ export const agentOpSchema = z.discriminatedUnion("op", [
   autoPunchInsOp,
   setGradeOp,
   addMusicOp,
+  addVoiceoverOp,
   setMusicLevelOp,
   removeMusicOp,
   addBrollOp,

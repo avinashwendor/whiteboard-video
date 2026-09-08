@@ -79,6 +79,9 @@ export const DEFAULT_MUSIC_GAIN = 0.28;
 /** A one-shot effect sits above the bed but below the voice. */
 export const DEFAULT_SFX_GAIN = 0.6;
 
+/** Narration is the thing being listened to, so it sits at the top of the mix. */
+export const DEFAULT_VOICE_GAIN = 0.95;
+
 /** How far a ducked bed drops while someone is speaking, as a multiplier. */
 export const DUCK_DEPTH = 0.32;
 
@@ -87,7 +90,13 @@ export const DUCK_ATTACK_S = 0.25;
 export const DUCK_RELEASE_S = 0.6;
 
 export function defaultGainFor(kind: AudioKind): number {
-  return kind === "music" ? DEFAULT_MUSIC_GAIN : DEFAULT_SFX_GAIN;
+  if (kind === "music") return DEFAULT_MUSIC_GAIN;
+  // Narration is not a layer under the video, it *is* the video for as long as
+  // it runs. Mixed at an effect's level it sits behind the bed it should be in
+  // front of, and the fix somebody reaches for is to turn the music down —
+  // which is the wrong control.
+  if (kind === "voice") return DEFAULT_VOICE_GAIN;
+  return DEFAULT_SFX_GAIN;
 }
 
 /** True when there is nothing to mix and export can keep stream-copying. */

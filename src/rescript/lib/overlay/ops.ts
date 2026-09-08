@@ -1340,6 +1340,47 @@ async function runOne(
 
     /* ---------------------------------- sound ---------------------------------- */
 
+    case "addVoiceover": {
+      const at = Math.max(0, Math.min(op.at ?? ctx.playhead, Math.max(0, ctx.duration - 0.2)));
+      const spoken = await speakLine(op.text, op.provider, op.voice, signal);
+      if (!spoken) {
+        return {
+          ok: false,
+          message:
+            "No voice engine answered. Add ELEVENLABS_API_KEY, DEEPGRAM_API_KEY or CARTESIA_API_KEY.",
+        };
+      }
+      overlay.addAudio({
+        kind: "voice",
+        name: op.text.slice(0, 32),
+        src: spoken.src,
+        start: at,
+        // Deliberately allowed to run past the end of the video rather than be
+        // clipped to it: a line cut off mid-word is worse than one that reaches
+        // the last frame, and the exporter trims the mix to length anyway.
+        end: at + Math.max(0.2, spoken.seconds),
+        trimIn: 0,
+        gain: op.gain ?? defaultGainFor("voice"),
+        fadeIn: 0.05,
+        fadeOut: 0.15,
+        // Narration is the thing being listened to. A voiceover that pulls
+        // itself down under the speech it is narrating over is fighting the mix.
+        duck: false,
+        loop: false,
+        muted: false,
+        credit: {
+          title: op.text.slice(0, 40),
+          artist: spoken.provider,
+          licence: "Generated for this video",
+          attributionRequired: false,
+        },
+      });
+      return {
+        ok: true,
+        message: `Narrated “${op.text.slice(0, 40)}” at ${at.toFixed(1)}s (${spoken.seconds.toFixed(1)}s)`,
+      };
+    }
+
     case "addMusic": {
       const isBed = op.kind === "music";
       const start = isBed ? 0 : Math.max(0, Math.min(op.start ?? ctx.playhead, ctx.duration));
@@ -1590,6 +1631,60 @@ const CUTTING_OPS: ReadonlySet<AgentOp["op"]> = new Set([
 function currentTimeline(): OutputTimeline {
   const s = useEditorStore.getState();
   return buildTimeline(s.words, s.duration, s.manualCuts, s.sceneBoundaries);
+}
+
+/**
+ * Speak a line, and say how long it turned out to be.
+ *
+ * The length matters more than it looks. An engine that returns word timings
+ * hands one back; the rest do not, and a clip whose length is a guess either
+ * cuts the last word off or holds silence after it. Read off the file, it is
+ * exact and costs one metadata fetch of something already in the cache.
+ */
+async function speakLine(
+  text: string,
+  provider: string | undefined,
+  voiceId: string | undefined,
+  signal?: AbortSignal
+): Promise<{ src: string; seconds: number; provider: string } | null> {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      transcript: text,
+      ...(provider ? { provider } : {}),
+      ...(voiceId ? { voiceId } : {}),
+    }),
+  });
+  const json = (await res.json()) as {
+    success?: boolean;
+    audioUrl?: string;
+    duration?: number;
+    provider?: string;
+  };
+  if (!json.success || !json.audioUrl) return null;
+  const seconds = json.duration ?? (await mediaLength(json.audioUrl));
+  return { src: json.audioUrl, seconds, provider: json.provider ?? "voice" };
+}
+
+/** Length of an audio file, read off the file rather than estimated. */
+function mediaLength(src: string): Promise<number> {
+  return new Promise((resolve) => {
+    const probe = new Audio();
+    const done = (value: number) => {
+      probe.src = "";
+      resolve(value);
+    };
+    probe.addEventListener("loadedmetadata", () =>
+      done(Number.isFinite(probe.duration) ? probe.duration : 4)
+    );
+    // A file that will not report its length still has to place something, and
+    // four seconds of narration is a sentence.
+    probe.addEventListener("error", () => done(4));
+    probe.preload = "metadata";
+    probe.src = src;
+  });
 }
 
 export async function runPlan(

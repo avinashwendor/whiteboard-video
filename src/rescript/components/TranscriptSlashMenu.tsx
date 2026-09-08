@@ -12,6 +12,7 @@ import {
   Film,
   Image as ImageIcon,
   Loader2,
+  Mic,
   MoveUpRight,
   Music,
   Scissors,
@@ -63,13 +64,32 @@ const ICONS: Record<string, LucideIcon> = {
   "zoom-in": ZoomIn,
   "volume-2": Volume2,
   music: Music,
+  mic: Mic,
   sparkles: Sparkles,
 };
 
 export interface SlashMenuProps {
   context: SlashContext;
-  onRun: (result: SlashResult) => Promise<void> | void;
+  /**
+   * Runs the command. Resolves to what went wrong, or null when it worked.
+   *
+   * The menu stays open on a failure and says so. Closing on one would leave
+   * the person looking at the video wondering whether they had missed the
+   * click — and the reasons here are all actionable ("no stock catalogue is
+   * configured", "that phrase is not in the transcript"), which is exactly the
+   * kind of thing that must not be reported somewhere else.
+   */
+  onRun: (result: SlashResult) => Promise<string | null>;
   onClose: () => void;
+}
+
+/** Why the last command did not work, said where it was asked for. */
+function Problem({ text }: { text: string }) {
+  return (
+    <p className="mx-2 mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] leading-tight text-red-700 dark:bg-red-950/40 dark:text-red-300">
+      {text}
+    </p>
+  );
 }
 
 export default function TranscriptSlashMenu({
@@ -81,6 +101,7 @@ export default function TranscriptSlashMenu({
   const [chosen, setChosen] = useState<SlashCommand | null>(null);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const [rawCursor, setCursor] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const valueRef = useRef<HTMLInputElement>(null);
@@ -127,12 +148,17 @@ export default function TranscriptSlashMenu({
   const run = useCallback(
     async (command: SlashCommand, arg: string) => {
       setBusy(true);
+      setFailed(null);
+      let problem: string | null = null;
       try {
-        await onRun(command.run(context, arg));
+        problem = await onRun(command.run(context, arg));
+      } catch (err) {
+        problem = err instanceof Error ? err.message : "That didn't work.";
       } finally {
         setBusy(false);
-        onClose();
       }
+      if (problem) setFailed(problem);
+      else onClose();
     },
     [context, onRun, onClose]
   );
@@ -228,6 +254,8 @@ export default function TranscriptSlashMenu({
           />
         </div>
 
+        {failed && <Problem text={failed} />}
+
         {chosen.arg.kind === "pick" ? (
           <div ref={listRef} className="scrollbar-thin max-h-64 overflow-y-auto px-1 pb-1">
             {options.length === 0 ? (
@@ -301,6 +329,8 @@ export default function TranscriptSlashMenu({
         {busy && <Loader2 size={13} className="shrink-0 animate-spin text-zinc-400" />}
       </div>
 
+      {failed && <Problem text={failed} />}
+
       <div ref={listRef} className="scrollbar-thin max-h-80 overflow-y-auto p-1">
         {commands.length === 0 ? (
           <p className="px-2.5 py-3 text-[12px] text-zinc-400">
@@ -321,7 +351,6 @@ export default function TranscriptSlashMenu({
                 )}
                 <button
                   type="button"
-                  role="menuitem"
                   data-active={active}
                   onMouseEnter={() => setCursor(i)}
                   onClick={() => choose(command)}

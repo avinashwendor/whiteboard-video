@@ -91,7 +91,7 @@ const base: RescriptAgentContext = {
   transitions: [],
   transcript: "[0:04] We shipped it three times faster than last year.",
   aspect: 16 / 9,
-  can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true },
+  can: { generateImage: true, photoSearch: true, music: true, sfx: true, video: true, voice: true },
 };
 
 const PLAN = JSON.stringify({
@@ -357,6 +357,7 @@ async function ask(call: object, context: RescriptAgentContext) {
     music: false,
     sfx: false,
     video: false,
+    voice: false,
   });
   assert(/Music \(addMusic\): NOT configured/.test(off), "the brief does not rule out music");
   assert(
@@ -369,7 +370,7 @@ async function ask(call: object, context: RescriptAgentContext) {
     photoSearch: true,
     music: true,
     sfx: true,
-    video: true,
+    video: true, voice: true,
   });
   assert(/Music \(addMusic\): available/.test(on), "a configured deployment is told so");
   assert(/Sound effects \(autoSfx, addSfx\): available/.test(on), "and for effects too");

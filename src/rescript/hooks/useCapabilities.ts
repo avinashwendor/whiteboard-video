@@ -22,6 +22,7 @@ const OPTIMISTIC: SlashCapabilities = {
   video: true,
   sfx: true,
   music: true,
+  voice: true,
 };
 
 let cached: SlashCapabilities | null = null;
@@ -31,6 +32,7 @@ interface CapabilitiesResponse {
   image?: { providers?: Array<{ id: string; configured?: boolean }> };
   visual?: { configured?: boolean };
   media?: { kinds?: Record<string, boolean> };
+  voice?: { configured?: boolean };
 }
 
 function read(json: CapabilitiesResponse): SlashCapabilities {
@@ -46,6 +48,7 @@ function read(json: CapabilitiesResponse): SlashCapabilities {
     video: Boolean(kinds.video),
     sfx: Boolean(kinds.sfx),
     music: Boolean(kinds.music),
+    voice: Boolean(json.voice?.configured),
   };
 }
 

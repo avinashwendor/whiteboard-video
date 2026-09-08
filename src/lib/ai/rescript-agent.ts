@@ -289,6 +289,16 @@ ${describeSubtitlePresets()}
   Only add music if it was asked for, or if the video is plainly a montage with nothing being said: a bed
   under a talking head that did not ask for one is the most common way an automatic edit is made worse.
 
+{"op":"addVoiceover","text":"Six weeks later, it shipped.","at":42}
+  A line spoken into the cut, in a real voice, landing at that second. This is for the places an edit leaves
+  with picture and no voice — over a b-roll insert, under an opening title, across a stretch whose tangent
+  you cut out. NEVER over someone who is already talking: two voices at once is not an edit, it is a
+  mistake, and the transcript tells you exactly where the speech is.
+  Write it as it should be heard, punctuation and all — it is read aloud, not displayed. Keep it to a
+  sentence or two: narration is expensive attention, and a paragraph over four seconds of footage arrives
+  faster than anyone can follow. It is mixed on top and does not duck, because it is the thing being
+  listened to. Add "voice" only if a specific voice was named.
+
 {"op":"autoSfx","style":"energetic","perMinute":3}
   THIS IS HOW YOU ADD SOUND EFFECTS. It reads the edit you have just made — the cuts, the punch-ins, the
   captions — and puts an effect on the moments that earned one, spaced so they never become a tic. Placement
@@ -885,6 +895,8 @@ export interface RescriptAgentContext {
     sfx: boolean;
     /** Stock video, for b-roll that moves. */
     video: boolean;
+    /** A speech engine, for narration written into the cut. */
+    voice: boolean;
   };
 }
 
@@ -1461,7 +1473,7 @@ function describe(
       context.vision?.length
         ? describeVision(context.vision, context.aspect ?? 16 / 9)
         : "",
-      `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}\n  - Music (addMusic): ${context.can.music ? "available" : "NOT configured — do not plan it"}\n  - Sound effects (autoSfx, addSfx): ${context.can.sfx ? "available" : "NOT configured — do not plan it, and say so in the summary if they asked for sound"}\n  - Moving b-roll (addBroll): ${context.can.video ? "available" : "NOT configured — do not plan it; use addImage with a \"query\" for a still instead"}`,
+      `WHAT THIS DEPLOYMENT CAN DO:\n  - Generate artwork (addImage with "prompt"): ${context.can.generateImage ? "available" : "NOT configured — do not plan it"}\n  - Search real photos (addImage with "query"): ${context.can.photoSearch ? "available" : "NOT configured — do not plan it"}\n  - Music (addMusic): ${context.can.music ? "available" : "NOT configured — do not plan it"}\n  - Sound effects (autoSfx, addSfx): ${context.can.sfx ? "available" : "NOT configured — do not plan it, and say so in the summary if they asked for sound"}\n  - Moving b-roll (addBroll): ${context.can.video ? "available" : "NOT configured — do not plan it; use addImage with a \"query\" for a still instead"}\n  - Narration (addVoiceover): ${context.can.voice ? "available" : "NOT configured — do not plan it; put the words on screen with addText instead"}`,
       transcriptBlock,
     ]
       .filter(Boolean)
